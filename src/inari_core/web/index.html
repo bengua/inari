@@ -320,14 +320,22 @@ $("modelChip").onclick = () => { const a = snap.agents[selected]; modelPicker($(
 $("pickModel").onclick = () => { const a = selected && snap.agents[selected], node = a ? a.node : pendingCore; modelPicker($("pickModel"), node, a ? a.model : pendingModel, (m) => { if (a) api("/api/model", { agent: selected, model: m }); else { pendingModel = m; drawComposer(); } }); };
 $("coreChip").onclick = () => { const heavy = snap.nodes.filter((n) => n.role === "heavy"); sheet("Run it on…", heavy.map((n) => [n.node_id, () => { pendingCore = n.node_id; drawComposer(); }])); };
 $("attach").onclick = () => $("file").click();
-$("file").onchange = async (e) => { for (const f of e.target.files) { if (f.size > 4e6) { toast(f.name + " is over 4 MB"); continue; } const b64 = await new Promise((ok) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(",")[1]); r.readAsDataURL(f); }); attachments.push({ name: f.name, b64 }); } e.target.value = ""; drawComposer(); };
+$("file").onchange = (e) => { for (const f of e.target.files) { if (f.size > 25e6) { toast(f.name + " is over 25 MB"); continue; } attachments.push({ name: f.name, file: f }); } e.target.value = ""; drawComposer(); };
+// A file goes in parts of 512 KiB: no large request, and a part that failed is simply sent again.
+const PART = 512 * 1024;
+function b64of(buf) { let out = ""; const bytes = new Uint8Array(buf); for (let i = 0; i < bytes.length; i += 32768) out += String.fromCharCode.apply(null, bytes.subarray(i, i + 32768)); return btoa(out); }
+async function sendFile(agent, f) { const id = "up" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8), parts = Math.max(1, Math.ceil(f.file.size / PART));
+  for (let n = 0; n < parts; n++) { const at = n * PART, b64 = b64of(await f.file.slice(at, at + PART).arrayBuffer()); let reply = null;
+    for (let tries = 0; tries < 3 && !(reply && reply.ok !== false); tries++) reply = await api("/api/upload", { agent, path: f.name, upload_id: id, offset: at, total: f.file.size, b64 }).catch(() => null);
+    if (!reply || reply.ok === false) { toast(f.name + ": " + ((reply && reply.error) || "upload failed")); return false; } }
+  return true; }
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition; if (SR) { $("mic").hidden = false; let rec = null; $("mic").onclick = () => { if (rec) { rec.stop(); return; } rec = new SR(); rec.interimResults = false; rec.lang = navigator.language; rec.onresult = (e) => { $("msg").value += (($("msg").value ? " " : "") + e.results[0][0].transcript); }; rec.onend = () => { rec = null; $("mic").classList.remove("on"); }; $("mic").classList.add("on"); rec.start(); }; }
 $("composer").onsubmit = async (e) => { e.preventDefault(); let text = $("msg").value.trim(); if (!text && !attachments.length) return; $("sendBtn").disabled = true;
   try { let id = selected;
     if (!id) { const core = pendingCore; if (!core) return toast("No core available"); id = (text.split(/\s+/).slice(0, 4).join("-").replace(/[^\w-]+/g, "") || "thread").slice(0, 28) + "-" + (Date.now() % 1000); await api("/api/agent", { thread_id: id, node: core, title: text.slice(0, 40) });
       for (let i = 0; i < 40 && !(snap.agents[id]); i++) await new Promise((r) => setTimeout(r, 150)); if (pendingModel) await api("/api/model", { agent: id, model: pendingModel }); await select(id); }
-    for (const f of attachments) { await api("/api/upload", { agent: id, path: f.name, b64: f.b64 }); text += `\n(attached: ${f.name})`; } attachments = [];
-    $("msg").value = ""; await api("/api/message", { agent: id, text: text.trim() }); tlStamp = 0; setTimeout(() => { $("thread").scrollTop = $("thread").scrollHeight; }, 60);
+    const sent = []; for (const f of attachments) if (await sendFile(id, f)) sent.push(f.name); attachments = [];
+    $("msg").value = ""; await api("/api/message", { agent: id, text: text.trim(), attachments: sent }); tlStamp = 0; setTimeout(() => { $("thread").scrollTop = $("thread").scrollHeight; }, 60);
   } finally { $("sendBtn").disabled = false; } };
 $("msg").onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("composer").requestSubmit(); } };
 

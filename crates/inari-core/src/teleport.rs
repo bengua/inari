@@ -106,6 +106,8 @@ impl State {
 pub struct Machine {
     pub state: State,
     pub history: Vec<State>,
+    /// Told every new state: progress is a courtesy, it cannot fail the move.
+    pub on_state: Option<crate::mesh::Progress>,
 }
 
 impl Default for Machine {
@@ -113,6 +115,7 @@ impl Default for Machine {
         Self {
             state: State::Planned,
             history: vec![State::Planned],
+            on_state: None,
         }
     }
 }
@@ -138,6 +141,9 @@ impl Machine {
         };
         self.state = next;
         self.history.push(next);
+        if let Some(tell) = &self.on_state {
+            tell(next.as_str());
+        }
         Ok(next)
     }
 }
@@ -172,8 +178,22 @@ pub async fn teleport<S: Endpoint, T: Endpoint>(
     agent: &str,
     sid: Option<String>,
 ) -> Outcome {
+    teleport_observed(source, target, agent, sid, None).await
+}
+
+/// `teleport`, telling `on_state` each state the move goes through.
+pub async fn teleport_observed<S: Endpoint, T: Endpoint>(
+    source: &S,
+    target: &T,
+    agent: &str,
+    sid: Option<String>,
+    on_state: Option<crate::mesh::Progress>,
+) -> Outcome {
     let sid = sid.unwrap_or_else(|| crate::wire::random_hex(16));
-    let mut machine = Machine::default();
+    let mut machine = Machine {
+        on_state,
+        ..Machine::default()
+    };
     let mut out = Outcome {
         session_id: sid.clone(),
         state: "planned".into(),

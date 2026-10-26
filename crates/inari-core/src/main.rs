@@ -1,7 +1,7 @@
 //! `inari-core-rs`: the Rust core's command line.
 
 use inari_core::capsule::{self, attach, io, EventKind, Timeline};
-use inari_core::{agent, bus, buslink, host, rpc, teleport};
+use inari_core::{agent, bus, buslink, host, node, rpc, teleport};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -15,7 +15,8 @@ fn usage() -> ExitCode {
          status <root> <node> <agent>\n  teleport <root> <node> <agent> <target-node> <host:port> <key-file>\n  \
          fork <src> <dest> <new-thread> [upto-event]\n  merge <dest> <src>\n  \
          bus-echo <name> <key-file> <expected-peer>\n  bus-say <name> <key-file> <host:port> <subject> <payload-json> <wait-subject>\n  \
-         turn <root> <node> <agent> <text> [file-to-attach]... -- <acp-agent command...>"
+         turn <root> <node> <agent> <text> [file-to-attach]... -- <acp-agent command...>\n  \
+         node <config.json>"
     );
     ExitCode::from(2)
 }
@@ -265,6 +266,41 @@ fn run(args: &[String]) -> capsule::Result<ExitCode> {
                 }
                 None => Ok(ExitCode::from(1)),
             }
+        }
+        ["node", config] => {
+            let cfg = match node::NodeConfig::load(Path::new(config)) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("{e}");
+                    return Ok(ExitCode::from(2));
+                }
+            };
+            tokio::runtime::Runtime::new()?.block_on(async {
+                match node::Node::start(cfg).await {
+                    Ok(n) => {
+                        let mut hub = if n.is_hub {
+                            format!(", bus {}", n.bus_port)
+                        } else {
+                            String::new()
+                        };
+                        if n.gateway.is_some() {
+                            hub.push_str(&format!(", gateway {}", n.gateway_port));
+                        }
+                        println!(
+                            "node {} up: endpoint {}{hub}",
+                            n.cfg.node_id, n.endpoint_port
+                        );
+                        use std::io::Write;
+                        let _ = std::io::stdout().flush();
+                        std::future::pending::<()>().await;
+                        Ok(ExitCode::SUCCESS)
+                    }
+                    Err(e) => {
+                        eprintln!("cannot start: {e}");
+                        Ok(ExitCode::from(1))
+                    }
+                }
+            })
         }
         ["pack", dir, archive] => {
             io::pack(Path::new(dir), Path::new(archive)).map(|_| ExitCode::SUCCESS)

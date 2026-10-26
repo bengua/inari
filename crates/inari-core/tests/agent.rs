@@ -38,7 +38,7 @@ fn lab(images: bool, approver: Option<Approver>) -> Lab {
     let host = Arc::new(CapsuleHost::new("n1", &dir.path().join("node")).unwrap());
     let harness = fake(&log, &dir.path().join("sessions.json"), images);
     let runner = Runner::new(host, vec![("fake".into(), harness)], None, approver);
-    let agent = runner.create("t1", "", "be useful").unwrap();
+    let agent = runner.create("t1", "", "a title").unwrap();
     Lab {
         _dir: dir,
         log,
@@ -178,17 +178,15 @@ async fn the_session_is_reused_and_a_new_one_is_primed() {
 #[tokio::test]
 async fn the_model_choice_reaches_the_agent() {
     let l = lab(false, None);
-    assert!(l
-        .runner
-        .set_choice(&l.agent, None, Some("fam/beta"))
-        .unwrap());
+    assert!(l.runner.set_model(&l.agent, "fam/beta").unwrap());
+    assert!(!l.runner.set_model(&l.agent, "fam/beta").unwrap());
     l.runner.run(&l.agent, "hi", vec![]).await;
     assert!(std::fs::read_to_string(&l.log)
         .unwrap()
         .contains(r#"{"set_model": "fam/beta"}"#));
     assert!(journal(&l)
         .iter()
-        .any(|(k, d)| k == "provider_switch" && d["to"] == "fake:fam/beta"));
+        .any(|(k, d)| k == "provider_switch" && d["to"] == "fam/beta"));
     let models = l.runner.harnesses["fake"].list_models(l._dir.path()).await;
     assert_eq!(models, ["fam/alpha", "fam/beta"]);
 }
@@ -221,5 +219,46 @@ fn unused_attached_fields_stay_public() {
             size: 5,
             mime: a.mime
         }
+    );
+}
+
+#[tokio::test]
+async fn a_typed_command_runs_scrubbed_is_journaled_and_kept() {
+    let l = lab(false, None);
+    std::env::set_var("INARI_TEST_SECRET", "leak");
+    let out = l
+        .runner
+        .exec_user(
+            &l.agent,
+            "echo hi > out.txt; cat out.txt; echo ${INARI_TEST_SECRET:-clean}",
+            std::time::Duration::from_secs(10),
+        )
+        .await;
+    assert_eq!(out["output"], "hi\nclean\n", "{out}");
+    assert_eq!(out["ok"], true);
+    let kinds: Vec<String> = journal(&l).into_iter().map(|(k, _)| k).collect();
+    assert_eq!(&kinds[1..], ["tool_call", "tool_result"]);
+    let c = io::load(&l.runner.host.agents.join(&l.agent)).unwrap();
+    assert!(c.snapshot.tree.contains_key("out.txt"));
+    let started = std::time::Instant::now();
+    let slow = l
+        .runner
+        .exec_user(
+            &l.agent,
+            "sleep 30 & sleep 30",
+            std::time::Duration::from_millis(500),
+        )
+        .await;
+    assert_eq!(slow["timed_out"], true);
+    assert!(started.elapsed().as_secs() < 5);
+}
+
+#[tokio::test]
+async fn the_harness_choice_is_journaled_and_checked() {
+    let l = lab(false, None);
+    assert!(l.runner.set_harness(&l.agent, "nope").is_err());
+    assert!(
+        !l.runner.set_harness(&l.agent, "fake").unwrap(),
+        "already the harness"
     );
 }

@@ -9,6 +9,11 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Added
 
+- **Rust port, step 4**: the node and the gateway in Rust (`inari-core-rs node <config>`), same
+  configuration file and data directory as the Python node. A Python node joins a Rust hub and
+  agents teleport between them. Files from the phone arrive in parts (up to 25 MB) and reach
+  the model with the message. Measured on the laptop lab: 10 MB of memory, where the Python
+  node takes 40 to 45 MB.
 - **Rust port, step 3**: the ACP harness and the runner turn in Rust. Photos the person
   attaches reach the model as images (Claude, Gemini), other files as links into the workspace;
   permission requests go through the approver; a freeze cancels the turn; a new session on
@@ -21,6 +26,10 @@ Newest first. An entry says what changed for someone using the thing.
   agents to each other over TCP, in both directions.
 
 ### Fixed
+
+- The web page sent attachments in one request, which the 64 KiB body limit refused above
+  about 48 KB; it now sends them in parts and names them in the message. Parts need the Rust
+  gateway; the Python gateway, retired at the next step, still takes small files only.
 
 - Rust read some timestamps one ULP off (`serde_json` without `float_roundtrip`), so an event's
   hash changed after another node rewrote the journal.

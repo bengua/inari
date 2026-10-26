@@ -257,3 +257,102 @@ def test_a_rust_turn_sends_the_photo_and_python_reads_the_journal(tmp_path):
     assert user.data["attachments"][0]["mime"] == "image/png"
     assert events[-1].kind == EventKind.ASSISTANT_MESSAGE
     assert "photo.png" in load(held).snapshot.tree
+
+
+async def _snapshot(port: int, token: str) -> dict:
+    """The first frame of the event stream is the whole snapshot."""
+    import asyncio
+
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    writer.write(f"GET /events?token={token} HTTP/1.1\r\nHost: x\r\n\r\n".encode())
+    await writer.drain()
+    while not (line := await asyncio.wait_for(reader.readline(), 5)).startswith(b"data: "):
+        pass
+    writer.close()
+    return json.loads(line[6:])
+
+
+async def test_a_python_core_joins_a_rust_hub_and_an_agent_moves_between_them(tmp_path):
+    import asyncio
+
+    from inari_core.node import Node, NodeConfig
+
+    from .test_gateway import http
+    from .test_node import until
+
+    for name, value in (("mesh.key", "m"), ("device.key", "d"), ("token", "tok")):
+        (tmp_path / name).write_text(value)
+    log = tmp_path / "acp.log"
+    fake = {
+        "command": ["python3", str(ROOT / "tests/fake_acp.py")],
+        "env": {"FAKE_ACP_LOG": str(log)},
+    }
+    hub_cfg = tmp_path / "hub.json"
+    hub_cfg.write_text(json.dumps({
+        "node_id": "hub", "data_dir": str(tmp_path / "hub"), "key_file": str(tmp_path / "mesh.key"),
+        "device_key_file": str(tmp_path / "device.key"), "expected_peers": ["py"],
+        "gateway_listen": "127.0.0.1:0", "gateway_token_file": str(tmp_path / "token"),
+        "heartbeat": 0.2, "harnesses": {"fake": fake},
+    }))  # fmt: skip
+    rust = await asyncio.create_subprocess_exec(
+        str(BIN), "node", str(hub_cfg), stdout=asyncio.subprocess.PIPE
+    )
+    try:
+        words = (
+            (await asyncio.wait_for(rust.stdout.readline(), 15)).decode().replace(",", "").split()
+        )
+        bus, port = int(words[words.index("bus") + 1]), int(words[words.index("gateway") + 1])
+        py = Node(NodeConfig(
+            node_id="py", data_dir=tmp_path / "py", key_file=tmp_path / "mesh.key",
+            device_key_file=tmp_path / "device.key", hub=f"127.0.0.1:{bus}", heartbeat=0.2,
+            harnesses={"fake": fake},
+        ))  # fmt: skip
+        await py.start()
+        try:
+            snap = {}
+
+            async def post(path: str, body: dict):
+                return await http(port, "POST", path, body, token="tok")
+
+            async def seen(test) -> bool:
+                nonlocal snap
+                for _ in range(100):
+                    snap = await _snapshot(port, "tok")
+                    if test(snap):
+                        return True
+                    await asyncio.sleep(0.1)
+                return False
+
+            async def replies(agent: str, text: str) -> bool:
+                async def got():
+                    _, raw = await http(port, "GET", f"/api/agent/{agent}/timeline", token="tok")
+                    return any(
+                        e["text"] == f"fake reply to: {text}" for e in json.loads(raw)["events"]
+                    )
+
+                for _ in range(100):
+                    if await got():
+                        return True
+                    await asyncio.sleep(0.1)
+                return False
+
+            assert await seen(lambda s: len(s["nodes"]) == 2), snap
+            await post("/api/agent", {"thread_id": "t2", "node": "py"})
+            assert await seen(lambda s: s["agents"].get("t2", {}).get("node") == "py"), snap
+            await post("/api/message", {"agent": "t2", "text": "hi python"})
+            assert await replies("t2", "hi python")
+
+            _, raw = await post("/api/teleport", {"agent": "t2", "source": "py", "target": "hub"})
+            request = json.loads(raw)["request"]
+            assert await seen(lambda s: any(r["request"] == request for r in s["results"])), snap
+            assert next(r for r in snap["results"] if r["request"] == request)["ok"], snap
+            assert await seen(lambda s: s["agents"]["t2"]["node"] == "hub"), snap
+            await post("/api/message", {"agent": "t2", "text": "hi rust"})
+            assert await replies("t2", "hi rust")
+            assert verify(tmp_path / "hub" / "host" / "agents" / "t2") == []
+            assert await until(lambda: py.host.status("t2") != "running")
+        finally:
+            await py.stop()
+    finally:
+        rust.kill()
+        await rust.wait()

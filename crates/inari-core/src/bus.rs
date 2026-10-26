@@ -25,6 +25,22 @@ pub fn subject_matches(pattern: &str, subject: &str) -> bool {
     p.len() == s.len()
 }
 
+/// Publish and wait for one message on `reply`.
+pub async fn request(
+    bus: &Bus,
+    subject: &str,
+    payload: Value,
+    reply: &str,
+    timeout: std::time::Duration,
+) -> Option<Message> {
+    let mut rx = bus.subscribe(reply);
+    bus.publish(subject, payload);
+    tokio::time::timeout(timeout, rx.recv())
+        .await
+        .ok()
+        .flatten()
+}
+
 pub fn is_durable(subject: &str) -> bool {
     DURABLE.iter().any(|p| subject_matches(p, subject))
 }
@@ -158,6 +174,9 @@ impl Bus {
             .lock()
             .expect("not poisoned")
             .retain(|(pattern, tx)| {
+                if tx.is_closed() {
+                    return false; // dropped receivers go, matching or not (one-shot replies)
+                }
                 if subject_matches(pattern, &message.subject) {
                     if tx.send(message.clone()).is_err() {
                         return false; // the subscriber is gone
