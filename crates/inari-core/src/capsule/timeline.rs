@@ -172,6 +172,18 @@ mod tests {
     }
 
     #[test]
+    fn timestamps_survive_a_round_trip_bit_for_bit() {
+        // Without serde_json's `float_roundtrip`, these parse one ULP off and their
+        // hash no longer matches: a capsule rewritten by another node failed to verify.
+        for ts in [1793051643.2623925, 1793051644.1952085, 1793051645.2200317] {
+            let mut t = Timeline::new();
+            t.append("n", EventKind::System, json!({"text": "x"}), ts);
+            let back = Timeline::loads(&t.dumps()).unwrap();
+            assert!(back.verify().is_empty(), "{ts}: {:?}", back.verify());
+        }
+    }
+
+    #[test]
     fn a_rewritten_event_is_caught() {
         let mut t = Timeline::new();
         t.append(

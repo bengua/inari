@@ -1,6 +1,7 @@
 //! `inari-core-rs`: the Rust core's command line. For now: capsules.
 
 use inari_core::capsule::{self, attach, io, EventKind, Timeline};
+use inari_core::{host, rpc, teleport};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -9,7 +10,9 @@ fn usage() -> ExitCode {
     eprintln!(
         "usage: inari-core-rs <command>\n  verify <capsule-dir|archive>\n  inspect <capsule-dir|archive>\n  \
          create <dir> <thread-id> [holder]\n  append <dir> <author> <kind> <text>\n  \
-         attach <dir> <path-in-workspace> <file>\n  pack <dir> <archive>\n  unpack <archive> <dir>"
+         attach <dir> <path-in-workspace> <file>\n  pack <dir> <archive>\n  unpack <archive> <dir>\n  \
+         serve-endpoint <root> <node> <key-file> <port>\n  adopt <root> <node> <capsule-dir>\n  \
+         status <root> <node> <agent>\n  teleport <root> <node> <agent> <target-node> <host:port> <key-file>"
     );
     ExitCode::from(2)
 }
@@ -113,6 +116,61 @@ fn run(args: &[String]) -> capsule::Result<ExitCode> {
                 json!({"path": got.path, "sha256": got.sha256, "size": got.size, "mime": got.mime})
             );
             Ok(ExitCode::SUCCESS)
+        }
+        ["serve-endpoint", root, node, key_file, port] => {
+            let key = std::fs::read(key_file)?.trim_ascii().to_vec();
+            let port: u16 = port.parse().unwrap_or(0);
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(async {
+                let host = std::sync::Arc::new(host::CapsuleHost::new(node, Path::new(root))?);
+                host.recover();
+                let server = rpc::EndpointServer::new(host, &key);
+                let bound = server.start("127.0.0.1", port).await?;
+                println!("listening {bound}");
+                use std::io::Write;
+                std::io::stdout().flush()?;
+                std::future::pending::<()>().await;
+                Ok::<_, capsule::Error>(())
+            })?;
+            Ok(ExitCode::SUCCESS)
+        }
+        ["adopt", root, node, capsule_dir] => {
+            let host = host::CapsuleHost::new(node, Path::new(root))?;
+            match host.adopt(Path::new(capsule_dir)) {
+                Ok(agent) => {
+                    println!("{agent}");
+                    Ok(ExitCode::SUCCESS)
+                }
+                Err(e) => {
+                    eprintln!("{e}");
+                    Ok(ExitCode::from(1))
+                }
+            }
+        }
+        ["status", root, node, agent] => {
+            let host = host::CapsuleHost::new(node, Path::new(root))?;
+            println!("{}", host.status(agent));
+            Ok(ExitCode::SUCCESS)
+        }
+        ["teleport", root, node, agent, target_node, addr, key_file] => {
+            let key = std::fs::read(key_file)?.trim_ascii().to_vec();
+            let rt = tokio::runtime::Runtime::new()?;
+            let outcome = rt.block_on(async {
+                let source = host::CapsuleHost::new(node, Path::new(root))?;
+                let target = rpc::RemoteEndpoint::new(
+                    target_node,
+                    addr,
+                    &key,
+                    std::time::Duration::from_secs(30),
+                );
+                Ok::<_, capsule::Error>(teleport::teleport(&source, &target, agent, None).await)
+            })?;
+            println!("{}", serde_json::to_string(&outcome).expect("serializes"));
+            Ok(if outcome.state == "committed" {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(1)
+            })
         }
         ["pack", dir, archive] => {
             io::pack(Path::new(dir), Path::new(archive)).map(|_| ExitCode::SUCCESS)
