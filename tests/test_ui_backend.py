@@ -5,6 +5,8 @@ import base64
 import json
 from pathlib import Path
 
+import pytest
+
 from inari_core.agent import AcpHarness, AgentRunner, Completion
 from inari_core.capsule import load, verify
 from inari_core.gateway import Gateway
@@ -125,7 +127,7 @@ async def test_choosing_a_model_is_remembered_journaled_and_sent_to_the_agent(tm
     )
     run = AgentRunner(host, None, SubprocessRuntime(EnvResolver()), harness=harness)
     agent = run.create("t1")
-    assert run.set_model(agent, "fam/beta") is True and run.set_model(agent, "fam/beta") is False
+    assert run.set_model(agent, "fam/beta") is not None and run.set_model(agent, "fam/beta") is None
     assert load(host.agents / agent).manifest.labels["model"] == "fam/beta"
     await run.run(agent, "hello")
     assert {"set_model": "fam/beta"} in prompts(log)
@@ -159,3 +161,32 @@ async def test_an_attached_file_lands_in_the_workspace_and_cannot_escape_it(tmp_
     assert (await run.upload(agent, "../evil.txt", b"x"))["ok"] is False
     assert verify(host.agents / agent) == []
     _ = base64
+
+
+async def test_each_thread_picks_its_harness_and_a_core_without_it_refuses_the_move(tmp_path):
+    from inari_core.agent import ModelLoop
+    from inari_core.teleport import teleport
+
+    host = CapsuleHost("node-a", tmp_path / "a")
+    rt = SubprocessRuntime(EnvResolver())
+    claude, gemini = Scripted(Completion("from claude")), Scripted(Completion("from gemini"))
+    run = AgentRunner(
+        host, None, rt, harnesses={"claude": ModelLoop(claude, rt), "gemini": ModelLoop(gemini, rt)}
+    )
+    agent = run.create("t1", harness="gemini")
+    assert (await run.run(agent, "hi")).final_text == "from gemini"
+    assert run.set_harness(agent, "claude") is not None
+    assert (await run.run(agent, "hi again")).final_text == "from claude"
+    with pytest.raises(ValueError):
+        run.set_harness(agent, "codex")
+    # a core that only has OpenFox refuses a Claude thread, before the point of no return
+    target = CapsuleHost("node-b", tmp_path / "b")
+
+    def can_host(capsule):
+        if capsule.manifest.labels.get("harness") not in ("openfox",):
+            raise ValueError("this core has no such harness")
+
+    target.on_prepare = can_host
+    out = await teleport(host, target, agent)
+    assert out.state == "rolled_back" and "no such harness" in out.error
+    assert host.status(agent) == "running"

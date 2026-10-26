@@ -21,7 +21,7 @@ from ..approval_bus import NodeApprovals
 from ..approvals import needs_approval
 from ..capsule import io
 from ..capsule.models import AccessPolicy, EnvironmentSpec, EventKind, Holder
-from ..capsule.search import event_text
+from ..capsule.search import event_summary
 from ..capsule.timeline import Timeline
 from ..handover import compact, render
 from ..sandbox import Runtime, materialize
@@ -149,6 +149,8 @@ class AgentRunner:
         max_steps: int = 20,
         approval_ttl: float = 120.0,
     ) -> None:
+        if harnesses:
+            harness = harness or next(iter(harnesses.values()))
         if harness is None:
             if provider is None:
                 raise ValueError("a provider or a harness is required")
@@ -157,6 +159,9 @@ class AgentRunner:
             )
         self.host, self.harness, self.approvals, self.publish = host, harness, approvals, publish
         self.runtime = runtime
+        # Named harnesses: each thread picks one ("claude", "gemini", "openfox"...); the first is
+        # the default. A runner built with a single harness has it under "default".
+        self.harnesses: dict[str, Harness] = dict(harnesses or {"default": harness})
         self.approval_ttl = approval_ttl
         self.phases: dict[str, str] = {}
         self._locks: dict[str, asyncio.Lock] = {}
@@ -204,7 +209,12 @@ class AgentRunner:
         if self.publish:
             await self.publish(
                 f"agent.{agent}.event",
-                {"agent": agent, "id": event_id, "kind": kind, "text": event_text(data)[:400]},
+                {
+                    "agent": agent,
+                    "id": event_id,
+                    "kind": kind,
+                    "text": event_summary(kind, data)[:400],
+                },
             )
 
     async def _phase(self, agent: str, phase: str) -> None:
@@ -226,13 +236,37 @@ class AgentRunner:
         except (OSError, ValueError):
             return ""
 
-    def set_model(self, agent: str, model: str) -> bool:
-        """Remember the model chosen for a thread and journal the change."""
+    def harness_of(self, agent: str) -> str:
+        try:
+            return io.load(self.host.agents / agent).manifest.labels.get("harness", "")
+        except (OSError, ValueError):
+            return ""
+
+    def _harness_for(self, agent: str) -> Harness:
+        return self.harnesses.get(self.harness_of(agent)) or self.harness
+
+    def set_harness(self, agent: str, name: str):
+        """Choose who thinks for a thread. Changing harness also clears its model."""
+        if name not in self.harnesses:
+            raise ValueError(f"no harness {name!r} on this node")
+        path = self.host.agents / agent
+        capsule = io.load(path)
+        if capsule.manifest.labels.get("harness", "") == name:
+            return None
+        labels = {**capsule.manifest.labels, "harness": name, "model": ""}
+        io.seal(path, capsule.manifest.model_copy(update={"labels": labels}), capsule.timeline)
+        return self._append(
+            agent, EventKind.PROVIDER_SWITCH, {"from": "", "to": f"{name}:default", "harness": name}
+        )
+
+    def set_model(self, agent: str, model: str):
+        """Remember the model chosen for a thread and journal the change (returns the event,
+        or None when nothing changed)."""
         path = self.host.agents / agent
         capsule = io.load(path)
         previous = capsule.manifest.labels.get("model", "")
         if previous == model:
-            return False
+            return None
         labels = {**capsule.manifest.labels, "model": model}
         io.seal(path, capsule.manifest.model_copy(update={"labels": labels}), capsule.timeline)
         self._append(
@@ -278,7 +312,9 @@ class AgentRunner:
                 EventKind.TOOL_CALL,
                 {"call_id": call_id, "name": "bash", "arguments": {"cmd": cmd, "by": "user"}},
             )
-            await self._emit(agent, "tool_call", ev.id, {"name": "bash", "arguments": {"cmd": cmd}})
+            await self._emit(
+                agent, "tool_call", ev.id, {"name": "bash", "arguments": {"cmd": cmd, "by": "user"}}
+            )
             result = await self.runtime.run(
                 capsule.environment, workdir, ["/bin/sh", "-c", cmd], timeout=60
             )

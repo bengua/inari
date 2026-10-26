@@ -21,7 +21,7 @@ from .approval_bus import NodeApprovals
 from .approvals import ApprovalGate
 from .capsule import fork as fork_capsule
 from .capsule import io, merge
-from .capsule.search import event_text
+from .capsule.search import event_summary, event_text
 from .gateway import Gateway
 from .mesh import Bus, MeshCoordinator, NodeInfo, Registry, Role
 from .sandbox import ContainerRuntime, SubprocessRuntime
@@ -282,7 +282,6 @@ class Node:
             "events": len(events),
             "files": len(capsule.snapshot.tree),
             "last": event_text(last.data)[:160] if last else "",
-            "harness": self.cfg.harness.get("kind") or self.cfg.provider.kind or "none",
             "model": capsule.manifest.labels.get("model", ""),
             "harness": capsule.manifest.labels.get("harness", "")
             or (next(iter(self.runner.harnesses)) if self.runner else ""),
@@ -318,7 +317,9 @@ class Node:
             return
         try:
             agent = self.runner.create(
-                str(p["thread_id"]), title=str(p.get("title", "")), harness=str(p.get("harness", "")),
+                str(p["thread_id"]),
+                title=str(p.get("title", "")),
+                harness=str(p.get("harness", "")),
                 approval_required=list(p.get("approval_required", [])),
             )  # fmt: skip
             await self._announce_created(agent)
@@ -387,7 +388,7 @@ class Node:
         if self.host.status(agent) != "running":
             return
         events = [
-            {"id": e.id, "kind": e.kind.value, "text": event_text(e.data)[:400]}
+            {"id": e.id, "kind": e.kind.value, "text": event_summary(e.kind.value, e.data)[:400]}
             for e in io.load(self.host.agents / agent).timeline.ordered()
         ]
         await self.bus.publish(f"agent.{agent}.history", {"agent": agent, "events": events})
@@ -459,7 +460,9 @@ class Node:
         agent = m.subject.split(".")[1]
         if self.runner is None or self.host.status(agent) != "running":
             return
-        self.runner.set_model(agent, str(m.payload["model"]))
+        event = self.runner.set_model(agent, str(m.payload["model"]))
+        if event is not None:
+            await self.runner._emit(agent, "provider_switch", event.id, event.data)
 
     async def _on_harness(self, m) -> None:
         agent = m.subject.split(".")[1]

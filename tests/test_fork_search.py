@@ -46,3 +46,27 @@ def test_search_finds_exact_words_before_near_matches(tmp_path):
     hits = search(cap.timeline, "build")
     assert hits and hits[0]["kind"] == "user_message"
     assert search(cap.timeline, "zzz-not-there") == []
+
+
+def test_tool_calls_read_as_actions_not_argument_dumps():
+    from inari_core.capsule.search import event_summary
+
+    assert (
+        event_summary("tool_call", {"name": "bash", "arguments": {"cmd": "ls -la"}})
+        == "bash: ls -la"
+    )
+    assert (
+        event_summary("tool_call", {"name": "bash", "arguments": {"cmd": "make", "by": "user"}})
+        == "$ make"
+    )
+    acp = {
+        "name": "write_file: notes.txt",
+        "arguments": {"kind": "edit", "input": {"path": "notes.txt"}},
+    }
+    assert event_summary("tool_call", acp) == "write_file: notes.txt"
+    assert (
+        event_summary("tool_call", {"name": "read_file", "arguments": {"input": {"path": "a.md"}}})
+        == "read_file: a.md"
+    )
+    assert event_summary("provider_switch", {"from": "", "to": "x/qwen"}) == "x/qwen"
+    assert event_summary("checkpoint", {"reason": "teleport"}) == "teleport"
