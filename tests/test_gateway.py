@@ -106,24 +106,27 @@ async def test_an_approval_travels_phone_to_node_with_a_valid_signature(gw):
 async def test_the_demo_mesh_really_moves_an_agent_when_asked(tmp_path: Path):
     started: list[Gateway] = []
     task = asyncio.create_task(run_demo(port=0, workdir=tmp_path, on_ready=started.append))
-    for _ in range(50):
+    for _ in range(100):
         if started:
             break
         await asyncio.sleep(0.1)
     gateway = started[0]
-    for _ in range(50):
-        if len(gateway.nodes) == 3:
-            break
-        await asyncio.sleep(0.1)
     assert [n["node_id"] for n in gateway.nodes] == ["atlas", "borealis", "cirrus"]
     request = {"agent": "scribe", "source": "atlas", "target": "cirrus"}
     status, _ = await http(gateway.port, "POST", "/api/teleport", request, token="demo")
     assert status == 200
-    for _ in range(50):
+    for _ in range(100):
         if gateway.results:
             break
         await asyncio.sleep(0.1)
     assert gateway.results[-1]["state"] == "committed"
-    status, body = await http(gateway.port, "GET", "/api/agent/scribe/timeline", token="demo")
-    assert status == 200 and json.loads(body)["events"][-1]["kind"] == "checkpoint"
+    kinds = []
+    for _ in range(100):
+        status, body = await http(gateway.port, "GET", "/api/agent/scribe/timeline", token="demo")
+        kinds = [e["kind"] for e in json.loads(body)["events"]]
+        if "checkpoint" in kinds:
+            break
+        await asyncio.sleep(0.1)
+    assert status == 200 and "checkpoint" in kinds and "tool_result" in kinds
     task.cancel()
+    await asyncio.gather(task, return_exceptions=True)

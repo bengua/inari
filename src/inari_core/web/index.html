@@ -48,7 +48,7 @@ aside h2 { margin:0 0 8px; font-size:15px; }
 #tree li.user_message::before { border-color:var(--listening); } #tree li.checkpoint::before { border-radius:2px; transform:rotate(45deg); }
 #tree li.head { color:var(--fg); } #tree li b { color:var(--fg); font-weight:600; }
 #approvals { position:fixed; left:16px; right:16px; bottom:calc(16px + env(safe-area-inset-bottom)); display:grid; gap:10px; z-index:40; }
-.ask { padding:14px; max-width:520px; margin:0 auto; width:100%; border-color:var(--inference); }
+#approvals { pointer-events:none; } .ask { pointer-events:auto; padding:14px; max-width:520px; margin:0 auto; width:100%; border-color:var(--inference); }
 .ask code { display:block; margin:6px 0 10px; color:var(--inference); overflow-wrap:anywhere; }
 .ask .row { display:flex; gap:10px; } .ask button { flex:1; }
 button.act { font:inherit; color:var(--fg); background:var(--glass); border:1px solid var(--edge); border-radius:12px; padding:12px; min-height:44px; cursor:pointer; }
@@ -66,6 +66,17 @@ button.act.go { border-color:var(--success); color:var(--success); }
   aside { order:2; } #graph { order:1; } main { padding-bottom:200px; }
 }
 @media (prefers-reduced-motion: reduce) { .node, .agent { transition:none; } }
+#bar { display:flex; gap:10px; align-items:center; margin-left:auto; position:relative; flex-wrap:wrap; }
+#search { padding:10px 12px; border-radius:12px; border:1px solid var(--edge); background:rgba(0,0,0,.3); color:var(--fg); font:inherit; min-width:200px; }
+#hits { position:absolute; top:46px; right:0; width:min(420px,90vw); z-index:45; padding:8px; display:none; }
+#hits button { display:block; width:100%; text-align:left; background:none; border:0; color:var(--fg); padding:8px; border-radius:8px; font:inherit; cursor:pointer; }
+#hits button:hover { background:rgba(255,255,255,.08); } #hits small { color:var(--muted); display:block; }
+#composer { margin-top:12px; display:grid; gap:8px; } #composer[hidden] { display:none; }
+#composer textarea, #sheet input { width:100%; padding:10px; border-radius:10px; border:1px solid var(--edge); background:rgba(0,0,0,.3); color:var(--fg); font:inherit; resize:vertical; }
+#composer .row { display:flex; gap:8px; } #composer .row button { flex:1; }
+#tree li { cursor:pointer; } #tree li.pick { color:var(--fg); outline:1px dashed var(--inference); outline-offset:2px; }
+#tree li.assistant_message b { color:var(--success); }
+@media (max-width: 760px) { #bar { margin-left:0; width:100%; } #search { flex:1; } }
 </style>
 </head>
 <body>
@@ -79,10 +90,21 @@ button.act.go { border-color:var(--success); color:var(--success); }
   <header>
     <canvas id="orb" width="280" height="280" role="img" aria-label="Network activity indicator"></canvas>
     <div id="stats" aria-live="polite">connecting…</div>
+    <div id="bar">
+      <input id="search" type="search" placeholder="Search journals…" aria-label="Search journals">
+      <button class="act" id="newAgent">New agent</button>
+      <div id="hits" class="glass"></div>
+    </div>
   </header>
   <main>
     <section id="graph" aria-label="Machines and agents"></section>
-    <aside class="glass"><h2 id="inspTitle">Select an agent</h2><ul id="tree"></ul></aside>
+    <aside class="glass"><h2 id="inspTitle">Select an agent</h2><ul id="tree"></ul>
+      <form id="composer" hidden>
+        <textarea id="msg" rows="2" placeholder="Message the agent…" aria-label="Message"></textarea>
+        <div class="row"><button class="act go" type="submit">Send</button>
+          <button class="act" type="button" id="forkBtn" title="Tap an event first to fork from it">Fork</button>
+          <button class="act" type="button" id="mergeBtn">Merge into…</button></div>
+      </form></aside>
   </main>
 </div>
 <div id="approvals"></div>
@@ -136,7 +158,8 @@ function render() {
     graph.append(el);
   }
   drawOrbParams(snap.mascot);
-  renderApprovals();
+  renderApprovals(); showNotices();
+  if (selected && Date.now() - tlStamp > 1500) loadTimeline();
 }
 function pastille(id, a) {
   const b = document.createElement("button"); b.className = "agent"; b.dataset.agent = id; b.dataset.phase = a.phase; b.dataset.node = a.node;
@@ -149,15 +172,61 @@ function pastille(id, a) {
   b.onkeydown = (e) => { if (e.key === "t" || e.key === "T") openSheet(id, a.node); if (e.key === "Enter") select(id); };
   return b;
 }
-async function select(id) {
-  selected = id; $("inspTitle").textContent = id;
-  const { events } = await api(`/api/agent/${encodeURIComponent(id)}/timeline`);
+let forkAt = null, tlStamp = 0;
+async function select(id) { selected = id; forkAt = null; $("composer").hidden = false; await loadTimeline(); if (snap) render(); }
+async function loadTimeline() {
+  if (!selected) return; $("inspTitle").textContent = selected; tlStamp = Date.now();
+  const { events } = await api(`/api/agent/${encodeURIComponent(selected)}/timeline`);
   const tree = $("tree"); tree.textContent = "";
   events.forEach((ev, i) => {
-    const li = document.createElement("li"); li.className = ev.kind + (i === events.length - 1 ? " head" : "");
-    const k = document.createElement("b"); k.textContent = ev.kind.replace("_", " "); li.append(k, " " + ev.text.slice(0, 90)); tree.append(li);
+    const li = document.createElement("li"); li.className = ev.kind + (i === events.length - 1 ? " head" : "") + (ev.id === forkAt ? " pick" : "");
+    const k = document.createElement("b"); k.textContent = ev.kind.replace("_", " "); li.append(k, " " + ev.text.slice(0, 160));
+    li.onclick = () => { forkAt = ev.id; tree.querySelectorAll(".pick").forEach((x) => x.classList.remove("pick")); li.classList.add("pick"); };
+    tree.append(li);
   });
-  if (snap) render();
+  tree.lastChild && tree.lastChild.scrollIntoView({ block: "nearest" });
+}
+$("composer").onsubmit = async (e) => {
+  e.preventDefault(); const text = $("msg").value.trim(); if (!text || !selected) return;
+  $("msg").value = ""; await api("/api/message", { agent: selected, text });
+};
+$("forkBtn").onclick = async () => {
+  if (!selected) return; const name = selected + "-fork-" + (Date.now() % 10000);
+  await api("/api/fork", { agent: selected, new_thread: name, upto: forkAt }); toast(`Forking ${selected}${forkAt ? " at " + forkAt : ""}…`);
+};
+$("mergeBtn").onclick = () => {
+  const me = snap.agents[selected]; if (!me) return;
+  const others = Object.entries(snap.agents).filter(([id, a]) => id !== selected && a.node === me.node);
+  sheet(`Merge which thread into ${selected}?`, others.map(([id]) => [id, () => api("/api/merge", { target: selected, source: id })]), "Both threads must run on the same machine.");
+};
+$("newAgent").onclick = () => {
+  const heavy = snap.nodes.filter((n) => n.role === "heavy"); if (!heavy.length) return toast("No machine available");
+  const input = document.createElement("input"); input.placeholder = "Thread name"; input.setAttribute("aria-label", "Thread name");
+  sheet("New agent on…", heavy.map((n) => [n.node_id, () => { const t = input.value.trim() || "thread-" + (Date.now() % 100000); return api("/api/agent", { thread_id: t, node: n.node_id, title: t }); }]), "", input);
+};
+let hitTimer = null;
+$("search").oninput = () => { clearTimeout(hitTimer); hitTimer = setTimeout(async () => {
+  const q = $("search").value.trim(), box = $("hits"); box.textContent = ""; if (!q) { box.style.display = "none"; return; }
+  const { hits } = await api("/api/search?q=" + encodeURIComponent(q)); box.style.display = "block";
+  if (!hits.length) box.innerHTML = '<small class="empty">No match</small>';
+  for (const h of hits) { const b = document.createElement("button"); b.innerHTML = "<span></span><small></small>"; b.firstChild.textContent = h.text.slice(0, 90); b.lastChild.textContent = h.agent + " · " + h.kind;
+    b.onclick = () => { box.style.display = "none"; select(h.agent); }; box.append(b); }
+}, 300); };
+function sheet(title, options, note, extra) {
+  $("sheetTitle").textContent = title; const opts = $("sheetOpts"); opts.textContent = ""; if (extra) opts.append(extra);
+  if (note) { const p = document.createElement("small"); p.className = "empty"; p.textContent = note; opts.append(p); }
+  for (const [label, fn] of options) { const b = document.createElement("button"); b.className = "act"; b.textContent = label; b.onclick = () => { $("sheet").classList.remove("open"); fn(); }; opts.append(b); }
+  const c = document.createElement("button"); c.className = "act"; c.textContent = "Cancel"; c.onclick = () => $("sheet").classList.remove("open"); opts.append(c);
+  $("sheet").classList.add("open"); (extra || opts.querySelector("button")).focus();
+}
+let seenNotices = new Set(), firstNotices = true;
+function showNotices() {
+  for (const n of snap.notices || []) { const k = JSON.stringify(n); if (seenNotices.has(k)) continue; seenNotices.add(k);
+    if (firstNotices) continue;
+    if (n.subject === "agent.created") toast(n.ok ? `Created ${n.agent} on ${n.node}` : "Create failed: " + n.error);
+    else if (n.subject === "agent.merged") toast(n.ok ? `Merged ${n.source} into ${n.target} (+${n.added})` : "Merge failed: " + n.error);
+    else if (n.stopped && n.stopped !== "done") toast(`${n.agent}: ${n.stopped} ${n.error || ""}`);
+  } firstNotices = false;
 }
 /* Dragging: a ghost follows the pointer, valid machines glow, dropping on one moves the agent. */
 function startDrag(e, el, id, from) {
@@ -188,13 +257,8 @@ async function teleport(agent, source, target) {
   if (r.request) { pending.set(r.request, agent); toast(`Moving ${agent} to ${target}…`); render(); } else toast("Request refused");
 }
 function openSheet(agent, from) {
-  $("sheetTitle").textContent = `Move ${agent} to…`; const opts = $("sheetOpts"); opts.textContent = "";
-  for (const n of snap.nodes.filter((n) => n.node_id !== from && n.role === "heavy")) {
-    const b = document.createElement("button"); b.className = "act"; b.textContent = n.node_id;
-    b.onclick = () => { $("sheet").classList.remove("open"); teleport(agent, from, n.node_id); }; opts.append(b);
-  }
-  const c = document.createElement("button"); c.className = "act"; c.textContent = "Cancel"; c.onclick = () => $("sheet").classList.remove("open");
-  opts.append(c); $("sheet").classList.add("open"); (opts.firstChild || c).focus();
+  const targets = snap.nodes.filter((n) => n.node_id !== from && n.role === "heavy");
+  sheet(`Move ${agent} to…`, targets.map((n) => [n.node_id, () => teleport(agent, from, n.node_id)]));
 }
 function renderApprovals() {
   const box = $("approvals"); box.textContent = "";

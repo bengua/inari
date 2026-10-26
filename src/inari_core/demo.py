@@ -1,5 +1,6 @@
-"""A self-contained mesh for trying the interfaces: three nodes, three agents, live
-telemetry, approval questions, and a real teleportation behind every drag."""
+"""A whole mesh in one process, for trying the interface: three real nodes talking over
+loopback TCP, a rule-based model, live agents, and approval questions. Every drag in
+the browser performs a genuine teleportation."""
 
 from __future__ import annotations
 
@@ -7,111 +8,84 @@ import asyncio
 import contextlib
 import random
 import tempfile
-import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
-from .approval_bus import NodeApprovals
-from .approvals import ApprovalGate
-from .capsule import EnvironmentSpec, EventKind, Holder, Timeline, create, load
+from .agent import ProviderConfig
 from .gateway import Gateway
-from .mesh import Bus, MeshCoordinator, NodeInfo, Registry, Role
-from .teleport import CapsuleHost, teleport
+from .node import Node, NodeConfig
 
-NODES = ("atlas", "borealis", "cirrus")
-AGENTS = {"scribe": "atlas", "builder": "atlas", "reviewer": "borealis"}
-PHASES = ["idle", "listening", "inference", "inference", "success", "idle"]
-DEVICE_KEY = b"demo-device-key"
-
-
-def _summary(data: dict[str, Any]) -> str:
-    return str(data.get("text") or data.get("name") or data.get("output") or "")
-
-
-def _seed_capsule(root: Path, thread: str) -> Path:
-    t = Timeline()
-    steps = [
-        (EventKind.USER_MESSAGE, {"text": f"{thread}: start the task"}),
-        (EventKind.DECISION, {"text": "split the work in three steps"}),
-        (
-            EventKind.TOOL_CALL,
-            {"call_id": "c1", "name": "bash", "arguments": {"cmd": "ls"}},
-        ),
-        (EventKind.TOOL_RESULT, {"call_id": "c1", "output": "ok", "is_error": False}),
-        (EventKind.DECISION, {"text": "write the first draft"}),
-    ]
-    for i, (kind, data) in enumerate(steps):
-        t.append("seed", kind, data, float(i))
-    create(
-        root, thread_id=thread, environment=EnvironmentSpec(image="demo:1"), timeline=t,
-        working_memory=f"# {thread}\n", holder=Holder(node_id="seed", epoch=1),
-    )  # fmt: skip
-    return root
+NAMES = ("atlas", "borealis", "cirrus")
+START = {"scribe": "atlas", "builder": "atlas", "reviewer": "borealis"}
 
 
 async def run_demo(
-    host: str = "127.0.0.1", port: int = 8787, token: str = "demo",
-    workdir: Path | None = None, on_ready: Callable[[Gateway], None] | None = None,
-) -> None:  # fmt: skip
+    host: str = "127.0.0.1",
+    port: int = 8787,
+    token: str = "demo",
+    workdir: Path | None = None,
+    on_ready: Callable[[Gateway], None] | None = None,
+) -> None:
     base = Path(workdir or tempfile.mkdtemp(prefix="inari-demo-"))
-    bus = Bus("hub")
-    hosts = {n: CapsuleHost(n, base / n, clock=time.time) for n in NODES}
-    for agent, node in AGENTS.items():
-        hosts[node].adopt(_seed_capsule(base / "seeds" / agent, agent))
-
-    async def teleporter(agent: str, source: str, target: str):
-        return await teleport(hosts[source], hosts[target], agent)
-
-    registry = Registry(ttl=8)
-    coordinator = MeshCoordinator(bus, registry, teleporter)
-    coordinator.start()
-
-    def timeline(agent: str) -> list[dict[str, Any]]:
-        for h in hosts.values():
-            if h.status(agent) == "running":
-                events = load(h.agents / agent).timeline.ordered()
-                return [
-                    {"id": e.id, "kind": e.kind.value, "text": _summary(e.data)} for e in events
-                ]
-        return []
-
-    gateway = Gateway(bus, token=token, device_key=DEVICE_KEY, timeline_reader=timeline)
-    approvals = NodeApprovals(bus, ApprovalGate(DEVICE_KEY))
-    await gateway.start(host, port)
+    base.mkdir(parents=True, exist_ok=True)
+    for name, text in (
+        ("mesh.key", "demo-mesh-key"),
+        ("device.key", "demo-device-key"),
+        ("token", token),
+    ):
+        (base / name).write_text(text)
+    common = dict(
+        key_file=base / "mesh.key", device_key_file=base / "device.key",
+        provider=ProviderConfig(kind="demo"), heartbeat=1.0,
+    )  # fmt: skip
+    hub = Node(
+        NodeConfig(
+            node_id=NAMES[0], data_dir=base / NAMES[0], expected_peers=list(NAMES[1:]),
+            gateway_listen=f"{host}:{port}", gateway_token_file=base / "token", **common,
+        )
+    )  # fmt: skip
+    await hub.start()
+    nodes = {NAMES[0]: hub}
+    for name in NAMES[1:]:
+        node = Node(
+            NodeConfig(
+                node_id=name, data_dir=base / name, hub=f"127.0.0.1:{hub.bus_port}", **common
+            )
+        )
+        await node.start()
+        nodes[name] = node
+    gateway = hub.gateway
+    assert gateway is not None
+    while len(gateway.nodes) < len(NAMES):
+        await asyncio.sleep(0.1)
+    for agent, where in START.items():
+        nodes[where].runner.create(agent, title=agent, approval_required=[])
+    await asyncio.sleep(0.5)
+    for agent in START:
+        await hub.bus.publish(
+            f"agent.{agent}.run", {"text": f"write notes.txt: hello from {agent}"}
+        )
     rng = random.Random(7)
 
-    async def heartbeat() -> None:
+    async def chatter() -> None:
         while True:
-            for n in NODES:
-                await bus.publish("node.heartbeat", NodeInfo(n, Role.HEAVY).to_dict())
-            await coordinator.sweep()
-            await asyncio.sleep(2)
-
-    async def telemetry() -> None:
-        while True:
-            for n in NODES:
-                mine = [a for a in AGENTS if hosts[n].status(a) == "running"]
-                gpu = min(1.0, 0.1 + 0.3 * len(mine) + rng.random() * 0.4) if mine else 0.05
-                await bus.publish(
-                    f"node.{n}.load",
-                    {"node": n, "gpu": gpu, "packets": rng.random() * 1500},
-                )
-                for a in mine:
-                    await bus.publish(
-                        f"agent.{a}.state",
-                        {"agent": a, "node": n, "phase": rng.choice(PHASES)},
-                    )
-            await asyncio.sleep(1.2)
+            await asyncio.sleep(5)
+            agent = rng.choice(list(START))
+            await hub.bus.publish(f"agent.{agent}.run", {"text": "run: sleep 1; ls"})
 
     async def questions() -> None:
-        await asyncio.sleep(4)
+        await asyncio.sleep(6)
         while True:
-            await approvals.ask("builder", "atlas", "sudo systemctl restart demo", ttl=120)
-            await asyncio.sleep(20)
+            await hub.runner.approvals.ask(
+                "builder", "atlas", "sudo systemctl restart demo", ttl=120
+            )
+            await asyncio.sleep(25)
 
-    tasks = [asyncio.create_task(c()) for c in (heartbeat, telemetry, questions)]
-    print(f"inari-core demo: http://{host}:{gateway.port}/#token={token}  (Ctrl+C to stop)")
+    tasks = [asyncio.create_task(c()) for c in (chatter, questions)]
+    print(
+        f"inari-core demo: http://{host}:{gateway.port}/#token={token}  (Ctrl+C to stop)",
+        flush=True,
+    )
     if on_ready:
         on_ready(gateway)
     try:
@@ -121,4 +95,5 @@ async def run_demo(
             t.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await asyncio.gather(*tasks)
-        await gateway.stop()
+        for node in reversed(list(nodes.values())):
+            await node.stop()

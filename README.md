@@ -21,6 +21,7 @@ specification of the interfaces that sit on top.
 | BYOK secrets, signed one-gesture approvals | `secrets.py`, `approvals.py`, [docs/security.md](docs/security.md) | implemented, tested |
 | Gateway (HTTP/SSE) and the web client: spatial graph, orb, approvals, phone layout | `gateway.py`, `demo.py`, `web/`, [docs/ux.md](docs/ux.md) | implemented; drag-to-teleport checked in a real browser |
 | Authenticated TCP transport (bus links, remote endpoints), sandbox runtimes | `src/inari_core/transport`, `sandbox.py` | implemented, tested on loopback |
+| Agent driver (OpenAI-compatible and Anthropic providers, tools, loop), node daemon, fork/merge/search | `agent/`, `node.py`, [docs/node.md](docs/node.md) | implemented; two-node mesh tested over TCP |
 | Capsule signatures (Ed25519), approvals over the bus | `signature.py`, `approval_bus.py` | implemented, tested |
 | NATS / Zenoh adapters | — | not written: same two seams (`Link`, `Endpoint`) |
 

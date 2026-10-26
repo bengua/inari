@@ -37,6 +37,9 @@ class Gateway:
     ) -> None:
         self.bus, self.token, self._key = bus, token, device_key
         self.timeline_reader = timeline_reader
+        self.log: dict[str, list[dict[str, Any]]] = {}
+        self.notices: list[dict[str, Any]] = []
+        self._holder: dict[str, str] = {}
         self.telemetry = Telemetry()
         self.nodes: list[dict[str, Any]] = []
         self.results: list[dict[str, Any]] = []
@@ -50,6 +53,11 @@ class Gateway:
         bus.subscribe("node.lost", self._on_lost)
         bus.subscribe("teleport.result", self._on_result)
         bus.subscribe("approval.request", self._on_approval)
+        bus.subscribe("agent.*.event", self._on_event)
+        bus.subscribe("agent.*.history", self._on_history)
+        bus.subscribe("agent.*.done", self._on_notice)
+        bus.subscribe("agent.created", self._on_notice)
+        bus.subscribe("agent.merged", self._on_notice)
 
     # -- state ---------------------------------------------------------------
     def snapshot(self) -> dict[str, Any]:
@@ -64,6 +72,7 @@ class Gateway:
             "load": snap["nodes"],
             "mascot": mascot,
             "results": self.results[-5:],
+            "notices": self.notices[-5:],
             "approvals": [r.model_dump(mode="json") for r in self.approvals.values()],
         }
 
@@ -78,9 +87,32 @@ class Gateway:
         self.nodes = m.payload["nodes"]
         self._push()
 
-    def _on_agent(self, m: Message) -> None:
+    async def _on_agent(self, m: Message) -> None:
         p = m.payload
         self.telemetry.update_agent(p["agent"], p["node"], p["phase"])
+        self._push()
+        seen_at = self._holder.get(p["agent"])
+        self._holder[p["agent"]] = p["node"]
+        if seen_at != p["node"]:  # first sighting, or it moved: ask the holder for the journal
+            await self.bus.publish("agent.history.request", {"agent": p["agent"]})
+
+    def _on_event(self, m: Message) -> None:
+        p = m.payload
+        events = self.log.setdefault(p["agent"], [])
+        if all(e["id"] != p["id"] for e in events[-50:]):
+            events.append({"id": p["id"], "kind": p["kind"], "text": p["text"]})
+        self._push()
+
+    def _on_history(self, m: Message) -> None:
+        agent, history = m.payload["agent"], list(m.payload["events"])
+        known = {e["id"] for e in history}
+        live = [e for e in self.log.get(agent, []) if e["id"] not in known]
+        self.log[agent] = history + live  # a late reply must not erase newer events
+        self._push()
+
+    def _on_notice(self, m: Message) -> None:
+        self.notices.append({"subject": m.subject, **m.payload})
+        self.notices = self.notices[-10:]
         self._push()
 
     def _on_load(self, m: Message) -> None:
@@ -101,6 +133,25 @@ class Gateway:
         request = ApprovalRequest.model_validate(m.payload)
         self.approvals[request.request_id] = request
         self._push()
+
+    def search(self, query: str, agent: str = "") -> list[dict[str, Any]]:
+        from .capsule.vectors import VectorIndex
+
+        needle, hits = query.lower().strip(), []
+        pool = {a: v for a, v in self.log.items() if not agent or a == agent}
+        index = VectorIndex()
+        for a, events in pool.items():
+            for e in events:
+                index.add(f"{a}|{e['id']}", e["text"])
+                if needle and needle in e["text"].lower():
+                    hits.append({"agent": a, **e})
+        seen = {(h["agent"], h["id"]) for h in hits}
+        for key, score in index.search(query, k=6):
+            a, _, eid = key.partition("|")
+            if score > 0.05 and (a, eid) not in seen:
+                e = next(x for x in pool[a] if x["id"] == eid)
+                hits.append({"agent": a, **e})
+        return hits[:10]
 
     # -- actions ---------------------------------------------------------------
     async def request_teleport(self, agent: str, source: str, target: str) -> str:
@@ -192,8 +243,16 @@ class Gateway:
             return await self._events(writer)
         if method == "GET" and path.startswith("/api/agent/") and path.endswith("/timeline"):
             agent = path.split("/")[3]
-            events = self.timeline_reader(agent) if self.timeline_reader else []
+            events = (
+                self.timeline_reader(agent) if self.timeline_reader else self.log.get(agent, [])
+            )
             return await self._json(writer, 200, {"events": events})
+        if method == "GET" and path == "/api/search":
+            return await self._json(
+                writer,
+                200,
+                {"hits": self.search((query.get("q") or [""])[0], (query.get("agent") or [""])[0])},
+            )
         if method == "POST":
             try:
                 data = json.loads(body or b"{}")
@@ -202,6 +261,30 @@ class Gateway:
                         str(data["agent"]), str(data["source"]), str(data["target"])
                     )
                     return await self._json(writer, 200, {"request": req})
+                if path == "/api/agent":
+                    await self.bus.publish(
+                        "agent.create",
+                        {k: data[k] for k in ("thread_id", "node") if k in data}
+                        | {"title": str(data.get("title", ""))},
+                    )
+                    return await self._json(writer, 200, {"ok": True})
+                if path == "/api/message":
+                    await self.bus.publish(
+                        f"agent.{data['agent']}.run", {"text": str(data["text"])}
+                    )
+                    return await self._json(writer, 200, {"ok": True})
+                if path == "/api/fork":
+                    await self.bus.publish(
+                        f"agent.{data['agent']}.fork",
+                        {"new_thread": str(data["new_thread"]), "upto": data.get("upto")},
+                    )
+                    return await self._json(writer, 200, {"ok": True})
+                if path == "/api/merge":
+                    await self.bus.publish(
+                        "agent.merge",
+                        {"target": str(data["target"]), "source": str(data["source"])},
+                    )
+                    return await self._json(writer, 200, {"ok": True})
                 if path == "/api/approval":
                     ok = await self.answer_approval(str(data["request_id"]), bool(data["approved"]))
                     return await self._json(writer, 200 if ok else 404, {"ok": ok})
