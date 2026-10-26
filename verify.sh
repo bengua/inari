@@ -124,6 +124,6 @@ fi
 # translation lowers the allowance in the same change. Legitimately French
 # files are listed in .english-exceptions, each with its reason.
 command -v english-check >/dev/null || ROUGE "english-check absent (the runner image carries it)"
-english-check --max 1 || ROUGE "english-check: the French count changed (english-check --list)"
+english-check --max 0 || ROUGE "english-check: the French count changed (english-check --list)"
 echo "OK  english"
 echo "VERT"
