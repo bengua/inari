@@ -14,9 +14,11 @@ dependencies = ["pydantic>=2.7,<3"]
 
 [project.optional-dependencies]
 # ruff is pinned so CI and local runs agree exactly.
-dev = ["ruff==0.16.6", "pytest>=8", "pytest-asyncio>=0.23"]
+dev = ["ruff==0.16.6", "pytest>=8", "pytest-asyncio>=0.23", "cryptography>=42"]
 # Optional OS keychain backend for BYOK secrets (see docs/security.md).
 keyring = ["keyring>=25"]
+# Ed25519 signatures over exported capsules (see docs/security.md).
+signing = ["cryptography>=42"]
 
 [project.scripts]
 inari-core = "inari_core.cli:main"

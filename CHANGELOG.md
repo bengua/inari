@@ -9,6 +9,12 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Added
 
+- **Transport**: authenticated TCP framing, bus links with durable replay, remote
+  endpoints (teleportation across processes).
+- **Sandbox**: subprocess and container runtimes; workspace snapshots update the
+  capsule differentially.
+- **Signatures** (`inari-core keygen|sign|verify --trusted`) and **approvals over the
+  bus** with queued questions.
 - **Session State Capsule (`ssc/1`)**: an agent thread as a directory of plain
   files — manifest with per-file digests, hash-chained journal, working memory,
   local vector index, content-addressed workspace snapshot, sandbox spec. Packs to

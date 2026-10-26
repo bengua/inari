@@ -28,6 +28,14 @@ def main(argv: list[str] | None = None) -> int:
         sub.add_parser(
             name, help=f"{name} a capsule (directory or archive)"
         ).add_argument("path", type=Path)
+    sub.add_parser("keygen", help="make a signing key pair").add_argument("name")
+    sign = sub.add_parser("sign", help="sign an exported capsule directory")
+    sign.add_argument("root", type=Path)
+    sign.add_argument("--key", type=Path, required=True)
+    sub.choices["verify"].add_argument(
+        "--trusted", type=Path, action="append", default=[],
+        help="public key file; the capsule must be signed by one of them",
+    )  # fmt: skip
     pack = sub.add_parser("pack", help="archive a capsule directory")
     pack.add_argument("root", type=Path)
     pack.add_argument("archive", type=Path)
@@ -40,6 +48,21 @@ def main(argv: list[str] | None = None) -> int:
         for path in schema.export(args.dest):
             print(path)
         return 0
+    if args.cmd == "keygen":
+        from . import signature
+
+        private, public = signature.generate_keypair()
+        key_file = Path(args.name + ".key")
+        key_file.write_text(private)
+        key_file.chmod(0o600)
+        Path(args.name + ".pub").write_text(public)
+        print(f"key id {signature.key_id(public)}")
+        return 0
+    if args.cmd == "sign":
+        from . import signature
+
+        print(signature.sign_capsule(args.root, args.key.read_text().strip()))
+        return 0
     if args.cmd == "pack":
         io.pack(args.root, args.archive)
         return 0
@@ -50,6 +73,11 @@ def main(argv: list[str] | None = None) -> int:
         root = _open(args.path, Path(tmp) / "capsule")
         if args.cmd == "verify":
             problems = io.verify(root)
+            if args.trusted:
+                from . import signature
+
+                trusted = {p.read_text().strip() for p in args.trusted}
+                problems += signature.verify_signature(root, trusted)
             for problem in problems:
                 print(problem, file=sys.stderr)
             print("ok" if not problems else f"{len(problems)} problem(s)")

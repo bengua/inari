@@ -20,7 +20,9 @@ specification of the interfaces that sit on top.
 | Mesh: embedded bus, durable links, discovery, coordinator, telemetry → mascot | `src/inari_core/mesh`, [docs/mesh.md](docs/mesh.md) | implemented, tested |
 | BYOK secrets, signed one-gesture approvals | `secrets.py`, `approvals.py`, [docs/security.md](docs/security.md) | implemented, tested |
 | Desktop spatial graph and mobile client | [docs/ux.md](docs/ux.md) | specification only, on purpose |
-| Real transports (WireGuard/Tailscale sockets, NATS/Zenoh), sandbox runtime | — | not started: the seams are the `Endpoint` and `Link` protocols |
+| Authenticated TCP transport (bus links, remote endpoints), sandbox runtimes | `src/inari_core/transport`, `sandbox.py` | implemented, tested on loopback |
+| Capsule signatures (Ed25519), approvals over the bus | `signature.py`, `approval_bus.py` | implemented, tested |
+| NATS / Zenoh adapters | — | not written: same two seams (`Link`, `Endpoint`) |
 
 Read [docs/architecture.md](docs/architecture.md) first.
 

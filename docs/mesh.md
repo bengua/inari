@@ -61,7 +61,26 @@ heartbeats.
 Same snapshot, same creature: the mascot cannot lie, and a renderer can be tested
 without a GPU.
 
-## Not here yet
+## Transport
 
-Real transports, authentication of links, and the sandbox runtime. They plug in at
-`Link` and `Endpoint`; the tests use in-memory implementations of both.
+`inari_core.transport` carries both kinds of traffic over TCP:
+
+- **Wire**: a handshake proves knowledge of a shared key, then every frame carries
+  an HMAC under a per-connection session key with a sequence number (no tampering,
+  injection or replay). No encryption: use a private network.
+- **Bus links**: `BusServer` / `BusClient` (reconnecting with capped backoff).
+  Durable subjects queue while the peer is away and replay on return.
+- **Remote endpoints**: `EndpointServer` serves a `CapsuleHost`; `RemoteEndpoint`
+  implements `Endpoint` against it, with chunked file transfer. A teleportation
+  between two processes is the same `teleport()` call with a `RemoteEndpoint`.
+
+NATS and Zenoh adapters are not written; they would implement the same two seams
+(`Link.send`/`Bus.deliver` and `Endpoint`).
+
+## Sandbox
+
+`SubprocessRuntime` (scrubbed environment, process-group kill on timeout, output cap,
+secrets redacted from output) and `ContainerRuntime` (Podman/Docker command with no
+network, dropped capabilities, only the workspace writable, secrets passed by name).
+`materialize` restores a capsule's workspace; `update_snapshot` records the result
+back as a differential snapshot.

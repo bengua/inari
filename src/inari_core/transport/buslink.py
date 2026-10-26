@@ -81,9 +81,22 @@ class PeerLink:
 
 
 class BusServer:
-    def __init__(self, bus: Bus, key: bytes, bind: str = "127.0.0.1", port: int = 0):
+    def __init__(
+        self,
+        bus: Bus,
+        key: bytes,
+        bind: str = "127.0.0.1",
+        port: int = 0,
+        expected_peers: tuple[str, ...] = (),
+    ):
+        """`expected_peers` are bus names that will dial in: links for them exist
+        from the start, so durable messages queue even before their first visit."""
         self.bus, self.key, self.bind, self.port = bus, key, bind, port
         self.links: dict[str, PeerLink] = {}
+        for name in expected_peers:
+            link = self.links[name] = PeerLink(bus)
+            link.peer_name = name
+            bus.add_link(link)
         self._server: asyncio.AbstractServer | None = None
 
     async def start(self) -> int:
