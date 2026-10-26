@@ -1,0 +1,74 @@
+{
+  "$defs": {
+    "Mount": {
+      "properties": {
+        "mode": {
+          "default": "rw",
+          "enum": [
+            "ro",
+            "rw"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "target": {
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "target"
+      ],
+      "title": "Mount",
+      "type": "object"
+    }
+  },
+  "description": "Reproducible sandbox definition. Holds secret NAMES, never values.",
+  "properties": {
+    "env": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Env",
+      "type": "object"
+    },
+    "image": {
+      "default": "",
+      "title": "Image",
+      "type": "string"
+    },
+    "mounts": {
+      "items": {
+        "$ref": "#/$defs/Mount"
+      },
+      "title": "Mounts",
+      "type": "array"
+    },
+    "resources": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Resources",
+      "type": "object"
+    },
+    "secret_refs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Secret Refs",
+      "type": "array"
+    },
+    "workdir": {
+      "default": "/work",
+      "title": "Workdir",
+      "type": "string"
+    }
+  },
+  "title": "EnvironmentSpec",
+  "type": "object"
+}

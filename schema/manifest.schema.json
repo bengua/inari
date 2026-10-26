@@ -1,0 +1,175 @@
+{
+  "$defs": {
+    "AccessPolicy": {
+      "properties": {
+        "approval_required": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Approval Required",
+          "type": "array"
+        },
+        "owners": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Owners",
+          "type": "array"
+        },
+        "readers": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Readers",
+          "type": "array"
+        }
+      },
+      "title": "AccessPolicy",
+      "type": "object"
+    },
+    "FileDigest": {
+      "properties": {
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size": {
+          "minimum": 0,
+          "title": "Size",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "sha256",
+        "size"
+      ],
+      "title": "FileDigest",
+      "type": "object"
+    },
+    "Holder": {
+      "description": "Who may run the agent. The highest `epoch` wins: a fencing token.",
+      "properties": {
+        "epoch": {
+          "minimum": 0,
+          "title": "Epoch",
+          "type": "integer"
+        },
+        "node_id": {
+          "title": "Node Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id",
+        "epoch"
+      ],
+      "title": "Holder",
+      "type": "object"
+    },
+    "Lineage": {
+      "properties": {
+        "fork_event_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fork Event Id"
+        },
+        "merged_from": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Merged From",
+          "type": "array"
+        },
+        "parent_capsule": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Capsule"
+        }
+      },
+      "title": "Lineage",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "access": {
+      "$ref": "#/$defs/AccessPolicy"
+    },
+    "capsule_id": {
+      "title": "Capsule Id",
+      "type": "string"
+    },
+    "created_at": {
+      "title": "Created At",
+      "type": "number"
+    },
+    "files": {
+      "additionalProperties": {
+        "$ref": "#/$defs/FileDigest"
+      },
+      "title": "Files",
+      "type": "object"
+    },
+    "format": {
+      "const": "ssc/1",
+      "default": "ssc/1",
+      "title": "Format",
+      "type": "string"
+    },
+    "holder": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Holder"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "labels": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Labels",
+      "type": "object"
+    },
+    "lineage": {
+      "$ref": "#/$defs/Lineage"
+    },
+    "thread_id": {
+      "title": "Thread Id",
+      "type": "string"
+    },
+    "timeline_head": {
+      "default": "",
+      "title": "Timeline Head",
+      "type": "string"
+    },
+    "title": {
+      "default": "",
+      "title": "Title",
+      "type": "string"
+    }
+  },
+  "required": [
+    "capsule_id",
+    "thread_id",
+    "created_at"
+  ],
+  "title": "Manifest",
+  "type": "object"
+}

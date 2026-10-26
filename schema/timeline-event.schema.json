@@ -1,0 +1,72 @@
+{
+  "$defs": {
+    "EventKind": {
+      "enum": [
+        "system",
+        "user_message",
+        "assistant_message",
+        "thought",
+        "decision",
+        "tool_call",
+        "tool_result",
+        "provider_switch",
+        "checkpoint"
+      ],
+      "title": "EventKind",
+      "type": "string"
+    }
+  },
+  "description": "One immutable entry. `prev` chains the events of a single node; `lamport`\ngives the cross-node order, so merging two timelines is a set union.",
+  "properties": {
+    "data": {
+      "additionalProperties": true,
+      "title": "Data",
+      "type": "object"
+    },
+    "hash": {
+      "default": "",
+      "title": "Hash",
+      "type": "string"
+    },
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "kind": {
+      "$ref": "#/$defs/EventKind"
+    },
+    "lamport": {
+      "minimum": 1,
+      "title": "Lamport",
+      "type": "integer"
+    },
+    "node_id": {
+      "title": "Node Id",
+      "type": "string"
+    },
+    "node_seq": {
+      "minimum": 1,
+      "title": "Node Seq",
+      "type": "integer"
+    },
+    "prev": {
+      "default": "",
+      "title": "Prev",
+      "type": "string"
+    },
+    "ts": {
+      "title": "Ts",
+      "type": "number"
+    }
+  },
+  "required": [
+    "id",
+    "node_id",
+    "node_seq",
+    "lamport",
+    "ts",
+    "kind"
+  ],
+  "title": "TimelineEvent",
+  "type": "object"
+}

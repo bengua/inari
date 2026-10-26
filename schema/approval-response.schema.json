@@ -1,0 +1,23 @@
+{
+  "properties": {
+    "approved": {
+      "title": "Approved",
+      "type": "boolean"
+    },
+    "request_id": {
+      "title": "Request Id",
+      "type": "string"
+    },
+    "signature": {
+      "title": "Signature",
+      "type": "string"
+    }
+  },
+  "required": [
+    "request_id",
+    "approved",
+    "signature"
+  ],
+  "title": "ApprovalResponse",
+  "type": "object"
+}
