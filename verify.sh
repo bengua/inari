@@ -80,6 +80,23 @@ if [ "$exempt" = 0 ]; then
 fi
 if [ "$exempt" = 1 ]; then echo "OK  shape (template: content checks skipped)"; else echo "OK  shape"; fi
 
+# 3b. Rust: the core being ported. The runner image does not carry a toolchain yet,
+#     so CI installs the one rust-toolchain.toml pins (minimal profile) on the fly.
+#     The binary is built before pytest, which runs the Python/Rust interoperability tests.
+if [ -f Cargo.toml ]; then
+  if ! command -v cargo >/dev/null; then
+    [ "${CI:-}" = true ] || [ "${GITHUB_ACTIONS:-}" = true ] || ROUGE "cargo absent: install rustup"
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none >/dev/null || ROUGE "rustup install failed"
+    . "$HOME/.cargo/env"
+  fi
+  cargo fmt --all -- --check || ROUGE "rustfmt"
+  cargo clippy --all-targets --quiet -- -D warnings || ROUGE "clippy"
+  cargo test --quiet || ROUGE "cargo test"
+  cargo build --quiet || ROUGE "cargo build"
+  export INARI_RS_BIN="$DIR/target/debug/inari-core-rs"
+  echo "OK  code (rust: rustfmt, clippy, tests, build)"
+fi
+
 # 4. Code: whichever this repository actually ships. A repository with no
 #    pyproject.toml and no package.json ships no code (a documentation
 #    repository says so in its README, per docs/CONVENTIONS.md section 5).
