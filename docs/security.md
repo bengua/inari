@@ -33,18 +33,37 @@ stored in each side's keychain).
 Biometric confirmation is the phone's job (it gates use of the key); the node only
 checks the signature.
 
+## Approvals over the bus
+
+`NodeApprovals.ask(...)` publishes `approval.request` and waits; `PhoneApprover`
+answers on `approval.response` with the signed verdict. Both subjects are durable:
+a phone that was offline receives the question when it reconnects, and an answer
+that arrives after the expiry is refused. A server that expects the phone should
+list it in `BusServer(expected_peers=...)` so the question queues before the first
+visit.
+
 ## Integrity
 
 Capsule digests and the per-node hash chains detect accidental damage and
 tampering **by anyone without the ability to rewrite the whole capsule**. They are
-not signatures. If capsules cross a trust boundary, add a detached signature over
-`manifest.json`; the format leaves room for it (`manifest.json` is not itself
-digested).
+not signatures. When a capsule crosses a trust boundary, sign it:
+
+    inari-core keygen me                      # me.key (keep private), me.pub
+    inari-core sign capsule/ --key me.key
+    inari-core verify capsule/ --trusted me.pub
+
+The Ed25519 signature (extra `inari-core[signing]`) covers the bytes of
+`manifest.json`, which digests every file and the journal, so any change breaks it.
+It lives in `signature/`, outside the manifest's digests. It attests an exported
+state: a capsule that keeps running changes its holder and journal and must be
+signed again.
 
 Archives are extracted with traversal protection; the workspace restore refuses
 paths that leave the target directory.
 
 ## Not covered
 
-Authentication and encryption of links (delegated to the private network or the
-chosen bus), sandbox isolation (the runtime's job), and key rotation.
+Encryption of links (the TCP transport authenticates and signs every frame but does
+not encrypt: run it over WireGuard, Tailscale or a TLS tunnel), and key rotation.
+The container runtime drops capabilities and the network by default; it is only as
+strong as the engine under it.

@@ -70,7 +70,7 @@ def _scan(root: Path) -> dict[str, FileDigest]:
     files: dict[str, FileDigest] = {}
     for path in sorted(p for p in root.rglob("*") if p.is_file()):
         rel = path.relative_to(root).as_posix()
-        if rel == MANIFEST or rel.endswith(".part"):
+        if rel == MANIFEST or rel.startswith("signature/") or rel.endswith(".part"):
             continue
         data = path.read_bytes()
         files[rel] = FileDigest(sha256=sha256_hex(data), size=len(data))
