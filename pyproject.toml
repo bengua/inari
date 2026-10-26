@@ -1,0 +1,45 @@
+# Delete this file entirely if the repository ships no code. A documentation
+# repository declares nothing and says so in its README; the Shape check skips
+# both the license-agreement step and this file's checks when it is absent.
+#
+# `license` must name the same license whose full text is in LICENSE. The Shape
+# check compares them, because a repository that declares AGPL and ships only
+# the short notice satisfies neither the declaration nor the license.
+#
+# `name` must be changed. Until September 2026 this template declared
+# `name = "ace-agent"` with the description of an unrelated project, and every
+# repository generated from it inherited that. The Shape check now refuses a
+# pyproject still carrying the placeholder.
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "CHANGE-ME"
+version = "0.1.0"
+description = "One sentence, English, saying what this delivers."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "Zordur" }]
+dependencies = []
+
+[project.optional-dependencies]
+# ruff is PINNED so the CI (uv run ruff, from this synced env) and the coder
+# (uv run ruff in the same repo) agree exactly — an unpinned ruff drifts and a
+# run that passed then fails CI. Canonical value also in the Ansible role
+# (claude_ruff_version); bump both together.
+dev = ["ruff==0.16.6", "pytest>=8"]
+
+# Anything a human runs belongs here. Code invoked by file path cannot be
+# versioned, installed, upgraded or rolled back — see docs/CONVENTIONS.md
+# section 5. Delete this table only if the repository truly exposes no command.
+[project.scripts]
+# tool-name = "package.module:main"
+
+[tool.setuptools]
+packages = []
+
+[tool.ruff]
+line-length = 88

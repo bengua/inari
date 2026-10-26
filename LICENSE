@@ -1,0 +1,32 @@
+CHOOSE-A-LICENSE
+
+This file is a placeholder. CI fails while the marker on the first line is
+still here, so a repository cannot reach `main` without a license. That is
+deliberate: eight of the eleven repositories that existed before this template
+had none, and none of them was left unlicensed on purpose — the omission was
+simply never blocked by anything.
+
+Replace this entire file with the full text of one of three licenses, chosen by
+what the repository is. See `docs/CONVENTIONS.md` section 3.
+
+  AGPL-3.0-or-later   software that can be run as a hosted service
+  MIT                 tooling meant to be copied and adapted
+  CC-BY-SA-4.0        documentation, not code
+
+Two things are easy to get wrong here:
+
+1. Copy the *full text*, not the short notice. A file containing only "This
+   program is free software: you can redistribute it..." is the notice that
+   belongs in source headers. The AGPL and the GPL both require their terms to
+   accompany the work.
+
+2. The `Copyright (c)` line names a holder that can enforce it:
+
+     FreedzHost SASU        the harness and the fleet tooling
+     Benoit Guarnaccia      the personal projects
+
+   `Zordur` is the public identity in README.md and pyproject.toml authors. It
+   is a signature, not a title.
+
+Whatever you choose here must match what `pyproject.toml` declares in its
+`license` field. CI checks that the two agree.

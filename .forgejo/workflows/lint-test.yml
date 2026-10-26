@@ -1,0 +1,19 @@
+# The fleet's common workflow (PLAN-BUILD-UNIQUE §2, in postes): it knows
+# nothing about the repository it runs in. Everything specific lives in
+# ./verify.sh, the same file one runs by hand before pushing, on a runner
+# image that already carries the tooling (postes/runner, fh-runner). Its
+# context, `CI / lint-test`, is the one main's protection requires.
+#
+# Byte-identical across the fleet, on purpose: the collector compares each
+# repository's copy with the template's and names whoever drifted (the
+# `workflows` key of the snapshot). A change here is a change everywhere —
+# that is the point, and the reason nothing repository-specific belongs here.
+name: CI
+on: [push, pull_request]
+
+jobs:
+  lint-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@v4
+      - run: ./verify.sh
