@@ -157,4 +157,40 @@ def make_provider(cfg: ProviderConfig, resolver: SecretResolver) -> Provider:
         return OpenAIProvider(cfg, resolver)
     if cfg.kind == "anthropic":
         return AnthropicProvider(cfg, resolver)
+    if cfg.kind == "demo":
+        return DemoProvider()
     raise ValueError(f"unknown provider kind {cfg.kind!r}")
+
+
+class DemoProvider:
+    """No model, no network: answers from rules. For demos and tests of the whole stack.
+    `run: <cmd>` calls bash, `write <name>: <text>` writes a file; anything else is echoed."""
+
+    kind = "openai"
+
+    def __init__(self, *_: object) -> None:
+        pass
+
+    async def complete(self, rendered: dict[str, Any], tools: list[ToolSpec]) -> Completion:
+        messages = rendered["messages"]
+        last = messages[-1]
+        if last["role"] == "tool":
+            return Completion(f"Done. Output: {str(last['content'])[:200]}")
+        text = str(last.get("content") or "")
+        if text.startswith("run:"):
+            return Completion(
+                "", [ToolCall(uuid.uuid4().hex[:10], "bash", {"cmd": text[4:].strip()})]
+            )
+        if text.startswith("write "):
+            name, _, body = text[6:].partition(":")
+            return Completion(
+                "",
+                [
+                    ToolCall(
+                        uuid.uuid4().hex[:10],
+                        "write_file",
+                        {"path": name.strip(), "content": body.strip()},
+                    )
+                ],
+            )
+        return Completion(f"You said: {text}")

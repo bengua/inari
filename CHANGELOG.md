@@ -9,6 +9,13 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Added
 
+- **Agent driver**: OpenAI-compatible and Anthropic providers, workspace-confined tools, the
+  loop that journals every step, honours a freeze at step boundaries and asks the phone for
+  guarded commands.
+- **Node daemon** (`inari-core node`), hub or worker, over TCP; the gateway now creates
+  agents, sends messages, forks, merges and searches. The web page gains a composer, fork,
+  merge, new-agent and search.
+- Fork at an event, merge by journal union, journal search.
 - **Web interface and gateway**: node/agent graph with drag-to-teleport, journal tree,
   live orb, approvals, phone layout; `inari-core demo` and `inari-core gateway`.
 - **Transport**: authenticated TCP framing, bus links with durable replay, remote

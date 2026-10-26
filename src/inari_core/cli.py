@@ -37,6 +37,8 @@ def main(argv: list[str] | None = None) -> int:
     demo = sub.add_parser("demo", help="run a simulated mesh with the web interface")
     demo.add_argument("--port", type=int, default=8787)
     demo.add_argument("--token", default="demo")
+    node = sub.add_parser("node", help="run a mesh node from a JSON config file")
+    node.add_argument("--config", type=Path, required=True)
     gw = sub.add_parser("gateway", help="serve the web interface for a real mesh")
     gw.add_argument("--connect", required=True, help="HOST:PORT of a bus server")
     gw.add_argument("--key-file", type=Path, required=True, help="shared mesh key")
@@ -62,6 +64,26 @@ def main(argv: list[str] | None = None) -> int:
 
         try:
             asyncio.run(run_demo(port=args.port, token=args.token))
+        except KeyboardInterrupt:
+            pass
+        return 0
+    if args.cmd == "node":
+        import asyncio
+
+        from .node import Node, NodeConfig
+
+        async def serve_node() -> None:
+            node = Node(NodeConfig.load(args.config))
+            await node.start()
+            where = f"endpoint :{node.endpoint_port}" + (
+                f", bus :{node.bus_port}" if node.is_hub else ""
+            )
+            gateway = f", gateway :{node.gateway.port}" if node.gateway else ""
+            print(f"node {node.cfg.node_id} up ({where}{gateway})", flush=True)
+            await asyncio.Event().wait()
+
+        try:
+            asyncio.run(serve_node())
         except KeyboardInterrupt:
             pass
         return 0

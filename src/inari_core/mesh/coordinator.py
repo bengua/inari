@@ -4,6 +4,7 @@ the next round of heartbeats (crash-only)."""
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -26,6 +27,7 @@ class MeshCoordinator:
         self.bus, self.registry, self.teleporter = bus, registry, teleporter
         self.telemetry = telemetry or Telemetry()
         self._busy: set[str] = set()
+        self._tasks: set[asyncio.Task] = set()
 
     def start(self) -> None:
         self.bus.subscribe("node.announce", self._on_node)
@@ -66,8 +68,13 @@ class MeshCoordinator:
             return "this agent is already moving"
         return ""
 
-    async def _on_teleport_request(self, message: Message) -> None:
-        p = message.payload
+    def _on_teleport_request(self, message: Message) -> None:
+        # Detached: a move takes long and must not stall the link that delivered it.
+        task = asyncio.create_task(self._handle_teleport(message.payload))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def _handle_teleport(self, p: dict[str, Any]) -> None:
         refusal = self._refusal(p)
         if refusal:
             await self.bus.publish(

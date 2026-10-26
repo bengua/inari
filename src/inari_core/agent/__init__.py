@@ -20,6 +20,7 @@ __all__ = [
     "AgentRunner",
     "AnthropicProvider",
     "Completion",
+    "DemoProvider",
     "OpenAIProvider",
     "Provider",
     "ProviderConfig",

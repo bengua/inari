@@ -161,6 +161,10 @@ async def test_the_coordinator_refuses_a_phone_as_target_and_dead_nodes(tmp_path
             "teleport.request",
             {"request": target, "agent": "a", "source": "big", "target": target},
         )
+    for _ in range(50):
+        if len(replies) == 2:
+            break
+        await asyncio.sleep(0.02)  # the handler runs detached
     assert [r["ok"] for r in replies] == [False, False]
     assert "heavy" in replies[0]["error"] and "alive" in replies[1]["error"]
 
