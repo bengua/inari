@@ -234,3 +234,26 @@ async def test_python_and_rust_buses_exchange_messages_both_ways(tmp_path):
         assert {"cmd": "ls"} in seen
     finally:
         await server.stop()
+
+
+def test_a_rust_turn_sends_the_photo_and_python_reads_the_journal(tmp_path):
+    capsule = make_capsule(tmp_path / "py")
+    node = tmp_path / "node"
+    agent = rs("adopt", node, "n-rs", capsule.root).stdout.strip()
+    photo = tmp_path / "photo.png"
+    photo.write_bytes(b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR")
+    log = tmp_path / "acp.log"
+    fake = ["env", f"FAKE_ACP_LOG={log}", "FAKE_ACP_IMAGES=1"]
+    fake += ["python3", ROOT / "tests/fake_acp.py"]
+    out = rs("turn", node, "n-rs", agent, "what is this", photo, "--", *fake)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert json.loads(out.stdout)["text"].startswith("fake reply to:")
+    sent = json.loads(log.read_text().splitlines()[-1])
+    assert sent["blocks"] == ["text", "image"]
+    held = node / "agents" / agent
+    assert verify(held) == []
+    events = load(held).timeline.ordered()
+    user = next(e for e in events if e.kind == EventKind.USER_MESSAGE and e.data.get("attachments"))
+    assert user.data["attachments"][0]["mime"] == "image/png"
+    assert events[-1].kind == EventKind.ASSISTANT_MESSAGE
+    assert "photo.png" in load(held).snapshot.tree

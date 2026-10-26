@@ -9,6 +9,10 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Added
 
+- **Rust port, step 3**: the ACP harness and the runner turn in Rust. Photos the person
+  attaches reach the model as images (Claude, Gemini), other files as links into the workspace;
+  permission requests go through the approver; a freeze cancels the turn; a new session on
+  another node is primed with the journal (`inari-core-rs turn`).
 - **Rust port, step 2b**: event bus and TCP bus links (durable subjects replayed, duplicates
   dropped, expected peers queue before their first visit), fork and merge, and `clone_to`: copy
   an agent, give the copy another harness, send it to another core; the original stays.

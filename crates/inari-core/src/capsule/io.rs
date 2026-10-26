@@ -275,3 +275,55 @@ pub fn create(
     seal(root, manifest, timeline)?;
     load(root)
 }
+
+/// Recreate the capsule's workspace in `dest`, refusing paths that would leave it.
+pub fn materialize(root: &Path, dest: &Path) -> Result<()> {
+    let capsule = load(root)?;
+    fs::create_dir_all(dest)?;
+    for (name, sha) in &capsule.snapshot.tree {
+        let rel = safe_relative(name)
+            .ok_or_else(|| Error::Integrity(format!("path escapes the workspace: {name}")))?;
+        let data = fs::read(root.join(BLOBS).join(sha))?;
+        if sha256_hex(&data) != *sha {
+            return Err(Error::Integrity(format!(
+                "blob {} is corrupt",
+                &sha[..12.min(sha.len())]
+            )));
+        }
+        let target = dest.join(rel);
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(target, data)?;
+    }
+    Ok(())
+}
+
+/// Record `workdir` as the capsule's new snapshot (only new content adds a blob) and reseal.
+pub fn update_snapshot(root: &Path, workdir: &Path) -> Result<Capsule> {
+    let capsule = load(root)?;
+    let mut files = Vec::new();
+    if workdir.is_dir() {
+        walk(workdir, &mut files)?;
+    }
+    let mut tree = BTreeMap::new();
+    for path in files {
+        let data = fs::read(&path)?;
+        let sha = sha256_hex(&data);
+        let blob = root.join(BLOBS).join(&sha);
+        if !blob.is_file() {
+            atomic_write(&blob, &data)?;
+        }
+        tree.insert(rel(workdir, &path), sha);
+    }
+    let snapshot = Snapshot {
+        parent: Some(capsule.snapshot.digest()),
+        tree,
+    };
+    atomic_write(
+        &root.join(SNAPSHOT),
+        serde_json::to_string_pretty(&snapshot)?.as_bytes(),
+    )?;
+    seal(root, capsule.manifest, &capsule.timeline)?;
+    load(root)
+}
