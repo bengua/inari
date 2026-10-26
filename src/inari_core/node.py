@@ -11,6 +11,7 @@ import json
 import os
 import shutil
 import time
+import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,7 @@ from .sandbox import ContainerRuntime, SubprocessRuntime
 from .secrets import EnvResolver
 from .teleport import CapsuleHost, teleport
 from .transport import BusClient, BusServer, EndpointServer, RemoteEndpoint
+from .usage import CloudroomUsageSource, StaticUsageSource
 
 
 @dataclass
@@ -48,6 +50,9 @@ class NodeConfig:
     engine: str = "podman"
     gateway_listen: str = ""  # HOST:PORT, hub only
     gateway_token_file: Path | None = None
+    gateway_ui: dict = field(default_factory=dict)  # {"footer": "..."}
+    mascot_dir: Path | None = None  # a sprite engine folder served at /fox/ (optional)
+    usage: list[dict] = field(default_factory=list)  # quota sources, see docs/node.md
     heartbeat: float = 2.0
     registry_ttl: float = 8.0
 
@@ -55,7 +60,7 @@ class NodeConfig:
     def load(cls, path: Path) -> NodeConfig:
         raw = json.loads(Path(path).read_text())
         provider = ProviderConfig(**raw.pop("provider", {}))
-        for key in ("data_dir", "key_file", "device_key_file", "gateway_token_file"):
+        for key in ("data_dir", "key_file", "device_key_file", "gateway_token_file", "mascot_dir"):
             if raw.get(key):
                 raw[key] = Path(raw[key])
         return cls(provider=provider, **raw)
@@ -139,7 +144,22 @@ class Node:
         self._subscribe()
         if self.is_hub and cfg.gateway_listen:
             token = cfg.gateway_token_file.read_text().strip() if cfg.gateway_token_file else ""
-            self.gateway = Gateway(self.bus, token=token, device_key=self.device_key)
+            sources = []
+            for spec in cfg.usage:
+                if spec.get("kind") == "cloudroom":
+                    sources.append(
+                        CloudroomUsageSource(spec["url"], list(spec.get("providers", [])))
+                    )
+                elif spec.get("kind") == "static":
+                    sources.append(StaticUsageSource(list(spec.get("items", []))))
+            self.gateway = Gateway(
+                self.bus,
+                token=token,
+                device_key=self.device_key,
+                ui=cfg.gateway_ui,
+                mascot_dir=cfg.mascot_dir,
+                usage_sources=sources,
+            )
             lhost, _, lport = cfg.gateway_listen.rpartition(":")
             await self.gateway.start(lhost, int(lport))
         self._tasks.append(asyncio.create_task(self._beat()))
@@ -196,6 +216,30 @@ class Node:
                     await self.bus.publish("node.lost", {"node": node_id})
             await asyncio.sleep(cfg.heartbeat)
 
+    async def _models(self) -> list[str]:
+        cfg = self.cfg
+        try:
+            if cfg.harness.get("kind") == "acp" and isinstance(self.runner.harness, AcpHarness):
+                scratch = cfg.data_dir / "scratch"
+                scratch.mkdir(parents=True, exist_ok=True)
+                return await self.runner.harness.list_models(scratch)
+            if cfg.provider.base_url:
+                url = cfg.provider.base_url.rstrip("/") + "/models"
+                headers = {}
+                key = (
+                    EnvResolver().get(cfg.provider.api_key_ref)
+                    if cfg.provider.api_key_ref
+                    else None
+                )
+                if key:
+                    headers["Authorization"] = f"Bearer {key}"
+                req = urllib.request.Request(url, headers=headers)
+                raw = await asyncio.to_thread(lambda: urllib.request.urlopen(req, timeout=8).read())
+                return [m["id"] for m in json.loads(raw).get("data", [])]
+        except (OSError, ValueError, KeyError, AttributeError):
+            pass
+        return [cfg.provider.model] if cfg.provider.model else []
+
     def _meta(self, agent: str) -> dict:
         """What a card shows about an agent: cheap facts from its capsule."""
         try:
@@ -210,6 +254,7 @@ class Node:
             "files": len(capsule.snapshot.tree),
             "last": event_text(last.data)[:160] if last else "",
             "harness": self.cfg.harness.get("kind") or self.cfg.provider.kind or "none",
+            "model": capsule.manifest.labels.get("model", ""),
         }
 
     def _held(self) -> list[str]:
@@ -227,6 +272,8 @@ class Node:
         self.bus.subscribe("agent.files.request", self._on_files)
         self.bus.subscribe("agent.file.request", self._on_file)
         self.bus.subscribe("agent.exec.request", self._on_exec)
+        self.bus.subscribe("agent.upload.request", self._on_upload)
+        self.bus.subscribe("agent.*.model", self._on_model)
 
     async def _announce_created(self, agent: str, ok: bool = True, error: str = "") -> None:
         await self.bus.publish(
@@ -259,10 +306,10 @@ class Node:
         agent = m.subject.split(".")[1]
         if self.runner is None or self.host.status(agent) != "running":
             return
-        self._spawn(self._run_turn(agent, str(m.payload["text"])))
+        self._spawn(self._run_turn(agent, str(m.payload["text"]), str(m.payload.get("model", ""))))
 
-    async def _run_turn(self, agent: str, text: str) -> None:
-        summary = await self.runner.run(agent, text)
+    async def _run_turn(self, agent: str, text: str, model: str = "") -> None:
+        summary = await self.runner.run(agent, text, model)
         await self.bus.publish(
             f"agent.{agent}.done",
             {
@@ -363,3 +410,21 @@ class Node:
         except Exception as exc:  # noqa: BLE001 - the person gets the reason, not silence
             result = {"ok": False, "output": f"{type(exc).__name__}: {exc}", "code": -1}
         await self.bus.publish(reply, {"agent": agent, **result})
+
+    async def _on_upload(self, m) -> None:
+        agent = str(m.payload["agent"])
+        if self.runner is None or self.host.status(agent) != "running":
+            return
+        try:
+            result = await self.runner.upload(
+                agent, str(m.payload["path"]), base64.b64decode(m.payload["b64"])
+            )
+        except Exception as exc:  # noqa: BLE001
+            result = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        await self.bus.publish(m.payload["reply"], {"agent": agent, **result})
+
+    async def _on_model(self, m) -> None:
+        agent = m.subject.split(".")[1]
+        if self.runner is None or self.host.status(agent) != "running":
+            return
+        self.runner.set_model(agent, str(m.payload["model"]))

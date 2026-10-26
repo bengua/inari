@@ -12,10 +12,13 @@ import asyncio
 import hmac
 import importlib.resources
 import json
+import mimetypes
 import time
+import urllib.request
 import uuid
 from collections.abc import Callable
 from dataclasses import asdict
+from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
@@ -23,6 +26,7 @@ from .approvals import ApprovalRequest, ApprovalResponse, sign
 from .errors import TransportError
 from .mesh.bus import Bus, Message, request
 from .mesh.telemetry import Telemetry, mascot_state
+from .usage import poll
 
 MAX_BODY = 64 * 1024
 TimelineReader = Callable[[str], list[dict[str, Any]]]
@@ -36,10 +40,21 @@ class Gateway:
         token: str,
         device_key: bytes,
         timeline_reader: TimelineReader | None = None,
+        ui: dict[str, Any] | None = None,
+        mascot_dir: Path | None = None,
+        usage_sources: list | None = None,
+        usage_interval: float = 60.0,
     ) -> None:
         self.bus, self.token, self._key = bus, token, device_key
         self.timeline_reader = timeline_reader
         self.log: dict[str, list[dict[str, Any]]] = {}
+        self.ui = {"footer": "", **(ui or {})}
+        self.mascot_dir = Path(mascot_dir) if mascot_dir else None
+        self.usage: list[dict[str, Any]] = []
+        self.usage_sources = usage_sources or []
+        self.usage_interval = usage_interval
+        self._usage_task: asyncio.Task | None = None
+        self._logo_cache: dict[str, tuple[str, bytes]] = {}
         self.notices: list[dict[str, Any]] = []
         self.moves: dict[str, dict[str, Any]] = {}
         self._holder: dict[str, str] = {}
@@ -79,6 +94,8 @@ class Gateway:
             "mascot": mascot,
             "results": self.results[-5:],
             "notices": self.notices[-5:],
+            "usage": self.usage,
+            "ui": {**self.ui, "mascot": self.mascot_dir is not None},
             "approvals": [r.model_dump(mode="json") for r in self.approvals.values()],
         }
 
@@ -210,9 +227,19 @@ class Gateway:
     async def start(self, host: str = "127.0.0.1", port: int = 0) -> int:
         self._server = await asyncio.start_server(self._serve, host, port)
         self.port = self._server.sockets[0].getsockname()[1]
+        if self.usage_sources:
+            self._usage_task = asyncio.create_task(
+                poll(self.usage_sources, self.usage_interval, self._set_usage)
+            )
         return self.port
 
+    async def _set_usage(self, items: list[dict[str, Any]]) -> None:
+        self.usage = items
+        self._push()
+
     async def stop(self) -> None:
+        if self._usage_task:
+            self._usage_task.cancel()
         if self._server:
             self._server.close()
             self._clients.clear()
@@ -268,6 +295,8 @@ class Gateway:
         if method == "GET" and path == "/":
             page = importlib.resources.files("inari_core").joinpath("web/index.html").read_bytes()
             return await self._send(writer, 200, "text/html; charset=utf-8", page)
+        if method == "GET" and path.startswith("/fox/") and self.mascot_dir is not None:
+            return await self._static(writer, self.mascot_dir, path[len("/fox/") :] or "index.html")
         if not self._authorized(headers, query):
             return await self._json(writer, 401, {"error": "unauthorized"})
         if method == "GET" and path == "/events":
@@ -286,6 +315,8 @@ class Gateway:
             return await self._json(
                 writer, 200, await self._ask("agent.file.request", want) or {"text": ""}
             )
+        if method == "GET" and path.startswith("/api/logo/"):
+            return await self._logo(writer, path.rsplit("/", 1)[1])
         if method == "GET" and path == "/api/search":
             return await self._json(
                 writer,
@@ -309,6 +340,18 @@ class Gateway:
                     return await self._json(
                         writer, 200, reply or {"ok": False, "output": "no answer"}
                     )
+                if path == "/api/upload":
+                    reply = await self._ask(
+                        "agent.upload.request",
+                        {k: str(data[k]) for k in ("agent", "path", "b64")},
+                        timeout=30.0,
+                    )
+                    return await self._json(writer, 200, reply or {"ok": False})
+                if path == "/api/model":
+                    await self.bus.publish(
+                        f"agent.{data['agent']}.model", {"model": str(data["model"])}
+                    )
+                    return await self._json(writer, 200, {"ok": True})
                 if path == "/api/agent":
                     await self.bus.publish(
                         "agent.create",
@@ -339,6 +382,46 @@ class Gateway:
             except (KeyError, ValueError):
                 return await self._json(writer, 400, {"error": "bad request"})
         await self._json(writer, 404, {"error": "not found"})
+
+    async def _static(self, writer, root: Path, rel: str) -> None:
+        """Serve a file under `root`, never outside it. Streamed: sprite sets are large."""
+        target = (root / rel).resolve()
+        if root.resolve() not in target.parents or not target.is_file():
+            return await self._json(writer, 404, {"error": "not found"})
+        ctype = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+        writer.write(
+            (
+                f"HTTP/1.1 200 OK\r\nContent-Type: {ctype}\r\n"
+                f"Content-Length: {target.stat().st_size}\r\n"
+                "Cache-Control: max-age=3600\r\nX-Content-Type-Options: nosniff\r\n"
+                "Connection: close\r\n\r\n"
+            ).encode()
+        )
+        with target.open("rb") as fh:
+            while chunk := fh.read(65536):
+                writer.write(chunk)
+                await writer.drain()
+
+    async def _logo(self, writer, family: str) -> None:
+        """Provider logos live on the usage source's server: fetched once, served from here."""
+        if family not in self._logo_cache:
+            for source in self.usage_sources:
+                url = getattr(source, "logos", {}).get(family)
+                if url:
+                    try:
+                        raw = await asyncio.to_thread(
+                            lambda u=url: urllib.request.urlopen(u, timeout=10).read()
+                        )
+                        self._logo_cache[family] = (
+                            "image/svg+xml" if raw[:5] != b"\x89PNG\r" else "image/png",
+                            raw,
+                        )
+                    except (OSError, ValueError):
+                        pass
+        if family not in self._logo_cache:
+            return await self._json(writer, 404, {"error": "no logo"})
+        ctype, raw = self._logo_cache[family]
+        await self._send(writer, 200, ctype, raw)
 
     async def _events(self, writer) -> None:
         queue: asyncio.Queue[str] = asyncio.Queue(maxsize=50)

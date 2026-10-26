@@ -79,7 +79,7 @@ class OpenAIProvider:
     async def complete(self, rendered, tools) -> Completion:
         messages = rendered["messages"]  # the journal's system text is its first message
         body: dict[str, Any] = {
-            "model": self.cfg.model,
+            "model": rendered.get("model") or self.cfg.model,
             "messages": messages,
             "max_tokens": self.cfg.max_tokens,
         }
@@ -125,7 +125,7 @@ class AnthropicProvider:
 
     async def complete(self, rendered, tools) -> Completion:
         body: dict[str, Any] = {
-            "model": self.cfg.model,
+            "model": rendered.get("model") or self.cfg.model,
             "max_tokens": self.cfg.max_tokens,
             "system": rendered.get("system", ""),
             "messages": rendered["messages"],
