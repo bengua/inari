@@ -10,6 +10,7 @@ from .io import (
     seal,
     set_holder,
     unpack,
+    update_snapshot,
     verify,
 )
 from .models import (
@@ -53,5 +54,6 @@ __all__ = [
     "set_holder",
     "snapshot_tree",
     "unpack",
+    "update_snapshot",
     "verify",
 ]
