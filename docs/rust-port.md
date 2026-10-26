@@ -27,8 +27,8 @@ Rust nodes and move machine by machine.
 |---|---|---|
 | 1 | Capsule: canonical JSON, journal, manifest, verify, pack/unpack, workspace attachments, uploads in parts | done |
 | 2a | Transport (authenticated frames), capsule host, teleportation with fencing, endpoint server and client — Python and Rust nodes teleport agents to each other over TCP | done |
-| 2b | Bus links, fork/merge, and **clone to another core with another harness** (fork, switch harness, teleport the copy; the original stays) | next |
-| 3 | ACP harness, with attachments passed to the model: images as image content to Claude and Gemini, PDFs and other files placed in the workspace and named in the message | |
+| 2b | Bus and TCP bus links (durable replay, duplicates dropped), fork/merge, and **clone to another core with another harness** (fork, switch harness, teleport the copy; the original stays) — Python and Rust buses linked both ways | done |
+| 3 (next) | ACP harness, with attachments passed to the model: images as image content to Claude and Gemini, PDFs and other files placed in the workspace and named in the message | |
 | 4 | Node daemon and gateway (HTTP/SSE, uploads in parts from the Android app's share sheet, camera and file picker), serving the web interface | |
 | 5 | Switch the three cores to the Rust binary, retire the Python runtime | |
 

@@ -154,7 +154,82 @@ impl Wire {
         serde_json::from_slice(&body).map_err(|e| TransportError::Lost(format!("bad frame: {e}")))
     }
 
+    /// Separate halves, so a link can read and write at the same time.
+    pub fn split(self) -> (WireReader, WireWriter) {
+        let (r, w) = self.stream.into_split();
+        (
+            WireReader {
+                half: r,
+                session: self.session.clone(),
+                seq: self.seq_in,
+            },
+            WireWriter {
+                half: w,
+                session: self.session,
+                seq: self.seq_out,
+            },
+        )
+    }
+
     pub async fn close(mut self) {
         let _ = self.stream.shutdown().await;
+    }
+}
+
+pub struct WireReader {
+    half: tokio::net::tcp::OwnedReadHalf,
+    session: Vec<u8>,
+    seq: u64,
+}
+
+pub struct WireWriter {
+    half: tokio::net::tcp::OwnedWriteHalf,
+    session: Vec<u8>,
+    seq: u64,
+}
+
+impl WireReader {
+    pub async fn recv(&mut self) -> Result<Value, TransportError> {
+        let lost = |e: std::io::Error| TransportError::Lost(format!("connection lost: {e}"));
+        let mut len = [0u8; 4];
+        self.half.read_exact(&mut len).await.map_err(lost)?;
+        let size = u32::from_be_bytes(len) as usize;
+        if size > MAX_FRAME {
+            return Err(TransportError::TooLarge);
+        }
+        let mut tag = [0u8; 32];
+        self.half.read_exact(&mut tag).await.map_err(lost)?;
+        let mut body = vec![0u8; size];
+        self.half.read_exact(&mut body).await.map_err(lost)?;
+        let expected = mac(&self.session, &[&self.seq.to_be_bytes(), &body]);
+        if tag
+            .iter()
+            .zip(expected.iter())
+            .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+            != 0
+        {
+            return Err(TransportError::BadSignature);
+        }
+        self.seq += 1;
+        serde_json::from_slice(&body).map_err(|e| TransportError::Lost(format!("bad frame: {e}")))
+    }
+}
+
+impl WireWriter {
+    pub async fn send(&mut self, obj: &Value) -> Result<(), TransportError> {
+        let body = serde_json::to_vec(obj).expect("a JSON value serializes");
+        if body.len() > MAX_FRAME {
+            return Err(TransportError::TooLarge);
+        }
+        let tag = mac(&self.session, &[&self.seq.to_be_bytes(), &body]);
+        self.seq += 1;
+        let mut frame = Vec::with_capacity(4 + 32 + body.len());
+        frame.extend_from_slice(&(body.len() as u32).to_be_bytes());
+        frame.extend_from_slice(&tag);
+        frame.extend_from_slice(&body);
+        self.half
+            .write_all(&frame)
+            .await
+            .map_err(|e| TransportError::Lost(format!("send failed: {e}")))
     }
 }

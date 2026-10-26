@@ -372,6 +372,44 @@ pub async fn resolve_in_doubt<S: Endpoint, T: Endpoint>(
     out
 }
 
+/// Copy an agent and send the copy elsewhere, with another harness if asked: the
+/// fall-back when a teleport cannot happen (the target lacks the harness, the link is
+/// unreliable) and the way to try a thread with another model without risking it.
+/// The original keeps running where it is, whatever happens to the copy.
+pub async fn clone_to<T: Endpoint>(
+    source: &crate::host::CapsuleHost,
+    target: &T,
+    agent: &str,
+    new_thread: &str,
+    harness: Option<&str>,
+) -> Outcome {
+    let staging = source.root.join("new").join(new_thread);
+    let _ = std::fs::remove_dir_all(&staging);
+    let made = (|| -> Result<String, String> {
+        crate::capsule::fork::fork(&source.agents.join(agent), &staging, new_thread, None)
+            .map_err(|e| e.to_string())?;
+        if let Some(h) = harness {
+            let capsule = crate::capsule::io::load(&staging).map_err(|e| e.to_string())?;
+            let mut manifest = capsule.manifest;
+            manifest.set_label("harness", h);
+            manifest.set_label("model", "");
+            crate::capsule::io::seal(&staging, manifest, &capsule.timeline)
+                .map_err(|e| e.to_string())?;
+        }
+        let id = source.adopt(&staging).map_err(|e| e.to_string())?;
+        let _ = std::fs::remove_dir_all(&staging);
+        Ok(id)
+    })();
+    match made {
+        Ok(id) => teleport(source, target, &id, None).await,
+        Err(e) => Outcome {
+            state: "rolled_back".into(),
+            error: format!("clone failed: {e}"),
+            ..Default::default()
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

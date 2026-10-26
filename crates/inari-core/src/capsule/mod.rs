@@ -2,6 +2,7 @@
 //! describes an agent thread. See `docs/ssc.md` for the format.
 
 pub mod attach;
+pub mod fork;
 pub mod io;
 pub mod model;
 pub mod timeline;

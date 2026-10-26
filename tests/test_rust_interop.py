@@ -157,3 +157,80 @@ async def test_a_rust_node_teleports_an_agent_to_a_python_node_over_tcp(tmp_path
         assert rs("status", tmp_path / "r", "node-r", "thread-1").stdout.strip() == "tombstoned"
     finally:
         await server.stop()
+
+
+def test_a_rust_fork_and_merge_are_valid_python_capsules(tmp_path):
+    base = make_capsule(tmp_path / "base")
+    first = base.timeline.ordered()[0].id
+    assert rs("fork", base.root, tmp_path / "child", "thread-2", first).returncode == 0
+    child = load(tmp_path / "child")
+    assert [e.id for e in child.timeline.ordered()] == [first]
+    assert child.manifest.lineage.parent_capsule == base.manifest.capsule_id
+    assert child.manifest.holder is None and verify(tmp_path / "child") == []
+    # two forks grow apart, Rust merges them, Python agrees
+    from inari_core.capsule import fork
+
+    fork(base.root, tmp_path / "a", "ta")
+    assert rs("fork", base.root, tmp_path / "b", "tb").returncode == 0
+    append_event(tmp_path / "a", "n@ta", EventKind.DECISION, {"text": "left"}, 9.0)
+    assert rs("append", tmp_path / "b", "n@tb", "decision", "right").returncode == 0
+    assert rs("merge", tmp_path / "a", tmp_path / "b").stdout.strip() == "1"
+    merged = load(tmp_path / "a")
+    assert verify(tmp_path / "a") == []
+    texts = {e.data.get("text") for e in merged.timeline.ordered()}
+    assert {"left", "right"} <= texts
+
+
+async def test_python_and_rust_buses_exchange_messages_both_ways(tmp_path):
+    import asyncio
+
+    from inari_core.mesh import Bus
+    from inari_core.transport import BusClient, BusServer
+
+    (tmp_path / "k").write_text("bus-key")
+    # Rust server, Python client: the Rust side echoes what it receives
+    proc = await asyncio.create_subprocess_exec(
+        str(BIN), "bus-echo", "rust-hub", str(tmp_path / "k"), "py-phone",
+        stdout=asyncio.subprocess.PIPE,
+    )  # fmt: skip
+    port = int((await asyncio.wait_for(proc.stdout.readline(), 10)).split()[1])
+    phone = Bus("py-phone")
+    got: asyncio.Queue = asyncio.Queue()
+    phone.subscribe("echo.>", got.put_nowait)
+    client = BusClient(phone, b"bus-key", "127.0.0.1", port, retry=0.05)
+    client.start()
+    try:
+        for _ in range(100):
+            if client.link.connected:
+                break
+            await asyncio.sleep(0.03)
+        await phone.publish("teleport.request", {"n": 42})
+        echo = await asyncio.wait_for(got.get(), 5)
+        assert echo.subject == "echo.teleport.request" and echo.payload == {"n": 42}
+    finally:
+        await client.stop()
+        proc.kill()
+        await proc.wait()
+
+    # Python server, Rust client
+    home = Bus("py-home")
+    seen = []
+    home.subscribe("approval.>", lambda m: seen.append(m.payload))
+    home.subscribe(
+        "approval.request",
+        lambda m: asyncio.ensure_future(home.publish("approval.response", {"ok": True})),
+    )
+    server = BusServer(home, b"bus-key", expected_peers=("rust-phone",))
+    port = await server.start()
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            str(BIN), "bus-say", "rust-phone", str(tmp_path / "k"), f"127.0.0.1:{port}",
+            "approval.request", '{"cmd": "ls"}', "approval.response",
+            stdout=asyncio.subprocess.PIPE,
+        )  # fmt: skip
+        out, _ = await asyncio.wait_for(proc.communicate(), 15)
+        assert proc.returncode == 0, out
+        assert json.loads(out)["payload"] == {"ok": True}
+        assert {"cmd": "ls"} in seen
+    finally:
+        await server.stop()
