@@ -50,9 +50,7 @@ def test_openai_alignment():
 def test_reasoning_is_dropped_across_providers_but_kept_within_one():
     events = journal().ordered()
     assert "private reasoning" not in json.dumps(render(events, "anthropic"))
-    assert "private reasoning" in json.dumps(
-        render(events, "anthropic", same_provider=True)
-    )
+    assert "private reasoning" in json.dumps(render(events, "anthropic", same_provider=True))
 
 
 def test_a_call_cut_short_by_a_crash_gets_an_error_result():

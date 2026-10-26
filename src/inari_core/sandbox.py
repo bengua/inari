@@ -116,9 +116,7 @@ class ContainerRuntime:
         self.volumes = volumes or {}  # logical volume name -> host directory
         self.max_output = max_output
 
-    def command(
-        self, spec: EnvironmentSpec, workdir: Path, argv: list[str]
-    ) -> list[str]:
+    def command(self, spec: EnvironmentSpec, workdir: Path, argv: list[str]) -> list[str]:
         cmd = [
             self.engine, "run", "--rm", "--interactive=false", "--cap-drop=ALL",
             "--security-opt=no-new-privileges",
@@ -129,9 +127,7 @@ class ContainerRuntime:
             cmd.append(f"--memory={spec.resources['memory']}")
         for mount in spec.mounts:
             if mount.source not in self.volumes:
-                raise KeyError(
-                    f"volume {mount.source!r} is not configured on this node"
-                )
+                raise KeyError(f"volume {mount.source!r} is not configured on this node")
             cmd += ["-v", f"{self.volumes[mount.source]}:{mount.target}:{mount.mode}"]
         for key, value in sorted(spec.env.items()):
             cmd += ["-e", f"{key}={value}"]
@@ -149,9 +145,7 @@ class ContainerRuntime:
     ) -> RunResult:
         if shutil.which(self.engine) is None:
             raise FileNotFoundError(f"{self.engine} is not installed on this node")
-        secret_env = ephemeral_env(
-            EnvironmentSpec(secret_refs=spec.secret_refs), self.resolver
-        )
+        secret_env = ephemeral_env(EnvironmentSpec(secret_refs=spec.secret_refs), self.resolver)
         env = {"PATH": SAFE_PATH, **secret_env}
         return await _exec(
             self.command(spec, workdir, argv), cwd=workdir, env=env,

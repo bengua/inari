@@ -37,9 +37,7 @@ class Rendered:
     messages: list[Message]
 
 
-def to_messages(
-    events: list[TimelineEvent], *, same_provider: bool = False
-) -> Rendered:
+def to_messages(events: list[TimelineEvent], *, same_provider: bool = False) -> Rendered:
     """Provider-neutral conversation. Reasoning is private to the model that
     produced it, so it is dropped when the provider changes."""
     system: list[str] = []
@@ -54,9 +52,7 @@ def to_messages(
                 Message(
                     "user",
                     [
-                        Block(
-                            "tool_result", text=INTERRUPTED, call_id=cid, is_error=True
-                        )
+                        Block("tool_result", text=INTERRUPTED, call_id=cid, is_error=True)
                         for cid in pending
                     ],
                 )
@@ -77,9 +73,7 @@ def to_messages(
                 text = f"[decision] {text}"
             messages.append(Message("assistant", [Block("text", text=text)]))
         elif kind is EventKind.THOUGHT and same_provider:
-            messages.append(
-                Message("assistant", [Block("text", text=str(data.get("text", "")))])
-            )
+            messages.append(Message("assistant", [Block("text", text=str(data.get("text", "")))]))
         elif kind is EventKind.TOOL_CALL:
             block = Block(
                 "tool_use",
@@ -126,9 +120,7 @@ def to_anthropic(rendered: Rendered) -> dict[str, Any]:
     """Strict user/assistant alternation, tool results inside user turns."""
     messages = _merge_same_role(rendered.messages)
     if not messages or messages[0].role != "user":
-        messages.insert(
-            0, Message("user", [Block("text", text="(conversation resumed)")])
-        )
+        messages.insert(0, Message("user", [Block("text", text="(conversation resumed)")]))
     out: list[dict[str, Any]] = []
     for message in messages:
         content: list[dict[str, Any]] = []
@@ -185,9 +177,7 @@ def to_openai(rendered: Rendered) -> dict[str, Any]:
         else:
             for b in message.blocks:
                 if b.type == "tool_result":
-                    out.append(
-                        {"role": "tool", "tool_call_id": b.call_id, "content": b.text}
-                    )
+                    out.append({"role": "tool", "tool_call_id": b.call_id, "content": b.text})
                 else:
                     out.append({"role": "user", "content": b.text})
     return {"messages": out}

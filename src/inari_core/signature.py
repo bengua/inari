@@ -22,9 +22,7 @@ def _crypto():
         from cryptography.hazmat.primitives import serialization
         from cryptography.hazmat.primitives.asymmetric import ed25519
     except ImportError as exc:  # pragma: no cover - depends on the extra
-        raise RuntimeError(
-            "install inari-core[signing] to sign or check signatures"
-        ) from exc
+        raise RuntimeError("install inari-core[signing] to sign or check signatures") from exc
     return serialization, ed25519
 
 
@@ -45,17 +43,13 @@ def key_id(public_b64: str) -> str:
 
 
 def _payload(root: Path) -> bytes:
-    return canonical(
-        {"manifest_sha256": sha256_hex((root / "manifest.json").read_bytes())}
-    )
+    return canonical({"manifest_sha256": sha256_hex((root / "manifest.json").read_bytes())})
 
 
 def sign_capsule(root: Path, private_b64: str) -> str:
     """Write the signature; returns the signer's key id."""
     _, ed25519 = _crypto()
-    private = ed25519.Ed25519PrivateKey.from_private_bytes(
-        base64.b64decode(private_b64)
-    )
+    private = ed25519.Ed25519PrivateKey.from_private_bytes(base64.b64decode(private_b64))
     from cryptography.hazmat.primitives import serialization
 
     pub = base64.b64encode(

@@ -26,12 +26,15 @@ inari-core = "inari_core.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+inari_core = ["web/*.html"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.ruff]
-line-length = 88
+line-length = 100
 src = ["src", "tests"]
 
 [tool.ruff.lint]

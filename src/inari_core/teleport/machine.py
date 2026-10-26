@@ -65,8 +65,6 @@ class Machine:
         try:
             self.state = TRANSITIONS[(self.state, event)]
         except KeyError:
-            raise IllegalTransition(
-                f"{event!r} is not allowed in {self.state}"
-            ) from None
+            raise IllegalTransition(f"{event!r} is not allowed in {self.state}") from None
         self.history.append(self.state)
         return self.state

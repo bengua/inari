@@ -19,7 +19,7 @@ specification of the interfaces that sit on top.
 | Teleportation: two-phase commit with a fencing epoch, rollback, in-doubt resolution | `src/inari_core/teleport`, [docs/teleport.md](docs/teleport.md) | implemented, tested with injected faults |
 | Mesh: embedded bus, durable links, discovery, coordinator, telemetry → mascot | `src/inari_core/mesh`, [docs/mesh.md](docs/mesh.md) | implemented, tested |
 | BYOK secrets, signed one-gesture approvals | `secrets.py`, `approvals.py`, [docs/security.md](docs/security.md) | implemented, tested |
-| Desktop spatial graph and mobile client | [docs/ux.md](docs/ux.md) | specification only, on purpose |
+| Gateway (HTTP/SSE) and the web client: spatial graph, orb, approvals, phone layout | `gateway.py`, `demo.py`, `web/`, [docs/ux.md](docs/ux.md) | implemented; drag-to-teleport checked in a real browser |
 | Authenticated TCP transport (bus links, remote endpoints), sandbox runtimes | `src/inari_core/transport`, `sandbox.py` | implemented, tested on loopback |
 | Capsule signatures (Ed25519), approvals over the bus | `signature.py`, `approval_bus.py` | implemented, tested |
 | NATS / Zenoh adapters | — | not written: same two seams (`Link`, `Endpoint`) |
@@ -33,6 +33,7 @@ Read [docs/architecture.md](docs/architecture.md) first.
     uv run inari-core schema schema      # regenerate the JSON Schemas
     uv run inari-core verify  some.ssc   # check any capsule, directory or archive
     uv run inari-core inspect some.ssc
+    uv run inari-core demo               # simulated mesh + web interface on :8787
 
 A capsule is a plain tar of JSON and Markdown files: `tar xf some.ssc` and read it
 with any editor.

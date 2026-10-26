@@ -138,9 +138,7 @@ class EnvironmentSpec(BaseModel):
     def _no_secret_in_env(cls, value: dict[str, str]) -> dict[str, str]:
         bad = sorted(k for k in value if SECRET_NAME.search(k))
         if bad:
-            raise ValueError(
-                f"{bad}: secrets go in secret_refs and are injected at run time"
-            )
+            raise ValueError(f"{bad}: secrets go in secret_refs and are injected at run time")
         return value
 
 

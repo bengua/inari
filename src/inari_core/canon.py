@@ -9,9 +9,9 @@ from typing import Any
 
 def canonical(value: Any) -> bytes:
     """Serialize `value` so equal values always yield identical bytes."""
-    return json.dumps(
-        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-    ).encode("utf-8")
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
+        "utf-8"
+    )
 
 
 def sha256_hex(data: bytes) -> str:

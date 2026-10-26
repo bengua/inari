@@ -118,11 +118,7 @@ class CapsuleHost:
     # -- source side ---------------------------------------------------------
     async def freeze(self, agent_id: str) -> FrozenAgent:
         record = self._records().get(agent_id)
-        if (
-            not record
-            or record["holder"] != self.node_id
-            or record["status"] != "running"
-        ):
+        if not record or record["holder"] != self.node_id or record["status"] != "running":
             raise InariError(f"{agent_id} is not running here")
         path = self.agents / agent_id
         capsule_io.append_event(
@@ -156,11 +152,7 @@ class CapsuleHost:
         stage.mkdir(parents=True)
         (stage / "manifest.json").write_text(manifest.model_dump_json(indent=2))
         self._sessions[session_id] = (manifest.thread_id, epoch)
-        wanted = [
-            rel[len(BLOB_PREFIX) :]
-            for rel in manifest.files
-            if rel.startswith(BLOB_PREFIX)
-        ]
+        wanted = [rel[len(BLOB_PREFIX) :] for rel in manifest.files if rel.startswith(BLOB_PREFIX)]
         return self.store.have(wanted)
 
     async def receive(self, session_id: str, rel: str, data: bytes) -> None:

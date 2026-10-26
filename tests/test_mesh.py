@@ -95,9 +95,7 @@ def test_registries_converge_by_merging_snapshots():
     b.observe(NodeInfo("y", Role.MOBILE))
     a.merge(b.snapshot())
     b.merge(a.snapshot())
-    assert (
-        [n.node_id for n in a.alive()] == [n.node_id for n in b.alive()] == ["x", "y"]
-    )
+    assert [n.node_id for n in a.alive()] == [n.node_id for n in b.alive()] == ["x", "y"]
 
 
 def test_mascot_is_a_pure_function_of_telemetry():

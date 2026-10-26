@@ -26,17 +26,13 @@ def _mac(key: bytes, *parts: bytes) -> bytes:
 
 
 class Wire:
-    def __init__(
-        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, key: bytes
-    ):
+    def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, key: bytes):
         self.reader, self.writer, self._key = reader, writer, key
         self._session = b""
         self._seq_out = self._seq_in = 0
         self.peer: dict[str, Any] = {}
 
-    async def handshake(
-        self, role: str, hello: dict[str, Any], timeout: float = 5.0
-    ) -> None:
+    async def handshake(self, role: str, hello: dict[str, Any], timeout: float = 5.0) -> None:
         """`role` is "client" or "server"; both sides run this concurrently."""
         mine = os.urandom(16)
         try:

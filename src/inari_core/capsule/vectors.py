@@ -67,7 +67,5 @@ class VectorIndex:
     def loads(cls, text: str) -> VectorIndex:
         raw = json.loads(text)
         index = cls(HashingEmbedder(raw["dim"]))
-        index.items = {
-            i: (entry["text"], entry["vec"]) for i, entry in raw["items"].items()
-        }
+        index.items = {i: (entry["text"], entry["vec"]) for i, entry in raw["items"].items()}
         return index

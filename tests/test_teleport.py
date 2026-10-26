@@ -96,18 +96,14 @@ async def test_corruption_in_transit_is_caught_by_the_digests(pair):
 
 async def test_a_lost_reply_after_activation_is_settled_by_the_epoch(pair):
     source, target = pair
-    out = await teleport(
-        source, Faulty(target, fail_on="activate", when="after"), AGENT
-    )
+    out = await teleport(source, Faulty(target, fail_on="activate", when="after"), AGENT)
     assert out.state == "committed"  # the target did take over
     assert holders(source, target) == ["node-b"]
 
 
 async def test_a_lost_request_before_activation_rolls_back(pair):
     source, target = pair
-    out = await teleport(
-        source, Faulty(target, fail_on="activate", when="before"), AGENT
-    )
+    out = await teleport(source, Faulty(target, fail_on="activate", when="before"), AGENT)
     assert out.state == "rolled_back"
     assert holders(source, target) == ["node-a"]
 

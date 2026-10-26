@@ -1,8 +1,14 @@
 # UX/UI specification
 
-Status: specification. No interface code is shipped in this repository; both
-clients are built against the contracts below (bus subjects, JSON Schemas,
-`mascot_state`).
+Status: specified and implemented as one responsive page (`src/inari_core/web/index.html`,
+no build step, no external resource) served by `inari-core gateway`. Try it with
+`inari-core demo` (a simulated mesh; every drag performs a real teleportation).
+What the page does today: the node-and-agent graph with drag-to-teleport, the
+journal as a vertical tree, the live orb driven by `mascot_state`, signed
+approvals, a target sheet for touch (long-press, or `T` on the keyboard), and
+reduced-motion support. Not yet built: fork and merge gestures, search, the
+biometric gate (the gateway holds the approval key; browsers use a bearer token),
+and an installable shell. The sections below remain the contract.
 
 ## Principles
 

@@ -79,9 +79,7 @@ def _scan(root: Path) -> dict[str, FileDigest]:
 
 def seal(root: Path, manifest: Manifest, timeline: Timeline) -> Manifest:
     """Recompute the digests and write `manifest.json`."""
-    sealed = manifest.model_copy(
-        update={"files": _scan(root), "timeline_head": timeline.head()}
-    )
+    sealed = manifest.model_copy(update={"files": _scan(root), "timeline_head": timeline.head()})
     _atomic_write(root / MANIFEST, sealed.model_dump_json(indent=2).encode())
     return sealed
 
@@ -133,9 +131,7 @@ def load(root: Path) -> Capsule:
     return Capsule(
         root=root,
         manifest=Manifest.model_validate_json((root / MANIFEST).read_text()),
-        environment=EnvironmentSpec.model_validate_json(
-            (root / ENVIRONMENT).read_text()
-        ),
+        environment=EnvironmentSpec.model_validate_json((root / ENVIRONMENT).read_text()),
         working_memory=(root / WORKING_MEMORY).read_text(),
         timeline=Timeline.loads((root / TIMELINE).read_text()),
         index=VectorIndex.loads((root / VECTORS).read_text()),
@@ -173,9 +169,7 @@ def verify(root: Path) -> list[str]:
     return problems
 
 
-def append_event(
-    root: Path, node_id: str, kind: EventKind, data: dict, ts: float
-) -> Capsule:
+def append_event(root: Path, node_id: str, kind: EventKind, data: dict, ts: float) -> Capsule:
     """Add one event to a live capsule and reseal it."""
     capsule = load(root)
     capsule.timeline.append(node_id, kind, data, ts)

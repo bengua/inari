@@ -27,12 +27,8 @@ class ExtractiveSummarizer:
     backed summarizer can replace it behind the same protocol."""
 
     def summarize(self, dropped: list[TimelineEvent], working_memory: str) -> str:
-        decisions = [
-            str(e.data.get("text", "")) for e in dropped if e.kind is EventKind.DECISION
-        ]
-        tools = sorted(
-            {str(e.data.get("name")) for e in dropped if e.kind is EventKind.TOOL_CALL}
-        )
+        decisions = [str(e.data.get("text", "")) for e in dropped if e.kind is EventKind.DECISION]
+        tools = sorted({str(e.data.get("name")) for e in dropped if e.kind is EventKind.TOOL_CALL})
         lines = [f"Handover digest: {len(dropped)} earlier events were condensed."]
         if tools:
             lines.append("Tools used: " + ", ".join(tools) + ".")
