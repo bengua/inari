@@ -13,7 +13,8 @@ from .bus import Bus, Message
 from .registry import NodeInfo, Registry, Role
 from .telemetry import Telemetry
 
-Teleporter = Callable[[str, str, str], Awaitable[Outcome]]  # agent, source, target
+Progress = Callable[[str], Awaitable[None]]
+Teleporter = Callable[[str, str, str, Progress], Awaitable[Outcome]]  # agent, source, target
 
 
 class MeshCoordinator:
@@ -84,7 +85,15 @@ class MeshCoordinator:
             return
         self._busy.add(p["agent"])
         try:
-            outcome = await self.teleporter(p["agent"], p["source"], p["target"])
+
+            async def progress(state: str) -> None:
+                await self.bus.publish(
+                    "teleport.state",
+                    {"request": p["request"], "agent": p["agent"], "source": p["source"],
+                     "target": p["target"], "state": state},
+                )  # fmt: skip
+
+            outcome = await self.teleporter(p["agent"], p["source"], p["target"], progress)
         finally:
             self._busy.discard(p["agent"])
         await self.bus.publish(

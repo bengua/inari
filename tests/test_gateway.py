@@ -130,3 +130,27 @@ async def test_the_demo_mesh_really_moves_an_agent_when_asked(tmp_path: Path):
     assert status == 200 and "checkpoint" in kinds and "tool_result" in kinds
     task.cancel()
     await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_agent_cards_get_their_facts_and_moves_are_reported_live(gw):
+    bus, gateway = gw
+    await bus.publish(
+        "agent.a1.state",
+        {
+            "agent": "a1",
+            "node": "n1",
+            "phase": "idle",
+            "title": "Draft",
+            "events": 7,
+            "files": 2,
+            "last": "hi",
+        },
+    )
+    await bus.publish("agent.a1.state", {"agent": "a1", "node": "n1", "phase": "inference"})
+    snap = gateway.snapshot()
+    assert snap["agents"]["a1"]["title"] == "Draft" and snap["agents"]["a1"]["phase"] == "inference"
+    await bus.publish(
+        "teleport.state",
+        {"request": "r", "agent": "a1", "source": "n1", "target": "n2", "state": "transferred"},
+    )
+    assert gateway.snapshot()["moves"]["a1"]["state"] == "transferred"

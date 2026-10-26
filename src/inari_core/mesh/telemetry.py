@@ -35,7 +35,8 @@ class Telemetry:
     nodes: dict[str, dict[str, float]] = field(default_factory=dict)
 
     def update_agent(self, agent_id: str, node_id: str, phase: str, **extra: Any) -> None:
-        self.agents[agent_id] = {"node": node_id, "phase": Phase(phase), **extra}
+        known = self.agents.get(agent_id, {})
+        self.agents[agent_id] = {**known, "node": node_id, "phase": Phase(phase), **extra}
 
     def update_node(self, node_id: str, *, gpu: float = 0.0, packets: float = 0.0) -> None:
         self.nodes[node_id] = {"gpu": gpu, "packets": packets}

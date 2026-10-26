@@ -6,275 +6,374 @@
 <title>Inari</title>
 <style>
 :root {
-  --bg-0:#060913; --bg-1:#0f172a; --fg:#e6edf7; --muted:#8aa0bd;
+  --bg-0:#060913; --bg-1:#0f172a; --fg:#e6edf7; --muted:#8aa0bd; --faint:#5b6f8b;
   --idle:#22d3ee; --listening:#e879f9; --inference:#fbbf24; --success:#34d399; --error:#f87171;
-  --glass:rgba(255,255,255,.06); --edge:rgba(255,255,255,.12);
+  --glass:rgba(255,255,255,.055); --glass2:rgba(255,255,255,.09); --edge:rgba(255,255,255,.12);
 }
-* { box-sizing: border-box; }
-body { margin:0; min-height:100vh; color:var(--fg); font:15px/1.4 system-ui, sans-serif;
-  background: radial-gradient(1200px 700px at 70% -10%, #13203d 0, var(--bg-1) 45%, var(--bg-0) 100%) fixed;
-  padding: env(safe-area-inset-top) 16px env(safe-area-inset-bottom); }
-.glass { background:var(--glass); border:1px solid var(--edge); border-radius:18px;
+* { box-sizing:border-box; }
+html,body { height:100%; }
+body { margin:0; color:var(--fg); font:14.5px/1.45 system-ui,sans-serif; overflow:hidden;
+  background: radial-gradient(1200px 700px at 70% -10%, #13203d 0, var(--bg-1) 45%, var(--bg-0) 100%) fixed; }
+button { font:inherit; color:inherit; }
+.glass { background:var(--glass); border:1px solid var(--edge); border-radius:16px;
   backdrop-filter: blur(18px) saturate(140%); -webkit-backdrop-filter: blur(18px) saturate(140%); }
-header { display:flex; align-items:center; gap:16px; padding:12px 0; }
-#orb { width:72px; height:72px; flex:none; }
-#stats { color:var(--muted); }
-#stats b { color:var(--fg); font-weight:600; }
-main { display:grid; grid-template-columns: 1fr 340px; gap:16px; padding-bottom:24px; }
-#graph { display:grid; grid-template-columns: repeat(auto-fit, minmax(240px,1fr)); gap:16px; align-content:start; }
-.node { padding:14px; min-height:150px; transition: box-shadow .3s, border-color .3s, opacity .2s;
-  box-shadow: 0 0 calc(var(--load,0) * 36px) rgba(34,211,238,calc(.15 + var(--load,0) * .5)); }
-.node h3 { margin:0 0 4px; font-size:16px; }
-.node small { color:var(--muted); display:block; margin-bottom:10px; }
-.node.valid { border-color: var(--idle); box-shadow: 0 0 28px rgba(34,211,238,.5); }
-.node.invalid { opacity:.4; }
-.agents { display:flex; flex-wrap:wrap; gap:10px; }
-.agent { --c:var(--idle); display:inline-flex; align-items:center; gap:8px; color:var(--fg);
-  background:rgba(255,255,255,.07); border:2px solid var(--c); border-radius:999px; padding:8px 14px;
-  font:inherit; cursor:grab; touch-action:none; user-select:none; transition: border-color .4s, box-shadow .4s; }
+.btn { background:var(--glass); border:1px solid var(--edge); border-radius:11px; padding:9px 14px; min-height:40px; cursor:pointer; }
+.btn:hover { background:var(--glass2); } .btn.go { border-color:var(--success); color:var(--success); }
+.btn.small { padding:5px 10px; min-height:30px; font-size:13px; }
+#app { height:100%; display:grid; grid-template-rows:auto 1fr; padding:0 16px env(safe-area-inset-bottom); }
+header { display:flex; align-items:center; gap:14px; padding:10px 0; flex-wrap:wrap; }
+#orb { width:56px; height:56px; flex:none; }
+h1 { margin:0; font-size:18px; letter-spacing:.3px; }
+.chips { display:flex; gap:8px; flex-wrap:wrap; } .chip { color:var(--muted); padding:3px 10px; border-radius:999px; background:var(--glass); border:1px solid var(--edge); font-size:13px; }
+.chip b { color:var(--fg); }
+#bar { display:flex; gap:10px; align-items:center; margin-left:auto; position:relative; flex-wrap:wrap; }
+#search { padding:9px 12px; border-radius:11px; border:1px solid var(--edge); background:rgba(0,0,0,.3); color:var(--fg); font:inherit; min-width:220px; }
+#hits { position:absolute; top:46px; right:0; width:min(440px,92vw); z-index:45; padding:8px; display:none; }
+#hits button { display:block; width:100%; text-align:left; background:none; border:0; padding:8px; border-radius:8px; cursor:pointer; }
+#hits button:hover { background:var(--glass2); } #hits small { color:var(--muted); display:block; }
+main { display:grid; grid-template-columns: minmax(0,1fr) 440px; gap:16px; min-height:0; padding-bottom:16px; }
+#left { display:grid; grid-template-rows:1fr auto; gap:12px; min-height:0; }
+#graph { overflow:auto; display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:14px; align-content:start; padding:2px; }
+.machine { padding:14px; min-height:210px; display:flex; flex-direction:column; gap:10px; transition:box-shadow .3s,border-color .3s,opacity .2s;
+  box-shadow:0 0 calc(var(--load,0) * 34px) rgba(34,211,238,calc(.1 + var(--load,0) * .45)); }
+.machine.valid { border-color:var(--idle); box-shadow:0 0 30px rgba(34,211,238,.55); } .machine.invalid { opacity:.45; }
+.mhead { display:flex; align-items:center; gap:8px; } .mhead b { font-size:16px; }
+.dot { width:9px; height:9px; border-radius:50%; background:var(--success); box-shadow:0 0 8px var(--success); flex:none; }
+.role { margin-left:auto; color:var(--muted); font-size:12px; border:1px solid var(--edge); border-radius:999px; padding:1px 8px; }
+.gauge { display:grid; grid-template-columns:1fr auto; gap:10px; align-items:center; color:var(--muted); font-size:12.5px; }
+.bar { height:6px; border-radius:6px; background:rgba(255,255,255,.08); overflow:hidden; } .bar i { display:block; height:100%; background:linear-gradient(90deg,var(--idle),var(--inference)); transition:width .6s; }
+.spark { width:100%; height:26px; } .spark polyline { fill:none; stroke:var(--idle); stroke-width:1.6; opacity:.85; }
+.cards { display:grid; gap:10px; } .drop { color:var(--faint); border:1.5px dashed var(--edge); border-radius:12px; padding:18px; text-align:center; font-size:13px; }
+.agent { --c:var(--idle); padding:11px 13px; border-radius:13px; background:rgba(255,255,255,.06); border:1.5px solid var(--c); cursor:grab; touch-action:none;
+  user-select:none; transition:border-color .4s,box-shadow .4s,opacity .3s; position:relative; }
+.agent:hover { background:rgba(255,255,255,.09); }
 .agent[data-phase=listening] { --c:var(--listening); } .agent[data-phase=inference] { --c:var(--inference); }
 .agent[data-phase=success] { --c:var(--success); } .agent[data-phase=error] { --c:var(--error); }
-.agent .glyph { color:var(--c); width:1.1em; text-align:center; }
-.agent.selected { box-shadow: 0 0 0 3px rgba(255,255,255,.25), 0 0 18px var(--c); }
-.agent.moving { border-style:dashed; opacity:.55; cursor:progress; }
-.ghost { position:fixed; pointer-events:none; z-index:50; opacity:.9; transform:translate(-50%,-50%); }
-aside { padding:16px; align-self:start; }
-aside h2 { margin:0 0 8px; font-size:15px; }
-#tree { list-style:none; margin:0; padding:0; border-left:2px solid var(--edge); }
-#tree li { position:relative; padding:4px 0 4px 18px; color:var(--muted); overflow-wrap:anywhere; }
-#tree li::before { content:""; position:absolute; left:-6px; top:11px; width:10px; height:10px; border-radius:50%;
-  background:var(--bg-1); border:2px solid var(--muted); }
-#tree li.decision::before { border-color:var(--inference); } #tree li.tool_call::before { border-color:var(--idle); }
-#tree li.user_message::before { border-color:var(--listening); } #tree li.checkpoint::before { border-radius:2px; transform:rotate(45deg); }
-#tree li.head { color:var(--fg); } #tree li b { color:var(--fg); font-weight:600; }
-#approvals { position:fixed; left:16px; right:16px; bottom:calc(16px + env(safe-area-inset-bottom)); display:grid; gap:10px; z-index:40; }
-#approvals { pointer-events:none; } .ask { pointer-events:auto; padding:14px; max-width:520px; margin:0 auto; width:100%; border-color:var(--inference); }
-.ask code { display:block; margin:6px 0 10px; color:var(--inference); overflow-wrap:anywhere; }
-.ask .row { display:flex; gap:10px; } .ask button { flex:1; }
-button.act { font:inherit; color:var(--fg); background:var(--glass); border:1px solid var(--edge); border-radius:12px; padding:12px; min-height:44px; cursor:pointer; }
-button.act.go { border-color:var(--success); color:var(--success); }
-#sheet { position:fixed; inset:auto 16px calc(16px + env(safe-area-inset-bottom)) 16px; z-index:60; padding:16px; display:none; max-width:520px; margin:0 auto; }
-#sheet.open { display:block; } #sheet h2 { margin:0 0 10px; font-size:15px; } #sheet .opts { display:grid; gap:8px; }
-#toast { position:fixed; top:12px; left:50%; transform:translateX(-50%); z-index:70; padding:10px 16px; display:none; }
-#login { max-width:420px; margin:20vh auto; padding:20px; } #login input { width:100%; padding:12px; margin:10px 0; border-radius:10px;
-  border:1px solid var(--edge); background:rgba(0,0,0,.3); color:var(--fg); font:inherit; }
-.empty { color:var(--muted); }
-@media (max-width: 760px) {
-  main { grid-template-columns:1fr; }
-  header { flex-direction:column; text-align:center; padding-top:20px; }
-  #orb { width:min(70vw,280px); height:min(70vw,280px); }
-  aside { order:2; } #graph { order:1; } main { padding-bottom:200px; }
+.agent.selected { box-shadow:0 0 0 2px rgba(255,255,255,.3), 0 0 20px var(--c); }
+.agent.moving { border-style:dashed; opacity:.6; cursor:progress; }
+.agent .top { display:flex; align-items:center; gap:8px; } .agent .top b { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.phase { margin-left:auto; font-size:12px; color:var(--c, var(--idle)); display:inline-flex; gap:5px; align-items:center; white-space:nowrap; }
+.phase.live::before { content:""; width:7px; height:7px; border-radius:50%; background:var(--c, var(--idle)); animation:pulse 1.1s infinite; }
+@keyframes pulse { 50% { transform:scale(1.7); opacity:.4; } }
+.agent .last { margin:6px 0 4px; color:var(--muted); font-size:13px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; min-height:2.6em; }
+.agent .meta { color:var(--faint); font-size:12px; display:flex; gap:10px; }
+.badge { margin-top:8px; font-size:12px; color:var(--inference); } .bar.thin { height:4px; margin-top:4px; } .bar.thin i { background:var(--inference); }
+.arriving { border:1.5px dashed var(--idle); border-radius:13px; padding:12px; color:var(--idle); font-size:13px; }
+.arriving.fail { border-color:var(--error); color:var(--error); }
+.ghost { position:fixed; pointer-events:none; z-index:80; opacity:.92; width:260px; transform:translate(-50%,-50%) rotate(-1.5deg); }
+#tethers { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:30; } #tethers path { fill:none; stroke:var(--inference); stroke-width:2; stroke-dasharray:6 7; animation:flow 1s linear infinite; }
+@keyframes flow { to { stroke-dashoffset:-26; } }
+#feed { padding:8px 12px; max-height:118px; overflow:auto; font-size:13px; color:var(--muted); }
+#feed div { padding:2px 0; } #feed time { color:var(--faint); margin-right:8px; } #feed .ok { color:var(--success); } #feed .bad { color:var(--error); } #feed .ask { color:var(--inference); }
+.hero { grid-column:1/-1; padding:34px; text-align:center; } .hero h2 { margin:0 0 8px; } .hero p { color:var(--muted); max-width:520px; margin:6px auto 16px; }
+#panel { display:grid; grid-template-rows:auto auto 1fr auto; min-height:0; overflow:hidden; }
+#phead { padding:14px 14px 8px; display:flex; flex-wrap:wrap; gap:8px; align-items:center; } #phead h2 { margin:0; font-size:16px; flex:1; min-width:100px; overflow:hidden; text-overflow:ellipsis; }
+#back { display:none; }
+.tabs { display:flex; gap:4px; padding:0 10px; border-bottom:1px solid var(--edge); }
+.tab { background:none; border:0; padding:9px 12px; color:var(--muted); cursor:pointer; border-bottom:2px solid transparent; }
+.tab.on { color:var(--fg); border-bottom-color:var(--idle); }
+#body { overflow:auto; padding:12px 14px; min-height:0; }
+.empty { color:var(--muted); } .sugg { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+.msg { max-width:88%; margin:8px 0; padding:9px 12px; border-radius:14px; overflow-wrap:anywhere; }
+.msg.user { margin-left:auto; background:rgba(232,121,249,.16); border:1px solid rgba(232,121,249,.35); border-bottom-right-radius:4px; }
+.msg.assistant { background:var(--glass2); border:1px solid var(--edge); border-bottom-left-radius:4px; }
+.msg code { background:rgba(0,0,0,.35); padding:1px 5px; border-radius:5px; font-size:13px; } .msg pre { background:rgba(0,0,0,.4); padding:9px; border-radius:9px; overflow:auto; margin:6px 0; }
+details.tool { margin:6px 0; border:1px solid var(--edge); border-radius:11px; background:rgba(34,211,238,.06); } details.tool.err { border-color:var(--error); background:rgba(248,113,113,.07); }
+details.tool summary { padding:6px 10px; cursor:pointer; color:var(--idle); font-size:13px; } details.tool.err summary { color:var(--error); }
+details.tool pre { margin:0; padding:8px 10px; white-space:pre-wrap; overflow-wrap:anywhere; color:var(--muted); font-size:12.5px; max-height:220px; overflow:auto; }
+.note { text-align:center; color:var(--faint); font-size:12px; margin:10px 0; } .typing { display:inline-flex; gap:4px; padding:10px 12px; } .typing i { width:6px; height:6px; border-radius:50%; background:var(--muted); animation:pulse 1s infinite; } .typing i:nth-child(2){animation-delay:.15s} .typing i:nth-child(3){animation-delay:.3s}
+#tree { list-style:none; margin:0; padding:0; border-left:2px solid var(--edge); } #tree li { position:relative; padding:5px 0 5px 18px; color:var(--muted); cursor:pointer; overflow-wrap:anywhere; }
+#tree li::before { content:""; position:absolute; left:-6px; top:12px; width:10px; height:10px; border-radius:50%; background:var(--bg-1); border:2px solid var(--muted); }
+#tree li.decision::before { border-color:var(--inference); } #tree li.tool_call::before { border-color:var(--idle); } #tree li.user_message::before { border-color:var(--listening); } #tree li.checkpoint::before { border-radius:2px; transform:rotate(45deg); }
+#tree li.pick { color:var(--fg); outline:1px dashed var(--inference); outline-offset:2px; } #tree li b { color:var(--fg); font-weight:600; }
+.files button { display:flex; width:100%; justify-content:space-between; gap:10px; background:none; border:0; border-bottom:1px solid var(--edge); padding:9px 4px; cursor:pointer; text-align:left; } .files small { color:var(--faint); }
+pre.viewer { white-space:pre-wrap; overflow-wrap:anywhere; background:rgba(0,0,0,.35); padding:10px; border-radius:10px; font-size:13px; }
+#composer { padding:10px 12px; border-top:1px solid var(--edge); display:grid; gap:8px; grid-template-columns:1fr auto; align-items:end; } #composer[hidden] { display:none; }
+#composer textarea { width:100%; padding:10px; border-radius:12px; border:1px solid var(--edge); background:rgba(0,0,0,.3); color:var(--fg); font:inherit; resize:none; max-height:140px; }
+#approvals { position:fixed; left:16px; right:16px; bottom:calc(16px + env(safe-area-inset-bottom)); display:grid; gap:10px; z-index:60; pointer-events:none; }
+.ask { pointer-events:auto; padding:14px; max-width:540px; margin:0 auto; width:100%; border-color:var(--inference); background:rgba(15,23,42,.92); }
+.ask code { display:block; margin:6px 0 10px; color:var(--inference); overflow-wrap:anywhere; } .ask .row { display:flex; gap:10px; } .ask .row .btn { flex:1; }
+#sheet { position:fixed; inset:auto 16px calc(16px + env(safe-area-inset-bottom)) 16px; z-index:70; padding:16px; display:none; max-width:540px; margin:0 auto; background:rgba(15,23,42,.95); }
+#sheet.open { display:block; } #sheet h2 { margin:0 0 10px; font-size:15px; } #sheet .opts { display:grid; gap:8px; } #sheet input { width:100%; padding:10px; border-radius:10px; border:1px solid var(--edge); background:rgba(0,0,0,.3); color:var(--fg); font:inherit; }
+#toast { position:fixed; top:12px; left:50%; transform:translateX(-50%); z-index:90; padding:10px 16px; display:none; background:rgba(15,23,42,.95); }
+#login { max-width:420px; margin:20vh auto; padding:22px; } #login input { width:100%; padding:12px; margin:10px 0; border-radius:10px; border:1px solid var(--edge); background:rgba(0,0,0,.3); color:var(--fg); font:inherit; }
+@media (max-width: 900px) {
+  body { overflow:auto; } #app { height:auto; min-height:100%; } main { grid-template-columns:1fr; }
+  #orb { width:84px; height:84px; } #bar { margin-left:0; width:100%; } #search { flex:1; min-width:0; } #left { grid-template-rows:auto auto; }
+  #graph { overflow:visible; grid-template-columns:1fr; padding-bottom:12px; }
+  #panel { position:fixed; inset:0; z-index:50; border-radius:0; background:rgba(6,9,19,.97); display:none; } body.open #panel { display:grid; }
+  #back { display:inline-flex; } #feed { max-height:96px; } #approvals { top:calc(12px + env(safe-area-inset-top)); bottom:auto; }
 }
-@media (prefers-reduced-motion: reduce) { .node, .agent { transition:none; } }
-#bar { display:flex; gap:10px; align-items:center; margin-left:auto; position:relative; flex-wrap:wrap; }
-#search { padding:10px 12px; border-radius:12px; border:1px solid var(--edge); background:rgba(0,0,0,.3); color:var(--fg); font:inherit; min-width:200px; }
-#hits { position:absolute; top:46px; right:0; width:min(420px,90vw); z-index:45; padding:8px; display:none; }
-#hits button { display:block; width:100%; text-align:left; background:none; border:0; color:var(--fg); padding:8px; border-radius:8px; font:inherit; cursor:pointer; }
-#hits button:hover { background:rgba(255,255,255,.08); } #hits small { color:var(--muted); display:block; }
-#composer { margin-top:12px; display:grid; gap:8px; } #composer[hidden] { display:none; }
-#composer textarea, #sheet input { width:100%; padding:10px; border-radius:10px; border:1px solid var(--edge); background:rgba(0,0,0,.3); color:var(--fg); font:inherit; resize:vertical; }
-#composer .row { display:flex; gap:8px; } #composer .row button { flex:1; }
-#tree li { cursor:pointer; } #tree li.pick { color:var(--fg); outline:1px dashed var(--inference); outline-offset:2px; }
-#tree li.assistant_message b { color:var(--success); }
-@media (max-width: 760px) { #bar { margin-left:0; width:100%; } #search { flex:1; } }
+@media (prefers-reduced-motion: reduce) { .machine,.agent { transition:none; } .phase.live::before,#tethers path,.typing i { animation:none; } }
 </style>
 </head>
 <body>
 <div id="login" class="glass" hidden>
-  <h2>Inari</h2>
-  <label for="tokenInput">Access token</label>
-  <input id="tokenInput" type="password" autocomplete="current-password">
-  <button class="act go" id="tokenGo">Connect</button>
+  <h2>Inari</h2><label for="tokenInput">Access token</label>
+  <input id="tokenInput" type="password" autocomplete="current-password"><button class="btn go" id="tokenGo">Connect</button>
 </div>
 <div id="app" hidden>
   <header>
-    <canvas id="orb" width="280" height="280" role="img" aria-label="Network activity indicator"></canvas>
-    <div id="stats" aria-live="polite">connecting…</div>
+    <canvas id="orb" width="224" height="224" role="img" aria-label="Network activity indicator"></canvas>
+    <h1>Inari</h1><div class="chips" id="stats" aria-live="polite"><span class="chip">connecting…</span></div>
     <div id="bar">
-      <input id="search" type="search" placeholder="Search journals…" aria-label="Search journals">
-      <button class="act" id="newAgent">New agent</button>
-      <div id="hits" class="glass"></div>
+      <input id="search" type="search" placeholder="Search all journals…" aria-label="Search journals">
+      <button class="btn" id="newAgent">＋ New agent</button><div id="hits" class="glass"></div>
     </div>
   </header>
   <main>
-    <section id="graph" aria-label="Machines and agents"></section>
-    <aside class="glass"><h2 id="inspTitle">Select an agent</h2><ul id="tree"></ul>
-      <form id="composer" hidden>
-        <textarea id="msg" rows="2" placeholder="Message the agent…" aria-label="Message"></textarea>
-        <div class="row"><button class="act go" type="submit">Send</button>
-          <button class="act" type="button" id="forkBtn" title="Tap an event first to fork from it">Fork</button>
-          <button class="act" type="button" id="mergeBtn">Merge into…</button></div>
-      </form></aside>
+    <div id="left"><section id="graph" aria-label="Machines and agents"></section><section id="feed" class="glass" aria-label="Activity"></section></div>
+    <aside id="panel" class="glass">
+      <div id="phead"><button class="btn small" id="back">‹ Back</button><h2 id="ptitle">No agent selected</h2><span id="pphase"></span>
+        <button class="btn small" id="moveBtn" hidden>Move…</button><button class="btn small" id="forkBtn" hidden>Fork</button><button class="btn small" id="mergeBtn" hidden>Merge…</button></div>
+      <div class="tabs" role="tablist"><button class="tab on" data-tab="chat" role="tab">Chat</button><button class="tab" data-tab="journal" role="tab">Journal</button><button class="tab" data-tab="files" role="tab">Files</button></div>
+      <div id="body"></div>
+      <form id="composer" hidden><textarea id="msg" rows="1" placeholder="Message the agent…" aria-label="Message"></textarea><button class="btn go" type="submit">Send</button></form>
+    </aside>
   </main>
 </div>
+<svg id="tethers" aria-hidden="true"></svg>
 <div id="approvals"></div>
 <div id="sheet" class="glass" role="dialog" aria-modal="true"><h2 id="sheetTitle"></h2><div class="opts" id="sheetOpts"></div></div>
 <div id="toast" class="glass" role="status" aria-live="assertive"></div>
 <script>
 "use strict";
 const GLYPH = {idle:"·", listening:"◐", inference:"⟳", success:"✓", error:"!"};
+const LABEL = {idle:"idle", listening:"listening", inference:"thinking", success:"done", error:"error"};
+const STEPS = ["planned","frozen","offered","transferred","verified","ready","committing","committed"];
 const $ = (id) => document.getElementById(id);
+const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 let token = new URLSearchParams(location.hash.slice(1)).get("token") || sessionStorage.getItem("inari-token") || "";
-let snap = null, selected = null, pending = new Map(), seenResults = new Set(), drag = null;
+let snap = null, selected = null, tab = "chat", events = [], files = null, fileView = null, forkAt = null, drag = null;
+const loadHist = {}, feed = [], seen = new Set(); let firstSnap = true, tlStamp = 0, tlBusy = false;
 
 function api(path, body) {
   return fetch(path, { method: body ? "POST" : "GET", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
     body: body ? JSON.stringify(body) : undefined }).then((r) => r.json());
 }
-function toast(text) {
-  const t = $("toast"); t.textContent = text; t.style.display = "block"; clearTimeout(toast.h);
-  toast.h = setTimeout(() => (t.style.display = "none"), 4000);
-}
+function toast(text) { const t = $("toast"); t.textContent = text; t.style.display = "block"; clearTimeout(toast.h); toast.h = setTimeout(() => (t.style.display = "none"), 4200); }
+function log(text, tone) { feed.unshift({ t: new Date(), text, tone: tone || "" }); feed.length = Math.min(feed.length, 30); }
+
 function connect() {
   if (!token) { $("login").hidden = false; return; }
   sessionStorage.setItem("inari-token", token); history.replaceState(null, "", location.pathname);
   $("login").hidden = true; $("app").hidden = false;
   const es = new EventSource("/events?token=" + encodeURIComponent(token));
   es.onmessage = (e) => { snap = JSON.parse(e.data); render(); };
-  es.onerror = () => { $("stats").textContent = "offline — last known state"; $("app").style.opacity = ".6"; };
+  es.onerror = () => { $("stats").innerHTML = '<span class="chip">offline — showing the last known state</span>'; $("app").style.opacity = ".6"; };
   es.onopen = () => ($("app").style.opacity = "1");
 }
 $("tokenGo").onclick = () => { token = $("tokenInput").value.trim(); connect(); };
 
+/* ---------- activity feed from notices, results and approvals ---------- */
+function absorb() {
+  const keys = [];
+  for (const n of snap.notices || []) keys.push(["n" + JSON.stringify(n), n]);
+  for (const r of snap.results || []) keys.push(["r" + r.request, r]);
+  for (const a of snap.approvals || []) keys.push(["a" + a.request_id, a]);
+  for (const [k, v] of keys) {
+    if (seen.has(k)) continue; seen.add(k); if (firstSnap) continue;
+    if (k[0] === "r") { log(v.ok ? "Teleport committed" : `Teleport ${v.state || "refused"}: ${v.error || ""}`, v.ok ? "ok" : "bad"); if (!v.ok) toast("Teleport " + (v.state || "refused")); }
+    else if (k[0] === "a") log(`Approval requested: ${v.command} (${v.agent_id})`, "ask");
+    else if (v.subject === "agent.created") log(v.ok ? `Created ${v.agent} on ${v.node}` : `Create failed: ${v.error}`, v.ok ? "ok" : "bad");
+    else if (v.subject === "agent.merged") log(v.ok ? `Merged ${v.source} into ${v.target}` : `Merge failed: ${v.error}`, v.ok ? "ok" : "bad");
+    else if (v.stopped) log(`${v.agent} ${v.stopped === "done" ? "finished" : v.stopped}${v.error ? ": " + v.error : ""}`, v.stopped === "done" ? "ok" : "bad");
+  }
+  firstSnap = false;
+}
+
+/* ---------- rendering ---------- */
 function render() {
+  absorb();
+  for (const n of snap.nodes) { const h = (loadHist[n.node_id] = loadHist[n.node_id] || []); h.push((snap.load[n.node_id] || {}).gpu || 0); if (h.length > 40) h.shift(); }
   const agents = Object.entries(snap.agents), busy = agents.filter(([, a]) => a.phase !== "idle").length;
-  $("stats").innerHTML = `<b>${snap.nodes.length}</b> nodes · <b>${agents.length}</b> agents · <b>${busy}</b> busy`;
-  for (const r of snap.results) {
-    if (!seenResults.has(r.request)) {
-      const mine = pending.has(r.request);
-      seenResults.add(r.request); pending.delete(r.request);
-      if (mine) toast(r.ok ? "Teleport committed" : "Teleport " + (r.state || "refused") + ": " + (r.error || ""));
-    }
-  }
-  const graph = $("graph"); graph.textContent = "";
-  if (!snap.nodes.length) graph.innerHTML = '<p class="empty">No machine has announced itself yet.</p>';
+  $("stats").innerHTML = `<span class="chip"><b>${snap.nodes.length}</b> machines</span><span class="chip"><b>${agents.length}</b> agents</span><span class="chip"><b>${busy}</b> working</span>`;
+  if (!drag || !drag.active) renderGraph(agents);
+  renderFeed(); renderApprovals(); renderPanelHead(); drawOrbParams(snap.mascot);
+  if (selected && Date.now() - tlStamp > 1500) refreshDetail();
+}
+function sparkline(vals) {
+  const w = 120, h = 26, pts = vals.map((v, i) => `${(i / Math.max(1, vals.length - 1) * w).toFixed(1)},${(h - 2 - v * (h - 4)).toFixed(1)}`).join(" ");
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><polyline points="${pts}"/></svg>`;
+}
+const inFlight = (mv) => mv && !["committed", "rolled_back"].includes(mv.state);
+function card(id, a, mv) {
+  const el = document.createElement("div"); el.className = "agent" + (selected === id ? " selected" : "") + (inFlight(mv) ? " moving" : "");
+  el.dataset.agent = id; el.dataset.phase = a.phase; el.dataset.node = a.node; el.tabIndex = 0;
+  el.setAttribute("aria-label", `${a.title || id} on ${a.node}, ${LABEL[a.phase]}. Press T to move it.`);
+  const live = ["listening", "inference"].includes(a.phase);
+  el.innerHTML = `<div class="top"><b></b><span class="phase${live ? " live" : ""}">${GLYPH[a.phase] || "·"} ${LABEL[a.phase] || a.phase}</span></div>
+    <p class="last"></p><div class="meta"><span>${a.events ?? "–"} events</span><span>${a.files ?? 0} files</span><span>${esc(a.harness || "")}</span></div>`;
+  el.querySelector("b").textContent = a.title || id; el.querySelector(".last").textContent = a.last || "No reply yet — send a message.";
+  if (inFlight(mv)) { const i = Math.max(0, STEPS.indexOf(mv.state)); el.insertAdjacentHTML("beforeend", `<div class="badge">→ ${esc(mv.target)} · ${esc(mv.state)}</div><div class="bar thin"><i style="width:${i / (STEPS.length - 1) * 100}%"></i></div>`); }
+  el.onpointerdown = (e) => startDrag(e, el, id, a.node);
+  el.onkeydown = (e) => { if (e.key === "t" || e.key === "T") openMove(id, a.node); if (e.key === "Enter") select(id); };
+  return el;
+}
+function renderGraph(agents) {
+  const g = $("graph"); g.textContent = "";
+  if (!snap.nodes.length) { g.innerHTML = '<div class="hero glass"><h2>Waiting for machines…</h2><p>Start a node and it will appear here.</p></div>'; return; }
+  if (!agents.length) g.insertAdjacentHTML("beforeend", '<div class="hero glass"><h2>Create your first agent</h2><p>An agent lives on one machine at a time. Once it exists, drag its card onto another machine to move it — its conversation and files go with it.</p><button class="btn go" id="heroNew">＋ New agent</button></div>');
   for (const n of snap.nodes) {
-    const load = (snap.load[n.node_id] || {}).gpu || 0;
-    const el = document.createElement("div"); el.className = "node glass"; el.dataset.node = n.node_id; el.style.setProperty("--load", load);
-    el.innerHTML = `<h3></h3><small></small><div class="agents"></div>`;
-    el.querySelector("h3").textContent = n.node_id;
-    el.querySelector("small").textContent = `${n.role} · load ${Math.round(load * 100)}%`;
-    for (const [id, a] of agents.filter(([, a]) => a.node === n.node_id)) el.querySelector(".agents").append(pastille(id, a));
-    graph.append(el);
+    const load = (snap.load[n.node_id] || {}).gpu || 0, mine = agents.filter(([, a]) => a.node === n.node_id);
+    const m = document.createElement("div"); m.className = "machine glass"; m.dataset.node = n.node_id; m.style.setProperty("--load", load);
+    m.innerHTML = `<div class="mhead"><span class="dot"></span><b></b><span class="role">${esc(n.role)}</span></div>
+      <div class="gauge"><div class="bar"><i style="width:${Math.round(load * 100)}%"></i></div><span>${Math.round(load * 100)}% load</span></div>${sparkline(loadHist[n.node_id] || [])}<div class="cards"></div>`;
+    m.querySelector("b").textContent = n.node_id;
+    const cards = m.querySelector(".cards");
+    for (const [id, a] of mine) cards.append(card(id, a, snap.moves[id]));
+    for (const mv of Object.values(snap.moves)) if (mv.target === n.node_id && mv.source !== n.node_id && mv.state !== "committed") {
+      const bad = mv.state === "rolled_back", i = Math.max(0, STEPS.indexOf(mv.state)), d = document.createElement("div"); d.className = "arriving" + (bad ? " fail" : "");
+      d.innerHTML = bad ? `${esc(mv.agent)} — move rolled back` : `⇢ ${esc(mv.agent)} arriving · ${esc(mv.state)}<div class="bar thin"><i style="width:${i / (STEPS.length - 1) * 100}%"></i></div>`; cards.append(d);
+    }
+    if (!cards.children.length) cards.innerHTML = '<div class="drop">Drop an agent here</div>';
+    g.append(m);
   }
-  drawOrbParams(snap.mascot);
-  renderApprovals(); showNotices();
-  if (selected && Date.now() - tlStamp > 1500) loadTimeline();
+  const hn = $("heroNew"); if (hn) hn.onclick = newAgent;
+  requestAnimationFrame(drawTethers);
 }
-function pastille(id, a) {
-  const b = document.createElement("button"); b.className = "agent"; b.dataset.agent = id; b.dataset.phase = a.phase; b.dataset.node = a.node;
-  b.setAttribute("aria-label", `${id} on ${a.node}, ${a.phase}. Press T to move it.`);
-  b.innerHTML = `<span class="glyph"></span><span></span>`;
-  b.firstChild.textContent = GLYPH[a.phase] || "·"; b.lastChild.textContent = id;
-  if (selected === id) b.classList.add("selected");
-  if ([...pending.values()].includes(id)) b.classList.add("moving");
-  b.onpointerdown = (e) => startDrag(e, b, id, a.node);
-  b.onkeydown = (e) => { if (e.key === "t" || e.key === "T") openSheet(id, a.node); if (e.key === "Enter") select(id); };
-  return b;
-}
-let forkAt = null, tlStamp = 0;
-async function select(id) { selected = id; forkAt = null; $("composer").hidden = false; await loadTimeline(); if (snap) render(); }
-async function loadTimeline() {
-  if (!selected) return; $("inspTitle").textContent = selected; tlStamp = Date.now();
-  const { events } = await api(`/api/agent/${encodeURIComponent(selected)}/timeline`);
-  const tree = $("tree"); tree.textContent = "";
-  events.forEach((ev, i) => {
-    const li = document.createElement("li"); li.className = ev.kind + (i === events.length - 1 ? " head" : "") + (ev.id === forkAt ? " pick" : "");
-    const k = document.createElement("b"); k.textContent = ev.kind.replace("_", " "); li.append(k, " " + ev.text.slice(0, 160));
-    li.onclick = () => { forkAt = ev.id; tree.querySelectorAll(".pick").forEach((x) => x.classList.remove("pick")); li.classList.add("pick"); };
-    tree.append(li);
-  });
-  tree.lastChild && tree.lastChild.scrollIntoView({ block: "nearest" });
-}
-$("composer").onsubmit = async (e) => {
-  e.preventDefault(); const text = $("msg").value.trim(); if (!text || !selected) return;
-  $("msg").value = ""; await api("/api/message", { agent: selected, text });
-};
-$("forkBtn").onclick = async () => {
-  if (!selected) return; const name = selected + "-fork-" + (Date.now() % 10000);
-  await api("/api/fork", { agent: selected, new_thread: name, upto: forkAt }); toast(`Forking ${selected}${forkAt ? " at " + forkAt : ""}…`);
-};
-$("mergeBtn").onclick = () => {
-  const me = snap.agents[selected]; if (!me) return;
-  const others = Object.entries(snap.agents).filter(([id, a]) => id !== selected && a.node === me.node);
-  sheet(`Merge which thread into ${selected}?`, others.map(([id]) => [id, () => api("/api/merge", { target: selected, source: id })]), "Both threads must run on the same machine.");
-};
-$("newAgent").onclick = () => {
-  const heavy = snap.nodes.filter((n) => n.role === "heavy"); if (!heavy.length) return toast("No machine available");
-  const input = document.createElement("input"); input.placeholder = "Thread name"; input.setAttribute("aria-label", "Thread name");
-  sheet("New agent on…", heavy.map((n) => [n.node_id, () => { const t = input.value.trim() || "thread-" + (Date.now() % 100000); return api("/api/agent", { thread_id: t, node: n.node_id, title: t }); }]), "", input);
-};
-let hitTimer = null;
-$("search").oninput = () => { clearTimeout(hitTimer); hitTimer = setTimeout(async () => {
-  const q = $("search").value.trim(), box = $("hits"); box.textContent = ""; if (!q) { box.style.display = "none"; return; }
-  const { hits } = await api("/api/search?q=" + encodeURIComponent(q)); box.style.display = "block";
-  if (!hits.length) box.innerHTML = '<small class="empty">No match</small>';
-  for (const h of hits) { const b = document.createElement("button"); b.innerHTML = "<span></span><small></small>"; b.firstChild.textContent = h.text.slice(0, 90); b.lastChild.textContent = h.agent + " · " + h.kind;
-    b.onclick = () => { box.style.display = "none"; select(h.agent); }; box.append(b); }
-}, 300); };
-function sheet(title, options, note, extra) {
-  $("sheetTitle").textContent = title; const opts = $("sheetOpts"); opts.textContent = ""; if (extra) opts.append(extra);
-  if (note) { const p = document.createElement("small"); p.className = "empty"; p.textContent = note; opts.append(p); }
-  for (const [label, fn] of options) { const b = document.createElement("button"); b.className = "act"; b.textContent = label; b.onclick = () => { $("sheet").classList.remove("open"); fn(); }; opts.append(b); }
-  const c = document.createElement("button"); c.className = "act"; c.textContent = "Cancel"; c.onclick = () => $("sheet").classList.remove("open"); opts.append(c);
-  $("sheet").classList.add("open"); (extra || opts.querySelector("button")).focus();
-}
-let seenNotices = new Set(), firstNotices = true;
-function showNotices() {
-  for (const n of snap.notices || []) { const k = JSON.stringify(n); if (seenNotices.has(k)) continue; seenNotices.add(k);
-    if (firstNotices) continue;
-    if (n.subject === "agent.created") toast(n.ok ? `Created ${n.agent} on ${n.node}` : "Create failed: " + n.error);
-    else if (n.subject === "agent.merged") toast(n.ok ? `Merged ${n.source} into ${n.target} (+${n.added})` : "Merge failed: " + n.error);
-    else if (n.stopped && n.stopped !== "done") toast(`${n.agent}: ${n.stopped} ${n.error || ""}`);
-  } firstNotices = false;
-}
-/* Dragging: a ghost follows the pointer, valid machines glow, dropping on one moves the agent. */
-function startDrag(e, el, id, from) {
-  drag = { id, from, x: e.clientX, y: e.clientY, active: false, el, ghost: null, hold: null };
-  drag.hold = setTimeout(() => { if (drag && !drag.active) { openSheet(id, from); drag = null; } }, 600);
-  window.onpointermove = onMove; window.onpointerup = onUp;
-}
-function onMove(e) {
-  if (!drag) return;
-  if (!drag.active && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 8) {
-    clearTimeout(drag.hold); drag.active = true; drag.ghost = drag.el.cloneNode(true); drag.ghost.className += " ghost"; document.body.append(drag.ghost);
-    document.querySelectorAll(".node").forEach((n) => n.classList.add(n.dataset.node === drag.from ? "invalid" : "valid"));
+function drawTethers() {
+  const svg = $("tethers"); svg.textContent = "";
+  for (const mv of Object.values(snap.moves || {})) {
+    if (!inFlight(mv)) continue;
+    const a = document.querySelector(`.machine[data-node="${CSS.escape(mv.source)}"]`), b = document.querySelector(`.machine[data-node="${CSS.escape(mv.target)}"]`);
+    if (!a || !b) continue; const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+    const x1 = ra.left + ra.width / 2, y1 = ra.top + ra.height / 2, x2 = rb.left + rb.width / 2, y2 = rb.top + rb.height / 2, mx = (x1 + x2) / 2;
+    svg.insertAdjacentHTML("beforeend", `<path d="M${x1},${y1} C${mx},${y1 - 50} ${mx},${y2 - 50} ${x2},${y2}"/>`);
   }
-  if (drag.active) { drag.ghost.style.left = e.clientX + "px"; drag.ghost.style.top = e.clientY + "px"; }
 }
-function onUp(e) {
-  window.onpointermove = window.onpointerup = null;
-  if (!drag) return; clearTimeout(drag.hold);
-  const d = drag; drag = null;
-  document.querySelectorAll(".node").forEach((n) => n.classList.remove("valid", "invalid"));
-  if (!d.active) { select(d.id); return; }
-  d.ghost.remove();
-  const target = document.elementsFromPoint(e.clientX, e.clientY).find((x) => x.classList && x.classList.contains("node"));
-  if (target && target.dataset.node !== d.from) teleport(d.id, d.from, target.dataset.node);
-}
-async function teleport(agent, source, target) {
-  const r = await api("/api/teleport", { agent, source, target });
-  if (r.request) { pending.set(r.request, agent); toast(`Moving ${agent} to ${target}…`); render(); } else toast("Request refused");
-}
-function openSheet(agent, from) {
-  const targets = snap.nodes.filter((n) => n.node_id !== from && n.role === "heavy");
-  sheet(`Move ${agent} to…`, targets.map((n) => [n.node_id, () => teleport(agent, from, n.node_id)]));
+function renderFeed() {
+  $("feed").innerHTML = feed.length ? feed.slice(0, 8).map((e) => `<div class="${e.tone}"><time>${e.t.toTimeString().slice(0, 8)}</time>${esc(e.text)}</div>`).join("")
+    : '<div class="empty">Activity will show here: moves, approvals, finished turns.</div>';
 }
 function renderApprovals() {
   const box = $("approvals"); box.textContent = "";
   for (const r of snap.approvals) {
     const d = document.createElement("div"); d.className = "ask glass"; d.setAttribute("role", "alert");
-    d.innerHTML = `<strong>Approve?</strong><code></code><div class="row"><button class="act">Deny</button><button class="act go">Approve</button></div>`;
+    d.innerHTML = `<strong>Approve this?</strong><code></code><div class="row"><button class="btn">Deny</button><button class="btn go">Approve</button></div>`;
     d.querySelector("code").textContent = r.command + "  ·  " + r.agent_id + " on " + r.node_id;
     const [no, yes] = d.querySelectorAll("button");
-    no.onclick = () => api("/api/approval", { request_id: r.request_id, approved: false });
-    yes.onclick = () => api("/api/approval", { request_id: r.request_id, approved: true });
+    no.onclick = () => api("/api/approval", { request_id: r.request_id, approved: false }); yes.onclick = () => api("/api/approval", { request_id: r.request_id, approved: true });
     box.append(d);
   }
 }
-/* The orb is a gauge: every parameter comes from the gateway's mascot state. */
+
+/* ---------- detail panel ---------- */
+function renderPanelHead() {
+  const a = selected && snap.agents[selected];
+  $("ptitle").textContent = a ? (a.title || selected) : "No agent selected";
+  $("pphase").innerHTML = a ? `<span class="phase${["listening", "inference"].includes(a.phase) ? " live" : ""}" style="--c:var(--${a.phase === "idle" ? "idle" : a.phase})">${GLYPH[a.phase]} ${LABEL[a.phase]} · ${esc(a.node)}</span>` : "";
+  for (const id of ["moveBtn", "forkBtn", "mergeBtn"]) $(id).hidden = !a;
+  $("composer").hidden = !a; document.body.classList.toggle("open", !!a);
+}
+async function select(id) { selected = id; forkAt = null; fileView = null; files = null; events = []; tlStamp = 0; renderPanelHead(); drawBody(); await refreshDetail(); if (snap) renderGraph(Object.entries(snap.agents)); }
+async function refreshDetail() {
+  if (!selected || tlBusy) return; tlBusy = true; tlStamp = Date.now();
+  try {
+    if (tab !== "files") events = (await api(`/api/agent/${encodeURIComponent(selected)}/timeline`)).events || [];
+    else if (!fileView) files = (await api(`/api/agent/${encodeURIComponent(selected)}/files`)).files || [];
+    drawBody();
+  } finally { tlBusy = false; }
+}
+document.querySelectorAll(".tab").forEach((t) => (t.onclick = () => { tab = t.dataset.tab; fileView = null; document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("on", x === t)); tlStamp = 0; refreshDetail(); }));
+function md(text) {
+  return String(text).split("```").map((p, i) => i % 2 ? `<pre>${esc(p.replace(/^\w*\n/, ""))}</pre>` : esc(p).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>")).join("");
+}
+function drawBody() {
+  const body = $("body"), atEnd = body.scrollHeight - body.scrollTop - body.clientHeight < 60; body.textContent = "";
+  if (!selected) { body.innerHTML = '<p class="empty">Select an agent to read its conversation, browse its journal and files, or send it a message.</p>'; return; }
+  const a = snap.agents[selected] || {};
+  if (tab === "chat") {
+    if (!events.filter((e) => e.kind !== "system").length) {
+      body.innerHTML = '<p class="empty">Nothing said yet. Try one of these:</p><div class="sugg"></div>';
+      for (const s of ["Write hello.txt containing a greeting", "List the files you can see", "Explain what you can do here"]) { const b = document.createElement("button"); b.className = "btn small"; b.textContent = s; b.onclick = () => { $("msg").value = s; $("msg").focus(); }; body.querySelector(".sugg").append(b); }
+    }
+    for (let i = 0; i < events.length; i++) {
+      const e = events[i];
+      if (e.kind === "user_message" || e.kind === "assistant_message") { const d = document.createElement("div"); d.className = "msg " + (e.kind === "user_message" ? "user" : "assistant"); d.innerHTML = md(e.text); body.append(d); }
+      else if (e.kind === "tool_call") {
+        const r = events[i + 1] && events[i + 1].kind === "tool_result" ? events[++i] : null, err = r && /^(denied|\w+Error)/.test(r.text);
+        const d = document.createElement("details"); d.className = "tool" + (err ? " err" : ""); d.innerHTML = "<summary></summary><pre></pre>";
+        d.querySelector("summary").textContent = "⚙ " + e.text.slice(0, 80) + (r ? "" : " …"); d.querySelector("pre").textContent = r ? r.text : "running…"; body.append(d);
+      } else if (e.kind === "decision") body.insertAdjacentHTML("beforeend", `<div class="note">${esc(e.text)}</div>`);
+      else if (e.kind === "checkpoint") body.insertAdjacentHTML("beforeend", '<div class="note">── moved or paused here ──</div>');
+    }
+    if (["listening", "inference"].includes(a.phase)) body.insertAdjacentHTML("beforeend", '<div class="msg assistant typing"><i></i><i></i><i></i></div>');
+  } else if (tab === "journal") {
+    body.insertAdjacentHTML("beforeend", '<p class="empty">Tap an event to fork the thread from it, then press Fork.</p><ul id="tree"></ul>'); const tree = body.querySelector("#tree");
+    events.forEach((ev) => { const li = document.createElement("li"); li.className = ev.kind + (ev.id === forkAt ? " pick" : ""); const k = document.createElement("b"); k.textContent = ev.kind.replace("_", " "); li.append(k, " " + ev.text.slice(0, 160));
+      li.onclick = () => { forkAt = ev.id; tree.querySelectorAll(".pick").forEach((x) => x.classList.remove("pick")); li.classList.add("pick"); }; tree.append(li); });
+  } else if (fileView) {
+    body.innerHTML = '<button class="btn small" id="fback">‹ Files</button><h3></h3><pre class="viewer"></pre>'; body.querySelector("h3").textContent = fileView.path; body.querySelector("pre").textContent = fileView.text;
+    $("fback").onclick = () => { fileView = null; refreshDetail(); };
+  } else {
+    if (!files) { body.innerHTML = '<p class="empty">Loading…</p>'; return; }
+    if (!files.length) { body.innerHTML = '<p class="empty">No files yet. Ask the agent to create one — its workspace travels with it when you move it.</p>'; return; }
+    body.insertAdjacentHTML("beforeend", '<div class="files"></div>');
+    for (const f of files) { const b = document.createElement("button"); b.innerHTML = "<span></span><small></small>"; b.firstChild.textContent = f.path; b.lastChild.textContent = f.size + " B";
+      b.onclick = async () => { const r = await api(`/api/agent/${encodeURIComponent(selected)}/file?path=${encodeURIComponent(f.path)}`); fileView = { path: f.path, text: r.text || "" }; drawBody(); }; body.querySelector(".files").append(b); }
+  }
+  if (atEnd || tab === "chat") body.scrollTop = body.scrollHeight;
+}
+$("back").onclick = () => { selected = null; renderPanelHead(); drawBody(); if (snap) renderGraph(Object.entries(snap.agents)); };
+$("composer").onsubmit = async (e) => { e.preventDefault(); const text = $("msg").value.trim(); if (!text || !selected) return; $("msg").value = ""; $("msg").style.height = "auto"; tab = "chat"; document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("on", x.dataset.tab === "chat")); await api("/api/message", { agent: selected, text }); tlStamp = 0; };
+$("msg").onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("composer").requestSubmit(); } };
+$("msg").oninput = () => { const t = $("msg"); t.style.height = "auto"; t.style.height = Math.min(140, t.scrollHeight) + "px"; };
+$("forkBtn").onclick = async () => { const name = selected + "-fork-" + (Date.now() % 10000); await api("/api/fork", { agent: selected, new_thread: name, upto: forkAt }); toast(`Forking ${selected}${forkAt ? " at the chosen event" : ""}…`); };
+$("moveBtn").onclick = () => openMove(selected, snap.agents[selected].node);
+$("mergeBtn").onclick = () => { const me = snap.agents[selected], others = Object.entries(snap.agents).filter(([id, a]) => id !== selected && a.node === me.node);
+  sheet(`Merge which thread into ${selected}?`, others.map(([id]) => [id, () => api("/api/merge", { target: selected, source: id })]), others.length ? "Both threads must run on the same machine." : "No other thread on this machine."); };
+function newAgent() {
+  const heavy = snap.nodes.filter((n) => n.role === "heavy"); if (!heavy.length) return toast("No machine available");
+  const input = document.createElement("input"); input.placeholder = "Name this thread"; input.setAttribute("aria-label", "Thread name");
+  sheet("Create an agent on…", heavy.map((n) => [n.node_id, async () => { const t = input.value.trim().replace(/[^\w-]+/g, "-") || "thread-" + (Date.now() % 100000); await api("/api/agent", { thread_id: t, node: n.node_id, title: t }); setTimeout(() => snap.agents[t] && select(t), 1500); }]), "", input);
+}
+$("newAgent").onclick = newAgent;
+let hitTimer = null;
+$("search").oninput = () => { clearTimeout(hitTimer); hitTimer = setTimeout(async () => {
+  const q = $("search").value.trim(), box = $("hits"); box.textContent = ""; if (!q) { box.style.display = "none"; return; }
+  const { hits } = await api("/api/search?q=" + encodeURIComponent(q)); box.style.display = "block";
+  if (!hits.length) box.innerHTML = '<small class="empty">No match</small>';
+  for (const h of hits) { const b = document.createElement("button"); b.innerHTML = "<span></span><small></small>"; b.firstChild.textContent = h.text.slice(0, 90); b.lastChild.textContent = h.agent + " · " + h.kind; b.onclick = () => { box.style.display = "none"; select(h.agent); }; box.append(b); }
+}, 300); };
+function sheet(title, options, note, extra) {
+  $("sheetTitle").textContent = title; const opts = $("sheetOpts"); opts.textContent = ""; if (extra) opts.append(extra);
+  if (note) { const p = document.createElement("small"); p.className = "empty"; p.textContent = note; opts.append(p); }
+  for (const [label, fn] of options) { const b = document.createElement("button"); b.className = "btn"; b.textContent = label; b.onclick = () => { $("sheet").classList.remove("open"); fn(); }; opts.append(b); }
+  const c = document.createElement("button"); c.className = "btn"; c.textContent = "Cancel"; c.onclick = () => $("sheet").classList.remove("open"); opts.append(c);
+  $("sheet").classList.add("open"); (extra || opts.querySelector("button")).focus();
+}
+function openMove(agent, from) { sheet(`Move ${agent} to…`, snap.nodes.filter((n) => n.node_id !== from && n.role === "heavy").map((n) => [n.node_id, () => teleport(agent, from, n.node_id)])); }
+async function teleport(agent, source, target) { const r = await api("/api/teleport", { agent, source, target }); if (r.request) { toast(`Moving ${agent} to ${target}…`); log(`Moving ${agent}: ${source} → ${target}`); } else toast("Request refused"); }
+
+/* ---------- drag to teleport (touch: long-press opens the target list) ---------- */
+function startDrag(e, el, id, from) {
+  if (e.button > 0) return;
+  drag = { id, from, x: e.clientX, y: e.clientY, active: false, el, ghost: null, hold: null };
+  drag.hold = setTimeout(() => { if (drag && !drag.active) { openMove(id, from); drag = null; } }, 650);
+  window.onpointermove = onMove; window.onpointerup = onUp;
+}
+function onMove(e) {
+  if (!drag) return;
+  if (!drag.active && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 8) {
+    clearTimeout(drag.hold); drag.active = true; drag.ghost = drag.el.cloneNode(true); drag.ghost.classList.add("ghost"); document.body.append(drag.ghost);
+    drag.el.style.opacity = ".35"; document.querySelectorAll(".machine").forEach((n) => n.classList.add(n.dataset.node === drag.from ? "invalid" : "valid"));
+  }
+  if (drag.active) { drag.ghost.style.left = e.clientX + "px"; drag.ghost.style.top = e.clientY + "px"; }
+}
+function onUp(e) {
+  window.onpointermove = window.onpointerup = null; if (!drag) return; clearTimeout(drag.hold);
+  const d = drag; drag = null; document.querySelectorAll(".machine").forEach((n) => n.classList.remove("valid", "invalid"));
+  if (!d.active) { select(d.id); return; }
+  d.ghost.remove(); d.el.style.opacity = "";
+  const t = document.elementsFromPoint(e.clientX, e.clientY).find((x) => x.classList && x.classList.contains("machine"));
+  if (t && t.dataset.node !== d.from) teleport(d.id, d.from, t.dataset.node); else if (snap) renderGraph(Object.entries(snap.agents));
+}
+addEventListener("resize", () => snap && drawTethers());
+
+/* ---------- the orb: a gauge driven by the gateway's mascot state ---------- */
 const orb = $("orb"), ctx = orb.getContext("2d"), still = matchMedia("(prefers-reduced-motion: reduce)").matches;
-let P = { colour: "#22d3ee", pulse_hz: .25, turbulence: 0, glow: .2 }, cur = { ...P, hue: [34, 211, 238] };
+let P = { colour: "#22d3ee", pulse_hz: .25, turbulence: 0, glow: .2 }, cur = { ...P };
 function drawOrbParams(m) { P = m; }
 function frame(t) {
   const w = orb.width, c = w / 2, s = t / 1000;
@@ -282,13 +381,10 @@ function frame(t) {
   ctx.clearRect(0, 0, w, w);
   const base = w * .27, r0 = still ? base : base * (1 + .06 * Math.sin(s * 2 * Math.PI * cur.pulse_hz));
   const halo = ctx.createRadialGradient(c, c, r0 * .6, c, c, w * .5);
-  halo.addColorStop(0, P.colour + Math.round(40 + cur.glow * 120).toString(16).padStart(2, "0")); halo.addColorStop(1, P.colour + "00");
-  ctx.fillStyle = halo; ctx.fillRect(0, 0, w, w);
+  halo.addColorStop(0, P.colour + Math.round(40 + cur.glow * 120).toString(16).padStart(2, "0")); halo.addColorStop(1, P.colour + "00"); ctx.fillStyle = halo; ctx.fillRect(0, 0, w, w);
   ctx.beginPath();
-  for (let i = 0; i <= 120; i++) {
-    const a = i / 120 * 2 * Math.PI, n = still ? 0 : cur.turbulence * w * .035 * (Math.sin(a * 3 + s * 1.7) + Math.sin(a * 5 - s * 2.3) * .6);
-    const x = c + Math.cos(a) * (r0 + n), y = c + Math.sin(a) * (r0 + n); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
-  }
+  for (let i = 0; i <= 120; i++) { const a = i / 120 * 2 * Math.PI, n = still ? 0 : cur.turbulence * w * .035 * (Math.sin(a * 3 + s * 1.7) + Math.sin(a * 5 - s * 2.3) * .6);
+    const x = c + Math.cos(a) * (r0 + n), y = c + Math.sin(a) * (r0 + n); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
   ctx.closePath(); const g = ctx.createRadialGradient(c - r0 * .3, c - r0 * .3, r0 * .1, c, c, r0 * 1.2);
   g.addColorStop(0, "#ffffffcc"); g.addColorStop(.35, P.colour); g.addColorStop(1, P.colour + "55"); ctx.fillStyle = g; ctx.fill();
   if (still) { ctx.lineWidth = 2 + cur.pulse_hz * 3; ctx.strokeStyle = P.colour; ctx.stroke(); }

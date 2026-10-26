@@ -12,6 +12,7 @@ import asyncio
 import hmac
 import importlib.resources
 import json
+import time
 import uuid
 from collections.abc import Callable
 from dataclasses import asdict
@@ -19,7 +20,8 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 from .approvals import ApprovalRequest, ApprovalResponse, sign
-from .mesh.bus import Bus, Message
+from .errors import TransportError
+from .mesh.bus import Bus, Message, request
 from .mesh.telemetry import Telemetry, mascot_state
 
 MAX_BODY = 64 * 1024
@@ -39,6 +41,7 @@ class Gateway:
         self.timeline_reader = timeline_reader
         self.log: dict[str, list[dict[str, Any]]] = {}
         self.notices: list[dict[str, Any]] = []
+        self.moves: dict[str, dict[str, Any]] = {}
         self._holder: dict[str, str] = {}
         self.telemetry = Telemetry()
         self.nodes: list[dict[str, Any]] = []
@@ -53,6 +56,7 @@ class Gateway:
         bus.subscribe("node.lost", self._on_lost)
         bus.subscribe("teleport.result", self._on_result)
         bus.subscribe("approval.request", self._on_approval)
+        bus.subscribe("teleport.state", self._on_move)
         bus.subscribe("agent.*.event", self._on_event)
         bus.subscribe("agent.*.history", self._on_history)
         bus.subscribe("agent.*.done", self._on_notice)
@@ -67,8 +71,10 @@ class Gateway:
         return {
             "nodes": self.nodes,
             "agents": {
-                a: {"node": v["node"], "phase": v["phase"].value} for a, v in snap["agents"].items()
+                a: {**{k: x for k, x in v.items() if k != "phase"}, "phase": v["phase"].value}
+                for a, v in snap["agents"].items()
             },
+            "moves": self._live_moves(),
             "load": snap["nodes"],
             "mascot": mascot,
             "results": self.results[-5:],
@@ -83,13 +89,28 @@ class Gateway:
                 queue.get_nowait()  # a slow client loses old frames, not the stream
             queue.put_nowait(text)
 
+    def _on_move(self, m: Message) -> None:
+        p = m.payload
+        self.moves[p["agent"]] = {**p, "at": time.time()}
+        self._push()
+
+    def _live_moves(self) -> dict[str, dict[str, Any]]:
+        """Moves in flight, plus finished ones for a few seconds so a client can show the end."""
+        now = time.time()
+        self.moves = {
+            a: v for a, v in self.moves.items()
+            if v["state"] not in ("committed", "rolled_back") or now - v["at"] < 5
+        }  # fmt: skip
+        return {a: {k: x for k, x in v.items() if k != "at"} for a, v in self.moves.items()}
+
     def _on_nodes(self, m: Message) -> None:
         self.nodes = m.payload["nodes"]
         self._push()
 
     async def _on_agent(self, m: Message) -> None:
         p = m.payload
-        self.telemetry.update_agent(p["agent"], p["node"], p["phase"])
+        extra = {k: v for k, v in p.items() if k not in ("agent", "node", "phase")}
+        self.telemetry.update_agent(p["agent"], p["node"], p["phase"], **extra)
         self._push()
         seen_at = self._holder.get(p["agent"])
         self._holder[p["agent"]] = p["node"]
@@ -152,6 +173,16 @@ class Gateway:
                 e = next(x for x in pool[a] if x["id"] == eid)
                 hits.append({"agent": a, **e})
         return hits[:10]
+
+    async def _ask(self, subject: str, payload: dict[str, Any], timeout: float = 5.0):
+        """Ask the node that holds an agent and wait for its one reply."""
+        reply = f"reply.{uuid.uuid4().hex}"
+        try:
+            return (
+                await request(self.bus, subject, {**payload, "reply": reply}, reply, timeout)
+            ).payload
+        except TransportError:
+            return None
 
     # -- actions ---------------------------------------------------------------
     async def request_teleport(self, agent: str, source: str, target: str) -> str:
@@ -247,6 +278,14 @@ class Gateway:
                 self.timeline_reader(agent) if self.timeline_reader else self.log.get(agent, [])
             )
             return await self._json(writer, 200, {"events": events})
+        if method == "GET" and path.startswith("/api/agent/") and path.endswith("/files"):
+            reply = await self._ask("agent.files.request", {"agent": path.split("/")[3]})
+            return await self._json(writer, 200, reply or {"files": []})
+        if method == "GET" and path.startswith("/api/agent/") and path.endswith("/file"):
+            want = {"agent": path.split("/")[3], "path": (query.get("path") or [""])[0]}
+            return await self._json(
+                writer, 200, await self._ask("agent.file.request", want) or {"text": ""}
+            )
         if method == "GET" and path == "/api/search":
             return await self._json(
                 writer,
