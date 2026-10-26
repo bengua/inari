@@ -48,6 +48,28 @@ are all configuration, and every default is empty.
 - **Network.** The transport authenticates and signs frames but does not encrypt: bind to
   a private interface (WireGuard, Tailscale) or tunnel it.
 
+## Interface options (hub with a gateway)
+
+```json
+"gateway_ui": {"footer": "<text shown at the bottom of the sidebar>"},
+"mascot_dir": "<folder holding a FoxBot-style sprite engine: index.html, js/, sprites/>",
+"usage": [
+  {"kind": "cloudroom", "url": "<base URL of a Cloudroom-compatible server>", "providers": ["claude-code", "codex"]},
+  {"kind": "static", "items": [{"provider_id": "local", "name": "Local models", "status": "unlimited"}]}
+]
+```
+
+- **Mascot.** `mascot_dir` is served at `/fox/` and driven through the engine's `window.fox`
+  contract (activity working/waiting/idle, harness persona, health, notify events). Without it
+  the interface falls back to a canvas orb. No sprite is shipped in this repository.
+- **Quotas.** Sources are polled every minute and normalised to `{provider_id, name, status,
+  plan, windows: [{label, used_percent, resets_at}]}`. The sidebar pill and the model chip show a
+  ring for the family of the model in use; a provider logo is proxied from its source when it has
+  one, otherwise a neutral family mark is drawn.
+- **Models.** Each node lists the models its harness (ACP `session/new`) or provider (`/models`)
+  offers and announces them; the picker in the composer reads that list. Choosing one is stored
+  on the thread, journaled as a `provider_switch`, and applied on the next turn.
+
 ## Bus subjects a node answers
 
 | Subject | Effect |

@@ -119,8 +119,7 @@ pre.code span.l::before { counter-increment:l; content:counter(l); position:abso
   </aside>
   <section id="main">
     <div id="top"><button class="btn icon" id="showside" aria-label="Show the sidebar">◨</button><button class="btn small" id="back">‹ Back</button><h2 id="ptitle">Inari</h2><span id="pphase"></span>
-      <button class="chip" id="modelChip" hidden></button><button class="btn small" id="moveBtn" hidden>Move…</button><button class="btn small" id="forkBtn" hidden>Fork</button><button class="btn small" id="mergeBtn" hidden>Merge…</button>
-      <button class="btn small" id="benchBtn">Artifacts</button></div>
+      <button class="chip" id="modelChip" hidden></button><button class="btn small" id="actionsBtn" hidden>Actions ▾</button><button class="btn small" id="benchBtn">Artifacts</button></div>
     <div id="thread"><div id="msgs"></div></div>
     <div id="dock"><form class="composer" id="composer"><div class="attached" id="attached"></div><textarea id="msg" rows="2" placeholder="Build anything…" aria-label="Message"></textarea>
       <div class="ctools"><button type="button" class="btn icon" id="attach" title="Attach a file" aria-label="Attach a file">＋</button><input type="file" id="file" multiple hidden>
@@ -245,7 +244,7 @@ function renderPill() {
 }
 function openPop(anchor, build) { const pop = $("pop"); if (pop.classList.contains("open") && pop.dataset.for === anchor.id) { pop.classList.remove("open"); return; } pop.innerHTML = ""; build(pop); pop.dataset.for = anchor.id; const r = anchor.getBoundingClientRect(); pop.classList.add("open");
   pop.style.left = Math.max(8, Math.min(r.left, innerWidth - pop.offsetWidth - 8)) + "px"; pop.style.top = Math.max(8, r.top - pop.offsetHeight - 8 > 8 ? r.top - pop.offsetHeight - 8 : r.bottom + 8) + "px"; }
-addEventListener("pointerdown", (e) => { const pop = $("pop"); if (pop.classList.contains("open") && !pop.contains(e.target) && !e.target.closest("#gear,#usageBtn,#pill,#modelChip,#pickModel,#coreChip")) pop.classList.remove("open"); });
+addEventListener("pointerdown", (e) => { const pop = $("pop"); if (pop.classList.contains("open") && !pop.contains(e.target) && !e.target.closest("#gear,#usageBtn,#pill,#modelChip,#pickModel,#coreChip,#actionsBtn")) pop.classList.remove("open"); });
 function usagePanel(pop) { pop.insertAdjacentHTML("beforeend", "<h3>Usage and quotas</h3>"); const items = snap.usage || [];
   if (!items.length) pop.insertAdjacentHTML("beforeend", '<div class="empty">No quota source is configured. Local models have no quota.</div>');
   for (const u of items) { const row = document.createElement("div"); row.className = "urow"; const head = document.createElement("div"); head.className = "uhead"; head.append(badge(u.provider_id, 22)); head.insertAdjacentHTML("beforeend", `<b>${esc(u.name)}</b><small>${esc(u.plan || (u.status === "unlimited" ? "no quota" : u.status))}</small>`); row.append(head);
@@ -280,7 +279,7 @@ function frame(t) { if (!orbEl || !orbEl.isConnected) return; const ctx = orbCtx
 function renderTop() {
   const a = selected && snap.agents[selected], app = $("app"); app.classList.toggle("nosel", !a); $("ptitle").textContent = a ? (a.title || selected) : "Inari";
   $("pphase").innerHTML = a ? `<span class="phase" style="--c:var(--${a.phase === "inference" ? "copper" : a.phase === "listening" ? "purple" : a.phase === "success" ? "ok" : a.phase === "error" ? "bad" : "dim"})">${GLYPH[a.phase]} ${LABEL[a.phase]} · ${esc(a.node)}</span>` : "";
-  for (const id of ["moveBtn", "forkBtn", "mergeBtn"]) $(id).hidden = !a; const chip = $("modelChip"); chip.hidden = !a; if (a) fillModelChip(chip, a.model); document.body.classList.toggle("open", !!a); drawComposer();
+  $("actionsBtn").hidden = !a; const chip = $("modelChip"); chip.hidden = !a; if (a) fillModelChip(chip, a.model); document.body.classList.toggle("open", !!a); drawComposer();
 }
 function fillModelChip(chip, model) { chip.textContent = ""; chip.append(badge(model, 18)); const n = document.createElement("span"); n.className = "n"; n.textContent = shortModel(model); chip.append(n); const r = ring(model); if (r) chip.append(r); }
 function drawComposer() {
@@ -329,9 +328,9 @@ function drawChat() {
 $("back").onclick = () => { selected = null; renderTop(); drawChat(); drawBench(); if (snap) renderCores(Object.entries(snap.agents)); };
 $("newThread").onclick = () => { selected = null; renderTop(); drawChat(); drawBench(); if (snap) renderCores(Object.entries(snap.agents)); $("msg").focus(); };
 $("searchBtn").onclick = () => { $("search").classList.toggle("on"); $("search").focus(); };
-$("forkBtn").onclick = async () => { await api("/api/fork", { agent: selected, new_thread: selected + "-fork-" + (Date.now() % 10000), upto: forkAt }); toast(`Forking ${selected}${forkAt ? " at the chosen event" : ""}…`); };
-$("moveBtn").onclick = () => openMove(selected, snap.agents[selected].node);
-$("mergeBtn").onclick = () => { const me = snap.agents[selected], others = Object.entries(snap.agents).filter(([id, a]) => id !== selected && a.node === me.node); sheet(`Merge which thread into ${selected}?`, others.map(([id]) => [id, () => api("/api/merge", { target: selected, source: id })]), others.length ? "Both threads must run on the same core." : "No other thread on this core."); };
+async function forkNow() { await api("/api/fork", { agent: selected, new_thread: selected + "-fork-" + (Date.now() % 10000), upto: forkAt }); toast(`Forking ${selected}${forkAt ? " at the chosen event" : ""}…`); }
+function doMerge() { const me = snap.agents[selected], others = Object.entries(snap.agents).filter(([id, a]) => id !== selected && a.node === me.node); sheet(`Merge which thread into ${selected}?`, others.map(([id]) => [id, () => api("/api/merge", { target: selected, source: id })]), others.length ? "Both threads must run on the same core." : "No other thread on this core."); }
+$("actionsBtn").onclick = () => openPop($("actionsBtn"), (pop) => { const a = snap.agents[selected]; pop.insertAdjacentHTML("beforeend", "<h3>Thread</h3>"); for (const [label, fn] of [["Move to another core…", () => openMove(selected, a.node)], [forkAt ? "Fork from the chosen event" : "Fork this thread", forkNow], ["Merge another thread into this one…", doMerge]]) { const b = document.createElement("button"); b.className = "mrow"; b.textContent = label; b.onclick = () => { $("pop").classList.remove("open"); fn(); }; pop.append(b); } });
 
 /* ---------- artifacts pane ---------- */
 const ICON = { md: "📝", txt: "📄", py: "🐍", js: "📜", ts: "📜", json: "🧾", html: "🌐", css: "🎨", png: "🖼", jpg: "🖼", jpeg: "🖼", gif: "🖼", svg: "🖼", webp: "🖼", csv: "📊", sh: "⌨️" }, MIME = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", svg: "image/svg+xml" }, ext = (p) => (p.split(".").pop() || "").toLowerCase();
@@ -356,8 +355,8 @@ function terminal(body) {
 function drawBench(soft) {
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("on", t.dataset.tab === tab)); const body = $("bbody"); if (soft && tab === "terminal" && document.activeElement && document.activeElement.id === "terminput") return;
   const keep = body.scrollTop; body.textContent = ""; body.style.padding = ""; if (!selected) { body.innerHTML = '<p class="empty">Select a thread to see its files, run commands, view results and read its journal.</p>'; return; }
-  if (tab === "artifacts") { if (!files) { body.innerHTML = '<p class="empty">Loading…</p>'; return; } if (!files.length) { body.innerHTML = '<p class="empty">No files yet. Ask the agent to create something — its workspace travels with it when you move it.</p>'; return; } body.insertAdjacentHTML("beforeend", '<div class="files"></div>');
-    for (const f of files) { const b = document.createElement("button"); b.innerHTML = `<span class="ic">${ICON[ext(f.path)] || "📄"}</span><span></span><small></small>`; b.children[1].textContent = f.path; b.children[2].textContent = f.size + " B"; b.onclick = () => openFile(f.path); body.querySelector(".files").append(b); } }
+  if (tab === "artifacts") { const hidden = !store.get("showgit", false); const shown = files ? files.filter((f) => !hidden || !f.path.startsWith(".git/")) : files; if (!files) { body.innerHTML = '<p class="empty">Loading…</p>'; return; } if (!shown.length) { body.innerHTML = '<p class="empty">No files yet. Ask the agent to create something — its workspace travels with it when you move it.</p>'; return; } body.insertAdjacentHTML("beforeend", `<label class="empty" style="display:flex;gap:6px;align-items:center;margin-bottom:6px"><input type="checkbox" id="showgit" ${hidden ? "" : "checked"}> show .git (${files.length - files.filter((f) => !f.path.startsWith(".git/")).length} files)</label><div class="files"></div>`); $("showgit").onchange = (e) => { store.set("showgit", e.target.checked); drawBench(); };
+    for (const f of shown) { const b = document.createElement("button"); b.innerHTML = `<span class="ic">${ICON[ext(f.path)] || "📄"}</span><span></span><small></small>`; b.children[1].textContent = f.path; b.children[2].textContent = f.size + " B"; b.onclick = () => openFile(f.path); body.querySelector(".files").append(b); } }
   else if (tab === "terminal") terminal(body); else if (tab === "viewer") viewer(body);
   else { body.insertAdjacentHTML("beforeend", '<p class="empty">Tap an event to fork the thread from it, then press Fork.</p><ul id="tree"></ul>'); const tree = body.querySelector("#tree"); events.forEach((ev) => { const li = document.createElement("li"); li.className = ev.kind + (ev.id === forkAt ? " pick" : ""); const k = document.createElement("b"); k.textContent = ev.kind.replace("_", " "); li.append(k, " " + ev.text.slice(0, 160)); li.onclick = () => { forkAt = ev.id; tree.querySelectorAll(".pick").forEach((x) => x.classList.remove("pick")); li.classList.add("pick"); }; tree.append(li); }); }
   body.scrollTop = keep;

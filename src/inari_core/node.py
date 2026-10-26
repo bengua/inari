@@ -194,7 +194,11 @@ class Node:
         info = NodeInfo(
             cfg.node_id, Role(cfg.role), int(time.time()), capabilities={"endpoint": advertise}
         )
+        models_at = 0.0
         while True:
+            if time.time() - models_at > 300:  # the catalogue changes rarely: look every 5 minutes
+                info.capabilities["models"] = await self._models()
+                models_at = time.time()
             await self.bus.publish("node.announce" if first else "node.heartbeat", info.to_dict())
             first = False
             now = _packets()

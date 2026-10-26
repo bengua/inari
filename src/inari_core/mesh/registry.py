@@ -44,7 +44,11 @@ class Registry:
         known = self._nodes.get(info.node_id)
         if known and known.incarnation > info.incarnation:
             return False  # a stale announcement from before a restart
-        changed = known is None or known.incarnation != info.incarnation
+        changed = (
+            known is None
+            or known.incarnation != info.incarnation
+            or known.capabilities != info.capabilities
+        )
         self._nodes[info.node_id] = info
         return changed
 
