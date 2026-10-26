@@ -3,9 +3,9 @@
 Status: specified and implemented as one responsive page (`src/inari_core/web/index.html`,
 no build step, no external resource) served by `inari-core gateway`. Try it with
 `inari-core demo` (a simulated mesh; every drag performs a real teleportation).
-What the page does today: the node-and-agent graph with drag-to-teleport, the
+Layout: a narrow column of cores on the left (machines stacked, agents as small cards you drag between them), the conversation and prompt in the middle taking the room, and a workbench on the right (Artifacts, Terminal, Viewer, Journal) that can be hidden. On a phone the cores are the home screen, the conversation opens full screen and the workbench is a second full-screen view. What the page does today: the node-and-agent graph with drag-to-teleport, the
 journal as a vertical tree, the live orb driven by `mascot_state`, signed
-approvals, a target sheet for touch (long-press, or `T` on the keyboard), and
+approvals, a terminal that runs a command in the agent's workspace (journaled, so the agent knows), a viewer for text, code, Markdown, JSON, images and sandboxed HTML, a target sheet for touch (long-press, or `T` on the keyboard), and
 reduced-motion support. Not yet built: fork and merge gestures, search, the
 biometric gate (the gateway holds the approval key; browsers use a bearer token),
 and an installable shell. The sections below remain the contract.

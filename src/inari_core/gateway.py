@@ -300,6 +300,15 @@ class Gateway:
                         str(data["agent"]), str(data["source"]), str(data["target"])
                     )
                     return await self._json(writer, 200, {"request": req})
+                if path == "/api/exec":
+                    reply = await self._ask(
+                        "agent.exec.request",
+                        {"agent": str(data["agent"]), "cmd": str(data["cmd"])},
+                        timeout=75.0,
+                    )
+                    return await self._json(
+                        writer, 200, reply or {"ok": False, "output": "no answer"}
+                    )
                 if path == "/api/agent":
                     await self.bus.publish(
                         "agent.create",

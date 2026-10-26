@@ -5,6 +5,7 @@ hub: it also runs the coordinator and, if configured, the gateway."""
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import json
 import os
@@ -225,6 +226,7 @@ class Node:
         self.bus.subscribe("agent.history.request", self._on_history)
         self.bus.subscribe("agent.files.request", self._on_files)
         self.bus.subscribe("agent.file.request", self._on_file)
+        self.bus.subscribe("agent.exec.request", self._on_exec)
 
     async def _announce_created(self, agent: str, ok: bool = True, error: str = "") -> None:
         await self.bus.publish(
@@ -330,11 +332,34 @@ class Node:
             return
         capsule = io.load(self.host.agents / agent)
         sha = capsule.snapshot.tree.get(rel)
-        text = ""
+        reply: dict = {
+            "agent": agent,
+            "path": rel,
+            "size": 0,
+            "b64": "",
+            "text": "",
+            "binary": False,
+        }
         if sha and capsule.blobs().has(sha):
-            raw = capsule.blobs().get(sha)[:100_000]
+            raw = capsule.blobs().get(sha)
+            reply["size"] = len(raw)
             try:
-                text = raw.decode()
+                reply["text"] = raw[:200_000].decode()
             except UnicodeDecodeError:
-                text = "[binary file]"
-        await self.bus.publish(m.payload["reply"], {"agent": agent, "path": rel, "text": text})
+                reply["binary"] = True
+            if reply["binary"] and len(raw) <= 3_000_000:  # images and the like: sent whole
+                reply["b64"] = base64.b64encode(raw).decode()
+        await self.bus.publish(m.payload["reply"], reply)
+
+    async def _on_exec(self, m) -> None:
+        agent = str(m.payload["agent"])
+        if self.runner is None or self.host.status(agent) != "running":
+            return
+        self._spawn(self._exec(agent, str(m.payload["cmd"]), m.payload["reply"]))
+
+    async def _exec(self, agent: str, cmd: str, reply: str) -> None:
+        try:
+            result = await self.runner.exec_user(agent, cmd)
+        except Exception as exc:  # noqa: BLE001 - the person gets the reason, not silence
+            result = {"ok": False, "output": f"{type(exc).__name__}: {exc}", "code": -1}
+        await self.bus.publish(reply, {"agent": agent, **result})

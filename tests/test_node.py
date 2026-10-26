@@ -146,3 +146,25 @@ async def test_a_guarded_command_reaches_the_phone_through_the_hub(mesh):
     assert await until(
         lambda: any(e["kind"] == "tool_result" and "hi" in e["text"] for e in hub.gateway.log["g"])
     )
+
+
+async def test_a_command_typed_by_the_person_runs_in_the_workspace_and_the_agent_knows(mesh):
+    hub, worker = mesh
+    api = hub.gateway.port
+    await http(api, "POST", "/api/agent", {"thread_id": "x1", "node": "worker"}, token="tok")
+    assert await until(lambda: worker.host.status("x1") == "running")
+    status, body = await http(
+        api,
+        "POST",
+        "/api/exec",
+        {"agent": "x1", "cmd": "echo made-by-person > p.txt; cat p.txt"},
+        token="tok",
+    )
+    reply = json.loads(body)
+    assert status == 200 and reply["ok"] and "made-by-person" in reply["output"]
+    capsule = load(worker.host.agents / "x1")
+    assert "p.txt" in capsule.snapshot.tree and verify(capsule.root) == []
+    call = [e for e in capsule.timeline.ordered() if e.kind.value == "tool_call"][0]
+    assert call.data["arguments"]["by"] == "user"  # journaled, so the next turn sees it
+    status, body = await http(api, "GET", "/api/agent/x1/file?path=p.txt", token="tok")
+    assert "made-by-person" in json.loads(body)["text"]
