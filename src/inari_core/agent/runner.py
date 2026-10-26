@@ -152,6 +152,7 @@ class AgentRunner:
                 provider, runtime, context_tokens=context_tokens, max_steps=max_steps
             )
         self.host, self.harness, self.approvals, self.publish = host, harness, approvals, publish
+        self.runtime = runtime
         self.approval_ttl = approval_ttl
         self.phases: dict[str, str] = {}
         self._locks: dict[str, asyncio.Lock] = {}
@@ -207,6 +208,44 @@ class AgentRunner:
             self.host.agents / agent, self._author(agent), kind, data, time.time()
         )
         return capsule.timeline.ordered()[-1]
+
+    # -- a command typed by the person, run in the agent's sandbox ---------------------------
+    async def exec_user(self, agent: str, cmd: str) -> dict[str, Any]:
+        """Run `cmd` in the agent's workspace, journal it as a tool call so the agent knows
+        what was done, and keep the resulting files. Waits for any turn in progress."""
+        lock = self._locks.setdefault(agent, asyncio.Lock())
+        async with lock:
+            if self.host.status(agent) != "running":
+                return {"ok": False, "output": "this node does not run the agent", "code": -1}
+            path, workdir = self.host.agents / agent, self.host.root / "work" / agent
+            shutil.rmtree(workdir, ignore_errors=True)
+            capsule = io.load(path)
+            materialize(capsule, workdir)
+            call_id = uuid.uuid4().hex[:12]
+            ev = self._append(
+                agent,
+                EventKind.TOOL_CALL,
+                {"call_id": call_id, "name": "bash", "arguments": {"cmd": cmd, "by": "user"}},
+            )
+            await self._emit(agent, "tool_call", ev.id, {"name": "bash", "arguments": {"cmd": cmd}})
+            result = await self.runtime.run(
+                capsule.environment, workdir, ["/bin/sh", "-c", cmd], timeout=60
+            )
+            output = (result.stdout + result.stderr)[:20000] or "(no output)"
+            ev = self._append(
+                agent,
+                EventKind.TOOL_RESULT,
+                {"call_id": call_id, "output": output, "is_error": result.code != 0},
+            )
+            await self._emit(agent, "tool_result", ev.id, {"output": output})
+            io.update_snapshot(path, workdir)
+            shutil.rmtree(workdir, ignore_errors=True)
+            return {
+                "ok": result.code == 0,
+                "output": output,
+                "code": result.code,
+                "timed_out": result.timed_out,
+            }
 
     # -- one user turn -----------------------------------------------------------
     async def run(self, agent: str, text: str) -> RunSummary:
