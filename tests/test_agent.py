@@ -132,7 +132,7 @@ async def test_without_an_approver_a_guarded_command_is_denied(tmp_path):
         for e in load(host.agents / agent).timeline.ordered()
         if e.kind.value == "tool_result"
     ]
-    assert out[0]["is_error"] and "no approver" in out[0]["output"]
+    assert out[0]["is_error"] and out[0]["output"].startswith("denied")
 
 
 async def test_freezing_during_a_run_stops_it_at_the_next_step_and_the_agent_moves(tmp_path):
