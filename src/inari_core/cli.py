@@ -21,13 +21,11 @@ def _open(path: Path, work: Path) -> Path:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="inari-core")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("schema", help="write the JSON Schemas").add_argument(
-        "dest", type=Path
-    )
+    sub.add_parser("schema", help="write the JSON Schemas").add_argument("dest", type=Path)
     for name in ("verify", "inspect"):
-        sub.add_parser(
-            name, help=f"{name} a capsule (directory or archive)"
-        ).add_argument("path", type=Path)
+        sub.add_parser(name, help=f"{name} a capsule (directory or archive)").add_argument(
+            "path", type=Path
+        )
     sub.add_parser("keygen", help="make a signing key pair").add_argument("name")
     sign = sub.add_parser("sign", help="sign an exported capsule directory")
     sign.add_argument("root", type=Path)
@@ -36,6 +34,15 @@ def main(argv: list[str] | None = None) -> int:
         "--trusted", type=Path, action="append", default=[],
         help="public key file; the capsule must be signed by one of them",
     )  # fmt: skip
+    demo = sub.add_parser("demo", help="run a simulated mesh with the web interface")
+    demo.add_argument("--port", type=int, default=8787)
+    demo.add_argument("--token", default="demo")
+    gw = sub.add_parser("gateway", help="serve the web interface for a real mesh")
+    gw.add_argument("--connect", required=True, help="HOST:PORT of a bus server")
+    gw.add_argument("--key-file", type=Path, required=True, help="shared mesh key")
+    gw.add_argument("--token-file", type=Path, required=True, help="bearer token for browsers")
+    gw.add_argument("--device-key-file", type=Path, required=True, help="approval signing key")
+    gw.add_argument("--listen", default="127.0.0.1:8787")
     pack = sub.add_parser("pack", help="archive a capsule directory")
     pack.add_argument("root", type=Path)
     pack.add_argument("archive", type=Path)
@@ -47,6 +54,41 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "schema":
         for path in schema.export(args.dest):
             print(path)
+        return 0
+    if args.cmd == "demo":
+        import asyncio
+
+        from .demo import run_demo
+
+        try:
+            asyncio.run(run_demo(port=args.port, token=args.token))
+        except KeyboardInterrupt:
+            pass
+        return 0
+    if args.cmd == "gateway":
+        import asyncio
+
+        from .gateway import Gateway
+        from .mesh import Bus
+        from .transport import BusClient
+
+        async def serve() -> None:
+            bus = Bus("gateway")
+            host, _, port = args.connect.rpartition(":")
+            client = BusClient(bus, args.key_file.read_bytes().strip(), host, int(port))
+            client.start()
+            gateway = Gateway(
+                bus, token=args.token_file.read_text().strip(),
+                device_key=args.device_key_file.read_bytes().strip(),
+            )  # fmt: skip
+            lhost, _, lport = args.listen.rpartition(":")
+            print(f"gateway on http://{lhost}:{await gateway.start(lhost, int(lport))}/")
+            await asyncio.Event().wait()
+
+        try:
+            asyncio.run(serve())
+        except KeyboardInterrupt:
+            pass
         return 0
     if args.cmd == "keygen":
         from . import signature

@@ -34,14 +34,10 @@ class Telemetry:
     agents: dict[str, dict[str, Any]] = field(default_factory=dict)
     nodes: dict[str, dict[str, float]] = field(default_factory=dict)
 
-    def update_agent(
-        self, agent_id: str, node_id: str, phase: str, **extra: Any
-    ) -> None:
+    def update_agent(self, agent_id: str, node_id: str, phase: str, **extra: Any) -> None:
         self.agents[agent_id] = {"node": node_id, "phase": Phase(phase), **extra}
 
-    def update_node(
-        self, node_id: str, *, gpu: float = 0.0, packets: float = 0.0
-    ) -> None:
+    def update_node(self, node_id: str, *, gpu: float = 0.0, packets: float = 0.0) -> None:
         self.nodes[node_id] = {"gpu": gpu, "packets": packets}
 
     def drop_node(self, node_id: str) -> None:

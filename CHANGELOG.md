@@ -9,6 +9,8 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Added
 
+- **Web interface and gateway**: node/agent graph with drag-to-teleport, journal tree,
+  live orb, approvals, phone layout; `inari-core demo` and `inari-core gateway`.
 - **Transport**: authenticated TCP framing, bus links with durable replay, remote
   endpoints (teleportation across processes).
 - **Sandbox**: subprocess and container runtimes; workspace snapshots update the

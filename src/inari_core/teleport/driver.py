@@ -67,9 +67,7 @@ async def teleport(
     except TransportError as exc:
         machine.fire("ack_lost")
         out.error = f"reply lost: {exc}"
-        settled = await resolve_in_doubt(
-            source, target, agent_id, sid, frozen.epoch, epoch
-        )
+        settled = await resolve_in_doubt(source, target, agent_id, sid, frozen.epoch, epoch)
         out.needs_attention = settled.state == State.IN_DOUBT.value
         out.state = settled.state
         out.history = [s.value for s in machine.history]

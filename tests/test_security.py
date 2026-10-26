@@ -91,9 +91,7 @@ async def test_forged_flipped_and_expired_responses_are_refused():
 def test_exported_schemas_match_the_committed_ones():
     root = Path(__file__).resolve().parent.parent / "schema"
     for name, text in schema.render().items():
-        assert (root / name).read_text() == text, (
-            f"{name} is stale: run `inari-core schema schema`"
-        )
+        assert (root / name).read_text() == text, f"{name} is stale: run `inari-core schema schema`"
 
 
 def test_cli_verifies_inspects_and_detects_damage(tmp_path):

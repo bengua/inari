@@ -81,9 +81,7 @@ def test_environment_refuses_secret_values():
 
 
 def test_append_event_keeps_the_capsule_sound(capsule):
-    updated = append_event(
-        capsule.root, "node-a", EventKind.DECISION, {"text": "go"}, 9.0
-    )
+    updated = append_event(capsule.root, "node-a", EventKind.DECISION, {"text": "go"}, 9.0)
     assert len(updated.timeline) == 4
     assert verify(capsule.root) == []
 

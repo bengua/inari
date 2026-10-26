@@ -23,17 +23,13 @@ def _to_dict(m: Message) -> dict[str, Any]:
 
 
 def _from_dict(d: dict[str, Any]) -> Message:
-    return Message(
-        d["subject"], d["payload"], d["sender"], d["msg_id"], tuple(d["path"])
-    )
+    return Message(d["subject"], d["payload"], d["sender"], d["msg_id"], tuple(d["path"]))
 
 
 class PeerLink:
     """Same duck type as `mesh.bus.Link`: `peer_name` and `send`."""
 
-    def __init__(
-        self, bus: Bus, durable: tuple[str, ...] = DURABLE, limit: int = 10_000
-    ):
+    def __init__(self, bus: Bus, durable: tuple[str, ...] = DURABLE, limit: int = 10_000):
         self.bus, self.durable = bus, durable
         self.peer_name = ""
         self.wire: Wire | None = None
@@ -128,9 +124,7 @@ class BusServer:
 class BusClient:
     """Dials a server and keeps the link up, reconnecting with a capped backoff."""
 
-    def __init__(
-        self, bus: Bus, key: bytes, address: str, port: int, retry: float = 0.2
-    ):
+    def __init__(self, bus: Bus, key: bytes, address: str, port: int, retry: float = 0.2):
         self.bus, self.key, self.address, self.port = bus, key, address, port
         self.retry = retry
         self.link = PeerLink(bus)

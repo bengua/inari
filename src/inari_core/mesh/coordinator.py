@@ -44,9 +44,7 @@ class MeshCoordinator:
 
     def _on_load(self, message: Message) -> None:
         p = message.payload
-        self.telemetry.update_node(
-            p["node"], gpu=p.get("gpu", 0.0), packets=p.get("packets", 0.0)
-        )
+        self.telemetry.update_node(p["node"], gpu=p.get("gpu", 0.0), packets=p.get("packets", 0.0))
 
     async def sweep(self) -> list[str]:
         """Forget nodes that stopped heartbeating; tell everyone."""

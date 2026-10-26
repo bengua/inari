@@ -20,10 +20,7 @@ MODELS = {
 
 def render() -> dict[str, str]:
     return {
-        f"{name}.schema.json": json.dumps(
-            m.model_json_schema(), indent=2, sort_keys=True
-        )
-        + "\n"
+        f"{name}.schema.json": json.dumps(m.model_json_schema(), indent=2, sort_keys=True) + "\n"
         for name, m in MODELS.items()
     }
 

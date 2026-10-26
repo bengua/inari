@@ -31,9 +31,7 @@ class Timeline:
         return False
 
     def ordered(self) -> list[TimelineEvent]:
-        return sorted(
-            self._by_id.values(), key=lambda e: (e.lamport, e.node_id, e.node_seq)
-        )
+        return sorted(self._by_id.values(), key=lambda e: (e.lamport, e.node_id, e.node_seq))
 
     def clock(self) -> int:
         return max((e.lamport for e in self._by_id.values()), default=0)
@@ -88,14 +86,11 @@ class Timeline:
 
     def dumps(self) -> str:
         return "".join(
-            json.dumps(e.model_dump(mode="json"), sort_keys=True) + "\n"
-            for e in self.ordered()
+            json.dumps(e.model_dump(mode="json"), sort_keys=True) + "\n" for e in self.ordered()
         )
 
     @classmethod
     def loads(cls, text: str) -> Timeline:
         return cls(
-            TimelineEvent.model_validate_json(line)
-            for line in text.splitlines()
-            if line.strip()
+            TimelineEvent.model_validate_json(line) for line in text.splitlines() if line.strip()
         )

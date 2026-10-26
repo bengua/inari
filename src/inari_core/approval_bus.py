@@ -19,9 +19,7 @@ class NodeApprovals:
     def _on_response(self, message: Message) -> None:
         self.gate.resolve(ApprovalResponse.model_validate(message.payload))
 
-    async def ask(
-        self, agent_id: str, node_id: str, command: str, ttl: float = 60.0
-    ) -> bool:
+    async def ask(self, agent_id: str, node_id: str, command: str, ttl: float = 60.0) -> bool:
         request, future = self.gate.open(agent_id, node_id, command, ttl)
         await self.bus.publish("approval.request", request.model_dump(mode="json"))
         return await self.gate.decide(future, ttl)

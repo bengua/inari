@@ -34,9 +34,7 @@ class NodeInfo:
 
 
 class Registry:
-    def __init__(
-        self, *, ttl: float = 15.0, clock: Callable[[], float] = time.monotonic
-    ):
+    def __init__(self, *, ttl: float = 15.0, clock: Callable[[], float] = time.monotonic):
         self.ttl, self.clock = ttl, clock
         self._nodes: dict[str, NodeInfo] = {}
 
@@ -62,9 +60,7 @@ class Registry:
 
     def expired(self) -> list[str]:
         now = self.clock()
-        return sorted(
-            n.node_id for n in self._nodes.values() if now - n.seen_at > self.ttl
-        )
+        return sorted(n.node_id for n in self._nodes.values() if now - n.seen_at > self.ttl)
 
     def snapshot(self) -> list[dict[str, Any]]:
         return [n.to_dict() for n in self.alive()]

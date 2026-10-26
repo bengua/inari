@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Inari</title>
+<style>
+:root {
+  --bg-0:#060913; --bg-1:#0f172a; --fg:#e6edf7; --muted:#8aa0bd;
+  --idle:#22d3ee; --listening:#e879f9; --inference:#fbbf24; --success:#34d399; --error:#f87171;
+  --glass:rgba(255,255,255,.06); --edge:rgba(255,255,255,.12);
+}
+* { box-sizing: border-box; }
+body { margin:0; min-height:100vh; color:var(--fg); font:15px/1.4 system-ui, sans-serif;
+  background: radial-gradient(1200px 700px at 70% -10%, #13203d 0, var(--bg-1) 45%, var(--bg-0) 100%) fixed;
+  padding: env(safe-area-inset-top) 16px env(safe-area-inset-bottom); }
+.glass { background:var(--glass); border:1px solid var(--edge); border-radius:18px;
+  backdrop-filter: blur(18px) saturate(140%); -webkit-backdrop-filter: blur(18px) saturate(140%); }
+header { display:flex; align-items:center; gap:16px; padding:12px 0; }
+#orb { width:72px; height:72px; flex:none; }
+#stats { color:var(--muted); }
+#stats b { color:var(--fg); font-weight:600; }
+main { display:grid; grid-template-columns: 1fr 340px; gap:16px; padding-bottom:24px; }
+#graph { display:grid; grid-template-columns: repeat(auto-fit, minmax(240px,1fr)); gap:16px; align-content:start; }
+.node { padding:14px; min-height:150px; transition: box-shadow .3s, border-color .3s, opacity .2s;
+  box-shadow: 0 0 calc(var(--load,0) * 36px) rgba(34,211,238,calc(.15 + var(--load,0) * .5)); }
+.node h3 { margin:0 0 4px; font-size:16px; }
+.node small { color:var(--muted); display:block; margin-bottom:10px; }
+.node.valid { border-color: var(--idle); box-shadow: 0 0 28px rgba(34,211,238,.5); }
+.node.invalid { opacity:.4; }
+.agents { display:flex; flex-wrap:wrap; gap:10px; }
+.agent { --c:var(--idle); display:inline-flex; align-items:center; gap:8px; color:var(--fg);
+  background:rgba(255,255,255,.07); border:2px solid var(--c); border-radius:999px; padding:8px 14px;
+  font:inherit; cursor:grab; touch-action:none; user-select:none; transition: border-color .4s, box-shadow .4s; }
+.agent[data-phase=listening] { --c:var(--listening); } .agent[data-phase=inference] { --c:var(--inference); }
+.agent[data-phase=success] { --c:var(--success); } .agent[data-phase=error] { --c:var(--error); }
+.agent .glyph { color:var(--c); width:1.1em; text-align:center; }
+.agent.selected { box-shadow: 0 0 0 3px rgba(255,255,255,.25), 0 0 18px var(--c); }
+.agent.moving { border-style:dashed; opacity:.55; cursor:progress; }
+.ghost { position:fixed; pointer-events:none; z-index:50; opacity:.9; transform:translate(-50%,-50%); }
+aside { padding:16px; align-self:start; }
+aside h2 { margin:0 0 8px; font-size:15px; }
+#tree { list-style:none; margin:0; padding:0; border-left:2px solid var(--edge); }
+#tree li { position:relative; padding:4px 0 4px 18px; color:var(--muted); overflow-wrap:anywhere; }
+#tree li::before { content:""; position:absolute; left:-6px; top:11px; width:10px; height:10px; border-radius:50%;
+  background:var(--bg-1); border:2px solid var(--muted); }
+#tree li.decision::before { border-color:var(--inference); } #tree li.tool_call::before { border-color:var(--idle); }
+#tree li.user_message::before { border-color:var(--listening); } #tree li.checkpoint::before { border-radius:2px; transform:rotate(45deg); }
+#tree li.head { color:var(--fg); } #tree li b { color:var(--fg); font-weight:600; }
+#approvals { position:fixed; left:16px; right:16px; bottom:calc(16px + env(safe-area-inset-bottom)); display:grid; gap:10px; z-index:40; }
+.ask { padding:14px; max-width:520px; margin:0 auto; width:100%; border-color:var(--inference); }
+.ask code { display:block; margin:6px 0 10px; color:var(--inference); overflow-wrap:anywhere; }
+.ask .row { display:flex; gap:10px; } .ask button { flex:1; }
+button.act { font:inherit; color:var(--fg); background:var(--glass); border:1px solid var(--edge); border-radius:12px; padding:12px; min-height:44px; cursor:pointer; }
+button.act.go { border-color:var(--success); color:var(--success); }
+#sheet { position:fixed; inset:auto 16px calc(16px + env(safe-area-inset-bottom)) 16px; z-index:60; padding:16px; display:none; max-width:520px; margin:0 auto; }
+#sheet.open { display:block; } #sheet h2 { margin:0 0 10px; font-size:15px; } #sheet .opts { display:grid; gap:8px; }
+#toast { position:fixed; top:12px; left:50%; transform:translateX(-50%); z-index:70; padding:10px 16px; display:none; }
+#login { max-width:420px; margin:20vh auto; padding:20px; } #login input { width:100%; padding:12px; margin:10px 0; border-radius:10px;
+  border:1px solid var(--edge); background:rgba(0,0,0,.3); color:var(--fg); font:inherit; }
+.empty { color:var(--muted); }
+@media (max-width: 760px) {
+  main { grid-template-columns:1fr; }
+  header { flex-direction:column; text-align:center; padding-top:20px; }
+  #orb { width:min(70vw,280px); height:min(70vw,280px); }
+  aside { order:2; } #graph { order:1; } main { padding-bottom:200px; }
+}
+@media (prefers-reduced-motion: reduce) { .node, .agent { transition:none; } }
+</style>
+</head>
+<body>
+<div id="login" class="glass" hidden>
+  <h2>Inari</h2>
+  <label for="tokenInput">Access token</label>
+  <input id="tokenInput" type="password" autocomplete="current-password">
+  <button class="act go" id="tokenGo">Connect</button>
+</div>
+<div id="app" hidden>
+  <header>
+    <canvas id="orb" width="280" height="280" role="img" aria-label="Network activity indicator"></canvas>
+    <div id="stats" aria-live="polite">connecting…</div>
+  </header>
+  <main>
+    <section id="graph" aria-label="Machines and agents"></section>
+    <aside class="glass"><h2 id="inspTitle">Select an agent</h2><ul id="tree"></ul></aside>
+  </main>
+</div>
+<div id="approvals"></div>
+<div id="sheet" class="glass" role="dialog" aria-modal="true"><h2 id="sheetTitle"></h2><div class="opts" id="sheetOpts"></div></div>
+<div id="toast" class="glass" role="status" aria-live="assertive"></div>
+<script>
+"use strict";
+const GLYPH = {idle:"·", listening:"◐", inference:"⟳", success:"✓", error:"!"};
+const $ = (id) => document.getElementById(id);
+let token = new URLSearchParams(location.hash.slice(1)).get("token") || sessionStorage.getItem("inari-token") || "";
+let snap = null, selected = null, pending = new Map(), seenResults = new Set(), drag = null;
+
+function api(path, body) {
+  return fetch(path, { method: body ? "POST" : "GET", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined }).then((r) => r.json());
+}
+function toast(text) {
+  const t = $("toast"); t.textContent = text; t.style.display = "block"; clearTimeout(toast.h);
+  toast.h = setTimeout(() => (t.style.display = "none"), 4000);
+}
+function connect() {
+  if (!token) { $("login").hidden = false; return; }
+  sessionStorage.setItem("inari-token", token); history.replaceState(null, "", location.pathname);
+  $("login").hidden = true; $("app").hidden = false;
+  const es = new EventSource("/events?token=" + encodeURIComponent(token));
+  es.onmessage = (e) => { snap = JSON.parse(e.data); render(); };
+  es.onerror = () => { $("stats").textContent = "offline — last known state"; $("app").style.opacity = ".6"; };
+  es.onopen = () => ($("app").style.opacity = "1");
+}
+$("tokenGo").onclick = () => { token = $("tokenInput").value.trim(); connect(); };
+
+function render() {
+  const agents = Object.entries(snap.agents), busy = agents.filter(([, a]) => a.phase !== "idle").length;
+  $("stats").innerHTML = `<b>${snap.nodes.length}</b> nodes · <b>${agents.length}</b> agents · <b>${busy}</b> busy`;
+  for (const r of snap.results) {
+    if (!seenResults.has(r.request)) {
+      const mine = pending.has(r.request);
+      seenResults.add(r.request); pending.delete(r.request);
+      if (mine) toast(r.ok ? "Teleport committed" : "Teleport " + (r.state || "refused") + ": " + (r.error || ""));
+    }
+  }
+  const graph = $("graph"); graph.textContent = "";
+  if (!snap.nodes.length) graph.innerHTML = '<p class="empty">No machine has announced itself yet.</p>';
+  for (const n of snap.nodes) {
+    const load = (snap.load[n.node_id] || {}).gpu || 0;
+    const el = document.createElement("div"); el.className = "node glass"; el.dataset.node = n.node_id; el.style.setProperty("--load", load);
+    el.innerHTML = `<h3></h3><small></small><div class="agents"></div>`;
+    el.querySelector("h3").textContent = n.node_id;
+    el.querySelector("small").textContent = `${n.role} · load ${Math.round(load * 100)}%`;
+    for (const [id, a] of agents.filter(([, a]) => a.node === n.node_id)) el.querySelector(".agents").append(pastille(id, a));
+    graph.append(el);
+  }
+  drawOrbParams(snap.mascot);
+  renderApprovals();
+}
+function pastille(id, a) {
+  const b = document.createElement("button"); b.className = "agent"; b.dataset.agent = id; b.dataset.phase = a.phase; b.dataset.node = a.node;
+  b.setAttribute("aria-label", `${id} on ${a.node}, ${a.phase}. Press T to move it.`);
+  b.innerHTML = `<span class="glyph"></span><span></span>`;
+  b.firstChild.textContent = GLYPH[a.phase] || "·"; b.lastChild.textContent = id;
+  if (selected === id) b.classList.add("selected");
+  if ([...pending.values()].includes(id)) b.classList.add("moving");
+  b.onpointerdown = (e) => startDrag(e, b, id, a.node);
+  b.onkeydown = (e) => { if (e.key === "t" || e.key === "T") openSheet(id, a.node); if (e.key === "Enter") select(id); };
+  return b;
+}
+async function select(id) {
+  selected = id; $("inspTitle").textContent = id;
+  const { events } = await api(`/api/agent/${encodeURIComponent(id)}/timeline`);
+  const tree = $("tree"); tree.textContent = "";
+  events.forEach((ev, i) => {
+    const li = document.createElement("li"); li.className = ev.kind + (i === events.length - 1 ? " head" : "");
+    const k = document.createElement("b"); k.textContent = ev.kind.replace("_", " "); li.append(k, " " + ev.text.slice(0, 90)); tree.append(li);
+  });
+  if (snap) render();
+}
+/* Dragging: a ghost follows the pointer, valid machines glow, dropping on one moves the agent. */
+function startDrag(e, el, id, from) {
+  drag = { id, from, x: e.clientX, y: e.clientY, active: false, el, ghost: null, hold: null };
+  drag.hold = setTimeout(() => { if (drag && !drag.active) { openSheet(id, from); drag = null; } }, 600);
+  window.onpointermove = onMove; window.onpointerup = onUp;
+}
+function onMove(e) {
+  if (!drag) return;
+  if (!drag.active && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 8) {
+    clearTimeout(drag.hold); drag.active = true; drag.ghost = drag.el.cloneNode(true); drag.ghost.className += " ghost"; document.body.append(drag.ghost);
+    document.querySelectorAll(".node").forEach((n) => n.classList.add(n.dataset.node === drag.from ? "invalid" : "valid"));
+  }
+  if (drag.active) { drag.ghost.style.left = e.clientX + "px"; drag.ghost.style.top = e.clientY + "px"; }
+}
+function onUp(e) {
+  window.onpointermove = window.onpointerup = null;
+  if (!drag) return; clearTimeout(drag.hold);
+  const d = drag; drag = null;
+  document.querySelectorAll(".node").forEach((n) => n.classList.remove("valid", "invalid"));
+  if (!d.active) { select(d.id); return; }
+  d.ghost.remove();
+  const target = document.elementsFromPoint(e.clientX, e.clientY).find((x) => x.classList && x.classList.contains("node"));
+  if (target && target.dataset.node !== d.from) teleport(d.id, d.from, target.dataset.node);
+}
+async function teleport(agent, source, target) {
+  const r = await api("/api/teleport", { agent, source, target });
+  if (r.request) { pending.set(r.request, agent); toast(`Moving ${agent} to ${target}…`); render(); } else toast("Request refused");
+}
+function openSheet(agent, from) {
+  $("sheetTitle").textContent = `Move ${agent} to…`; const opts = $("sheetOpts"); opts.textContent = "";
+  for (const n of snap.nodes.filter((n) => n.node_id !== from && n.role === "heavy")) {
+    const b = document.createElement("button"); b.className = "act"; b.textContent = n.node_id;
+    b.onclick = () => { $("sheet").classList.remove("open"); teleport(agent, from, n.node_id); }; opts.append(b);
+  }
+  const c = document.createElement("button"); c.className = "act"; c.textContent = "Cancel"; c.onclick = () => $("sheet").classList.remove("open");
+  opts.append(c); $("sheet").classList.add("open"); (opts.firstChild || c).focus();
+}
+function renderApprovals() {
+  const box = $("approvals"); box.textContent = "";
+  for (const r of snap.approvals) {
+    const d = document.createElement("div"); d.className = "ask glass"; d.setAttribute("role", "alert");
+    d.innerHTML = `<strong>Approve?</strong><code></code><div class="row"><button class="act">Deny</button><button class="act go">Approve</button></div>`;
+    d.querySelector("code").textContent = r.command + "  ·  " + r.agent_id + " on " + r.node_id;
+    const [no, yes] = d.querySelectorAll("button");
+    no.onclick = () => api("/api/approval", { request_id: r.request_id, approved: false });
+    yes.onclick = () => api("/api/approval", { request_id: r.request_id, approved: true });
+    box.append(d);
+  }
+}
+/* The orb is a gauge: every parameter comes from the gateway's mascot state. */
+const orb = $("orb"), ctx = orb.getContext("2d"), still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+let P = { colour: "#22d3ee", pulse_hz: .25, turbulence: 0, glow: .2 }, cur = { ...P, hue: [34, 211, 238] };
+function drawOrbParams(m) { P = m; }
+function frame(t) {
+  const w = orb.width, c = w / 2, s = t / 1000;
+  cur.pulse_hz += (P.pulse_hz - cur.pulse_hz) * .05; cur.turbulence += (P.turbulence - cur.turbulence) * .05; cur.glow += (P.glow - cur.glow) * .05;
+  ctx.clearRect(0, 0, w, w);
+  const base = w * .27, r0 = still ? base : base * (1 + .06 * Math.sin(s * 2 * Math.PI * cur.pulse_hz));
+  const halo = ctx.createRadialGradient(c, c, r0 * .6, c, c, w * .5);
+  halo.addColorStop(0, P.colour + Math.round(40 + cur.glow * 120).toString(16).padStart(2, "0")); halo.addColorStop(1, P.colour + "00");
+  ctx.fillStyle = halo; ctx.fillRect(0, 0, w, w);
+  ctx.beginPath();
+  for (let i = 0; i <= 120; i++) {
+    const a = i / 120 * 2 * Math.PI, n = still ? 0 : cur.turbulence * w * .035 * (Math.sin(a * 3 + s * 1.7) + Math.sin(a * 5 - s * 2.3) * .6);
+    const x = c + Math.cos(a) * (r0 + n), y = c + Math.sin(a) * (r0 + n); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  }
+  ctx.closePath(); const g = ctx.createRadialGradient(c - r0 * .3, c - r0 * .3, r0 * .1, c, c, r0 * 1.2);
+  g.addColorStop(0, "#ffffffcc"); g.addColorStop(.35, P.colour); g.addColorStop(1, P.colour + "55"); ctx.fillStyle = g; ctx.fill();
+  if (still) { ctx.lineWidth = 2 + cur.pulse_hz * 3; ctx.strokeStyle = P.colour; ctx.stroke(); }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+connect();
+</script>
+</body>
+</html>

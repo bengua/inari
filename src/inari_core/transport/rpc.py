@@ -24,9 +24,7 @@ class RemoteError(InariError):
 
 
 class EndpointServer:
-    def __init__(
-        self, host: CapsuleHost, key: bytes, bind: str = "127.0.0.1", port: int = 0
-    ):
+    def __init__(self, host: CapsuleHost, key: bytes, bind: str = "127.0.0.1", port: int = 0):
         self.host, self.key, self.bind, self.port = host, key, bind, port
         self._server: asyncio.AbstractServer | None = None
         self._partial: dict[tuple[str, str], bytearray] = {}
@@ -41,9 +39,7 @@ class EndpointServer:
             self._server.close()
             await self._server.wait_closed()
 
-    async def _serve(
-        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
-    ) -> None:
+    async def _serve(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         wire = Wire(reader, writer, self.key)
         try:
             await wire.handshake("server", {"node": self.host.node_id})
@@ -52,9 +48,7 @@ class EndpointServer:
                 result = await self._dispatch(call["method"], call.get("args", {}))
                 await wire.send({"ok": True, "result": result})
             except Exception as exc:  # noqa: BLE001 - reported to the caller
-                await wire.send(
-                    {"ok": False, "kind": type(exc).__name__, "message": str(exc)}
-                )
+                await wire.send({"ok": False, "kind": type(exc).__name__, "message": str(exc)})
         except TransportError:
             pass  # a bad peer is dropped; nothing to clean up (crash-only)
         finally:
@@ -77,9 +71,7 @@ class EndpointServer:
         if method == "tombstone":
             return await h.tombstone(a["agent"], a["epoch"])
         if method == "offer":
-            have = await h.offer(
-                a["sid"], Manifest.model_validate(a["manifest"]), a["epoch"]
-            )
+            have = await h.offer(a["sid"], Manifest.model_validate(a["manifest"]), a["epoch"])
             return sorted(have)
         if method == "receive_chunk":
             key = (a["sid"], a["rel"])
@@ -105,9 +97,7 @@ class RemoteEndpoint:
     """An `Endpoint` whose work happens on another node. One connection per call:
     nothing to resume after a failure, so a retry is just another call."""
 
-    def __init__(
-        self, node_id: str, address: str, port: int, key: bytes, timeout: float = 30
-    ):
+    def __init__(self, node_id: str, address: str, port: int, key: bytes, timeout: float = 30):
         self.node_id, self.address, self.port = node_id, address, port
         self._key, self._timeout = key, timeout
 

@@ -84,3 +84,12 @@ secrets redacted from output) and `ContainerRuntime` (Podman/Docker command with
 network, dropped capabilities, only the workspace writable, secrets passed by name).
 `materialize` restores a capsule's workspace; `update_snapshot` records the result
 back as a differential snapshot.
+
+## Gateway
+
+`inari-core gateway --connect HOST:PORT --key-file K --token-file T --device-key-file D`
+joins the mesh as one more bus, aggregates it into a snapshot and serves the web
+client: `GET /` (the page, public), `GET /events` (server-sent snapshots),
+`POST /api/teleport`, `POST /api/approval`, `GET /api/agent/<id>/timeline`. All but
+the page need `Authorization: Bearer <token>` (or `?token=` for the event stream).
+The gateway holds the device approval key; serve it over a private network or TLS.

@@ -70,9 +70,7 @@ async def test_the_wrong_key_is_refused_and_the_source_resumes(remote):
 
 async def test_an_unreachable_target_rolls_back(remote):
     src, _, agent, _ = remote
-    out = await teleport(
-        src, RemoteEndpoint("node-b", "127.0.0.1", 1, KEY, timeout=1), agent
-    )
+    out = await teleport(src, RemoteEndpoint("node-b", "127.0.0.1", 1, KEY, timeout=1), agent)
     assert out.state == "rolled_back" and src.status(agent) == "running"
 
 

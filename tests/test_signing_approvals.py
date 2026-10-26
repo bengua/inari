@@ -26,10 +26,7 @@ def test_a_signed_capsule_verifies_and_any_change_breaks_it(tmp_path):
 
     loaded = load(capsule.root)
     seal(capsule.root, loaded.manifest, loaded.timeline)  # even a re-sealed capsule
-    assert (
-        "signature does not match"
-        in signature.verify_signature(capsule.root, {public})[0]
-    )
+    assert "signature does not match" in signature.verify_signature(capsule.root, {public})[0]
 
 
 def test_unsigned_and_foreign_signatures_are_refused(tmp_path):
