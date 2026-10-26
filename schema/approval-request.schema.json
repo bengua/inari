@@ -1,0 +1,38 @@
+{
+  "properties": {
+    "agent_id": {
+      "title": "Agent Id",
+      "type": "string"
+    },
+    "command": {
+      "title": "Command",
+      "type": "string"
+    },
+    "expires_at": {
+      "title": "Expires At",
+      "type": "number"
+    },
+    "node_id": {
+      "title": "Node Id",
+      "type": "string"
+    },
+    "nonce": {
+      "title": "Nonce",
+      "type": "string"
+    },
+    "request_id": {
+      "title": "Request Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "request_id",
+    "agent_id",
+    "node_id",
+    "command",
+    "nonce",
+    "expires_at"
+  ],
+  "title": "ApprovalRequest",
+  "type": "object"
+}

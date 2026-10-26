@@ -1,0 +1,26 @@
+{
+  "description": "A workspace tree as path -> content hash. Blobs live in a content store,\nso moving a workspace only moves the blobs the target lacks.",
+  "properties": {
+    "parent": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Parent"
+    },
+    "tree": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Tree",
+      "type": "object"
+    }
+  },
+  "title": "Snapshot",
+  "type": "object"
+}

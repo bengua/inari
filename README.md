@@ -1,100 +1,53 @@
-# Template-Repository-GitHub-Flow
+# inari-core
 
-The repository every new repository on this forge is generated from, by
-`fh-repo-provision.py`. It runs nothing itself: it is the shape a repository is
-expected to have on the day it is created, so the shape does not have to be
-remembered afterwards.
+A distributed agent core built around one idea: **an agent's state is a portable
+file, not a row in someone's database.** Everything else follows from it — hot
+provider switching, moving a running agent between machines, a phone that
+supervises without computing, nodes that keep working when the network does not.
 
-**Read [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md) first.** It states the rules
-— names, language, license, copyright holder, packaging — and, for each one,
-where it is enforced.
+It is a clean-slate design (see [ADR 0001](docs/adr/0001-clean-break.md)), not a
+patch of an earlier engine. This repository holds the foundation: the capsule
+format, the handover engine, the teleportation protocol, the mesh, and the
+specification of the interfaces that sit on top.
 
-## Install
+## What is here
 
-Nothing to install. A repository is generated from this one:
-
-    echo '{"name":"<kebab-case-name>","description":"<one sentence>","private":true}' \
-      | fh-repo-provision.py
-
-That call creates the repository from this template **and** arms branch
-protection on `main` in the same transaction: if the protection fails, the
-repository is deleted. No repository can be born without its guard.
-
-## Use
-
-In the generated repository, in this order:
-
-1. **`LICENSE`** — replace the placeholder. The Shape check fails while
-   `CHOOSE-A-LICENSE` is present, on purpose: an unlicensed repository should
-   not reach `main`.
-2. **`pyproject.toml`** — set `name`, `description`, `license` and the
-   `[project.scripts]` entry points. Delete the file if the repository ships no
-   code. The Shape check refuses a `pyproject.toml` still carrying the
-   template's own placeholder name.
-3. **`README.md`** — replace this text, keeping the four sections below.
-4. **`CHANGELOG.md`** — leave `Unreleased` empty until something belongs in it.
-
-Every README on this forge answers four questions, in this order. A reader who
-knows none of the context should be able to stop after any one of them and still
-have learned something true.
-
-    ## Install        what it takes to have it
-    ## Use            the shortest path to it doing its job
-    ## How it works   the mechanism, not the file list
-    ## Limits         what it does not do, what is untested, what will bite
-
-`Limits` is checked like the others. It is written last and forgotten first, and
-it is the section a future reader thanks you for.
-
-## How it works
-
-Two workflows run on every pull request:
-
-| workflow | status context | what it checks |
+| Piece | Where | State |
 |---|---|---|
-| `ci.yml` | `CI / lint-test` | sandbox guards, `ruff`, `pytest` — **the context branch protection requires** |
-| `shape.yml` | `Shape / Repository shape` | the repository's own shape — files, license, README |
+| Session State Capsule (SSC) format, schemas, verifier | `src/inari_core/capsule`, `schema/`, [docs/ssc.md](docs/ssc.md) | implemented, tested |
+| Provider handover (neutral journal → Anthropic / OpenAI shapes, compaction) | `src/inari_core/handover` | implemented, tested |
+| Teleportation: two-phase commit with a fencing epoch, rollback, in-doubt resolution | `src/inari_core/teleport`, [docs/teleport.md](docs/teleport.md) | implemented, tested with injected faults |
+| Mesh: embedded bus, durable links, discovery, coordinator, telemetry → mascot | `src/inari_core/mesh`, [docs/mesh.md](docs/mesh.md) | implemented, tested |
+| BYOK secrets, signed one-gesture approvals | `secrets.py`, `approvals.py`, [docs/security.md](docs/security.md) | implemented, tested |
+| Desktop spatial graph and mobile client | [docs/ux.md](docs/ux.md) | specification only, on purpose |
+| Real transports (WireGuard/Tailscale sockets, NATS/Zenoh), sandbox runtime | — | not started: the seams are the `Endpoint` and `Link` protocols |
 
-`CI / lint-test` is the context `fh-repo-provision.py` arms on every repository
-it generates. Until 6 September 2026 the template carried `lint.yaml` and
-`test.yaml` instead, whose contexts were `Lint / lint` and `Test / test`: every
-generated repository was born with a guard no workflow could satisfy, and its
-first pull request waited on a check that would never report.
+Read [docs/architecture.md](docs/architecture.md) first.
 
-The Shape check exists because of what this template used to hand down. Until
-September 2026 it carried a one-line README, a `LICENSE` naming a single fixed
-holder, and a `pyproject.toml` declaring `name = "ace-agent"` with the
-description of an unrelated project. Every repository generated from it
-inherited those and shipped with them.
+## Try it
 
-Meanwhile, repositories created by the agent loop did not come through here at
-all: `_handle_create_repo` in `fh-forge-helper.py` calls `tea repos create
---private` and produces an *empty* repository, so whatever the first push
-contained became the repository. Four repositories created between 31 August and
-4 September 2026 arrived with no license and no packaging that way.
+    uv sync --all-extras
+    uv run pytest
+    uv run inari-core schema schema      # regenerate the JSON Schemas
+    uv run inari-core verify  some.ssc   # check any capsule, directory or archive
+    uv run inari-core inspect some.ssc
 
-The result, measured across eleven repositories: four naming styles, three
-README languages, eight missing licenses, and one repository sharing another's
-root commit and all 75 of its commits.
+A capsule is a plain tar of JSON and Markdown files: `tar xf some.ssc` and read it
+with any editor.
 
-## Limits
+## Design rules
 
-- **This repository is exempt from its own content checks**, by name. `LICENSE`
-  here holds the placeholder that generated repositories must replace. Rename
-  this repository and its Shape check turns red until the name in `shape.yml` is
-  updated with it.
-- **The loop still does not come through here.** `create_repo` in
-  `fh-forge-helper.py` must be changed to call `fh-repo-provision.py`; until
-  then, a repository born from an agent run is still born empty.
-- **A new repository has no way to receive its first commit** through the chain:
-  `fh-relais` refuses to push to a default branch, `open_pr` has no base to
-  target, and the helper's `push` operation requires an existing `base_sha`.
-  The seeding is still manual.
-- **Shape checks shape, never correctness.** On 5 September 2026 a malformed
-  HTTP header reached `main` under a green CI: the test had been written
-  alongside the code, forbade itself from touching the network, and never looked
-  at the request it built. A test written with its code inherits that code's
-  blind spots.
-- **The license comparison is textual.** It looks for a phrase from the
-  operative terms plus a size floor. It catches the omission that actually
-  happened — the notice shipped instead of the terms — not every mismatch.
+1. **Crash-only.** Every write is atomic (temp file then rename); every operation
+   can be repeated; recovery is "start again and read the disk".
+2. **One holder.** An agent runs on exactly one node. A fencing epoch, not a
+   timeout, decides who — so a partition can freeze an agent but never run it twice.
+3. **Append-only history.** The journal only grows and merges by set union, so
+   replicas that diverged offline reconcile without conflicts.
+4. **No secrets at rest.** A capsule names the secrets it needs; the host's
+   keychain supplies them for one run.
+5. **Nothing site-specific in the code.** No hostnames, addresses or accounts:
+   everything is configuration.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
