@@ -591,13 +591,7 @@ impl AcpHarness {
                             })
                             .unwrap_or_default();
                     }
-                    output.truncate(
-                        output
-                            .char_indices()
-                            .nth(20_000)
-                            .map(|(i, _)| i)
-                            .unwrap_or(output.len()),
-                    );
+                    let output: String = output.chars().take(20_000).collect();
                     let data = json!({"call_id": call_id, "output": output, "is_error": status == "failed"});
                     if let Some(e) = t.append(EventKind::ToolResult, data) {
                         t.emit(&e);
