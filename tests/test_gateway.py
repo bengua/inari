@@ -42,7 +42,7 @@ async def gw():
 async def test_the_page_is_public_but_data_needs_the_token(gw):
     _, gateway = gw
     status, page = await http(gateway.port, "GET", "/", token="")
-    assert status == 200 and b'<canvas id="orb"' in page
+    assert status == 200 and b'id="fox"' in page
     assert (await http(gateway.port, "GET", "/events", token=""))[0] == 401
     assert (await http(gateway.port, "POST", "/api/teleport", {}, token="nope"))[0] == 401
 

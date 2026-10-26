@@ -9,6 +9,10 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Added
 
+- **Interface merge**: graphite/copper and warm-paper palettes with glass and glow, FoxBot as the mascot
+  (served from a configured folder), threads grouped by vertical core modules, per-thread model
+  picker with family marks, normalised quota sources, attach/dictate/home composer, and an
+  artifacts pane that folds, expands and resizes.
 - **ACP harness**: drive OpenFox (or any Agent Client Protocol agent) as the thinking part of
   an agent; the runner now separates the shared turn from the harness (`ModelLoop` or ACP).
 - **Agent driver**: OpenAI-compatible and Anthropic providers, workspace-confined tools, the

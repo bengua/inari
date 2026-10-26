@@ -42,7 +42,19 @@ for line in sys.stdin:
     elif m == "session/new":
         sid = f"s{len(known()) + 1}"
         KNOWN.write_text(" ".join([*known(), sid]))
-        send({"jsonrpc": "2.0", "id": ident, "result": {"sessionId": sid}})
+        send(
+            {
+                "jsonrpc": "2.0",
+                "id": ident,
+                "result": {
+                    "sessionId": sid,
+                    "models": {
+                        "availableModels": [{"modelId": "fam/alpha"}, {"modelId": "fam/beta"}],
+                        "currentModelId": "fam/alpha",
+                    },
+                },
+            }
+        )
     elif m == "session/load":
         if p["sessionId"] in known():
             send({"jsonrpc": "2.0", "id": ident, "result": {}})
@@ -140,5 +152,9 @@ for line in sys.stdin:
                 },
             )
         send({"jsonrpc": "2.0", "id": ident, "result": {"stopReason": "end_turn"}})
+    elif m == "session/set_model":
+        with LOG.open("a") as fh:
+            fh.write(json.dumps({"set_model": p["modelId"]}) + "\n")
+        send({"jsonrpc": "2.0", "id": ident, "result": {}})
     elif m == "session/cancel":
         pass

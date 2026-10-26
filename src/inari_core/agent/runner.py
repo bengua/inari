@@ -58,6 +58,7 @@ class TurnContext:
     phase: Callable[[str], Awaitable[None]]
     running: Callable[[], bool]  # False once a teleport froze the agent
     approve: Callable[[str], Awaitable[bool]]  # ask the phone about a command
+    model: str = ""  # the model chosen for this thread, "" = the harness default
 
 
 class Harness(Protocol):
@@ -93,7 +94,9 @@ class ModelLoop:
             )
             await ctx.phase("inference")
             try:
-                completion = await self.provider.complete(render(events, self.provider.kind), SPECS)
+                rendered = render(events, self.provider.kind)
+                rendered["model"] = ctx.model
+                completion = await self.provider.complete(rendered, SPECS)
             except ProviderError as exc:
                 ctx.append(
                     EventKind.CHECKPOINT, {"reason": "provider_error", "detail": str(exc)[:300]}
@@ -209,6 +212,46 @@ class AgentRunner:
         )
         return capsule.timeline.ordered()[-1]
 
+    def model_of(self, agent: str) -> str:
+        try:
+            return io.load(self.host.agents / agent).manifest.labels.get("model", "")
+        except (OSError, ValueError):
+            return ""
+
+    def set_model(self, agent: str, model: str) -> bool:
+        """Remember the model chosen for a thread and journal the change."""
+        path = self.host.agents / agent
+        capsule = io.load(path)
+        previous = capsule.manifest.labels.get("model", "")
+        if previous == model:
+            return False
+        labels = {**capsule.manifest.labels, "model": model}
+        io.seal(path, capsule.manifest.model_copy(update={"labels": labels}), capsule.timeline)
+        self._append(
+            agent,
+            EventKind.PROVIDER_SWITCH,
+            {"from": previous, "to": model, "text": f"model: {model}"},
+        )
+        return True
+
+    async def upload(self, agent: str, rel: str, data: bytes) -> dict[str, Any]:
+        """Put a file the person attached into the agent's workspace."""
+        lock = self._locks.setdefault(agent, asyncio.Lock())
+        async with lock:
+            if self.host.status(agent) != "running":
+                return {"ok": False, "error": "this node does not run the agent"}
+            path, workdir = self.host.agents / agent, self.host.root / "work" / agent
+            shutil.rmtree(workdir, ignore_errors=True)
+            materialize(io.load(path), workdir)
+            target = (workdir / rel).resolve()
+            if workdir.resolve() not in target.parents:
+                return {"ok": False, "error": "path leaves the workspace"}
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+            io.update_snapshot(path, workdir)
+            shutil.rmtree(workdir, ignore_errors=True)
+            return {"ok": True, "path": rel, "size": len(data)}
+
     # -- a command typed by the person, run in the agent's sandbox ---------------------------
     async def exec_user(self, agent: str, cmd: str) -> dict[str, Any]:
         """Run `cmd` in the agent's workspace, journal it as a tool call so the agent knows
@@ -248,12 +291,12 @@ class AgentRunner:
             }
 
     # -- one user turn -----------------------------------------------------------
-    async def run(self, agent: str, text: str) -> RunSummary:
+    async def run(self, agent: str, text: str, model: str = "") -> RunSummary:
         lock = self._locks.setdefault(agent, asyncio.Lock())
         async with lock:
-            return await self._run(agent, text)
+            return await self._run(agent, text, model)
 
-    async def _run(self, agent: str, text: str) -> RunSummary:
+    async def _run(self, agent: str, text: str, model: str = "") -> RunSummary:
         if self.host.status(agent) != "running":
             return RunSummary("frozen", error="this node does not run the agent")
         path = self.host.agents / agent
@@ -282,6 +325,7 @@ class AgentRunner:
             phase=lambda phase: self._phase(agent, phase),
             running=lambda: self.host.status(agent) == "running",
             approve=approve,
+            model=model or self.model_of(agent),
         )
         summary = RunSummary("error", error="harness did not finish")
         try:

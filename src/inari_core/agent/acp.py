@@ -49,6 +49,7 @@ class AcpHarness:
         self.command, self.sessions_file, self.timeout = command, Path(sessions_file), timeout
         self.context_tokens = context_tokens
         self.extra_env = extra_env or {}
+        self._models: dict[str, str] = {}
 
     # -- session memory kept per node ------------------------------------------
     def _sessions(self) -> dict[str, str]:
@@ -197,6 +198,16 @@ class AcpHarness:
         try:
             await request("initialize", {"protocolVersion": 1, "clientCapabilities": {}})
             session_id, primed = await self._session(request, ctx)
+            if ctx.model and ctx.model != self._models.get(session_id):
+                try:
+                    await request(
+                        "session/set_model", {"sessionId": session_id, "modelId": ctx.model}
+                    )
+                    self._models[session_id] = ctx.model
+                except RuntimeError as exc:  # unknown model: keep the agent's own, and say so
+                    ctx.append(
+                        EventKind.CHECKPOINT, {"reason": "model_refused", "detail": str(exc)[:200]}
+                    )
             prompt = ctx.text if not primed else f"{primed}\n\n{ctx.text}"
             await ctx.phase("inference")
             prompt_future = asyncio.create_task(
@@ -263,3 +274,38 @@ class AcpHarness:
             "You are continuing a conversation that started elsewhere (another machine or model). "
             "Earlier journal, oldest first:\n" + "\n".join(lines) + "\n\nNew message from the user:"
         )
+
+    async def list_models(self, cwd: Path, timeout: float = 20.0) -> list[str]:
+        """The model ids the agent offers, read from a throw-away session."""
+        proc = await self._spawn(cwd)
+        try:
+
+            async def ask(ident: int, method: str, params: dict) -> dict:
+                proc.stdin.write(
+                    (
+                        json.dumps(
+                            {"jsonrpc": "2.0", "id": ident, "method": method, "params": params}
+                        )
+                        + "\n"
+                    ).encode()
+                )
+                await proc.stdin.drain()
+                while True:
+                    line = await proc.stdout.readline()
+                    if not line:
+                        return {}
+                    message = json.loads(line)
+                    if message.get("id") == ident:
+                        return message.get("result") or {}
+
+            async def probe() -> list[str]:
+                await ask(1, "initialize", {"protocolVersion": 1, "clientCapabilities": {}})
+                made = await ask(2, "session/new", {"cwd": str(cwd), "mcpServers": []})
+                return [m["modelId"] for m in (made.get("models") or {}).get("availableModels", [])]
+
+            return await asyncio.wait_for(probe(), timeout)
+        except (TimeoutError, OSError, ValueError, KeyError):
+            return []
+        finally:
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
