@@ -9,6 +9,10 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Added
 
+- **Rust port, step 1**: the capsule format in Rust (`crates/inari-core`, binary
+  `inari-core-rs`): canonical JSON, journal, manifest, verification, archives, workspace
+  attachments with type detection, uploads in parts. Byte-compatible with the Python
+  reference, proven by cross-language tests.
 - **Interface merge**: graphite/copper and warm-paper palettes with glass and glow, FoxBot as the mascot
   (served from a configured folder), threads grouped by vertical core modules, per-thread model
   picker with family marks, normalised quota sources, attach/dictate/home composer, and an

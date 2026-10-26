@@ -25,7 +25,9 @@ specification of the interfaces that sit on top.
 | Capsule signatures (Ed25519), approvals over the bus | `signature.py`, `approval_bus.py` | implemented, tested |
 | NATS / Zenoh adapters | — | not written: same two seams (`Link`, `Endpoint`) |
 
-Read [docs/architecture.md](docs/architecture.md) first.
+Read [docs/architecture.md](docs/architecture.md) first. The core is being ported to Rust
+(`crates/inari-core`), byte-compatible with the Python reference: see
+[docs/rust-port.md](docs/rust-port.md).
 
 ## Try it
 
