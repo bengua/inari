@@ -139,6 +139,7 @@ dependencies = [
  "base64",
  "getrandom 0.2.17",
  "hmac",
+ "libc",
  "serde",
  "serde_json",
  "sha2",

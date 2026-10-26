@@ -77,9 +77,10 @@ for line in sys.stdin:
         with LOG.open("a") as fh:
             blocks = [b["type"] for b in p["prompt"]]
             fh.write(json.dumps({"cwd": os.getcwd(), "prompt": text, "blocks": blocks}) + "\n")
-        if "crash" in text:
+        last = text.rpartition("New message from the user:")[2]  # priming quotes earlier words
+        if "crash" in last:
             sys.exit(3)
-        if "slow" in text:
+        if "slow" in last:
             for _ in range(100):
                 time.sleep(0.1)
         update(
@@ -89,7 +90,7 @@ for line in sys.stdin:
                 "content": {"type": "text", "text": "secret thoughts"},
             },
         )
-        if "make" in text:
+        if "make" in last:
             Path("made.txt").write_text("made by the fake agent")
             update(
                 sid,
@@ -112,7 +113,7 @@ for line in sys.stdin:
                     ],
                 },
             )
-        if "perm" in text:
+        if "perm" in last:
             send(
                 {
                     "jsonrpc": "2.0",

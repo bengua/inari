@@ -21,6 +21,10 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{mpsc, oneshot};
 
+pub const DEFAULT_SYSTEM: &str =
+    "You are an agent working in a sandboxed workspace. Use the tools to inspect and change \
+                                  files. Be concise; say when you are done.";
+
 const ENV_KEEP: [&str; 6] = [
     "HOME",
     "PATH",
@@ -112,9 +116,9 @@ pub fn summary(e: &TimelineEvent) -> String {
             .to_string(),
         _ => ["text", "name", "output"]
             .iter()
-            .find_map(|k| d.get(*k).and_then(Value::as_str))
-            .unwrap_or("")
-            .to_string(),
+            .filter_map(|k| d.get(*k).and_then(Value::as_str).filter(|x| !x.is_empty()))
+            .collect::<Vec<_>>()
+            .join(" "),
     }
 }
 
@@ -782,7 +786,8 @@ impl Runner {
     }
 
     /// A new agent held by this node, with its harness; returns its id (the thread id).
-    pub fn create(&self, thread: &str, harness: &str, system: &str) -> Result<String, String> {
+    pub fn create(&self, thread: &str, harness: &str, title: &str) -> Result<String, String> {
+        let system = DEFAULT_SYSTEM;
         let harness = if harness.is_empty() {
             self.default_harness.clone()
         } else {
@@ -811,6 +816,9 @@ impl Runner {
         .map_err(|e| e.to_string())?;
         let mut manifest = made.manifest;
         manifest.set_label("harness", &harness);
+        if !title.is_empty() {
+            manifest.extra.insert("title".into(), json!(title));
+        }
         io::seal(&staging, manifest, &made.timeline).map_err(|e| e.to_string())?;
         let id = self.host.adopt(&staging).map_err(|e| e.to_string())?;
         let _ = std::fs::remove_dir_all(&staging);
@@ -827,62 +835,127 @@ impl Runner {
         attach_file(&self.host.agents.join(agent), rel, data).map_err(|e| e.to_string())
     }
 
-    /// Choose the harness or the model of a thread; journaled when it changes.
-    pub fn set_choice(
-        &self,
-        agent: &str,
-        harness: Option<&str>,
-        model: Option<&str>,
-    ) -> Result<bool, String> {
+    fn journal(&self, agent: &str, kind: EventKind, data: Value) -> Result<TimelineEvent, String> {
+        let c = io::append_event(
+            &self.host.agents.join(agent),
+            &format!("{}@{agent}", self.host.node_id),
+            kind,
+            data,
+            now(),
+        )
+        .map_err(|e| e.to_string())?;
+        let e = c
+            .timeline
+            .ordered()
+            .last()
+            .cloned()
+            .cloned()
+            .ok_or("empty journal")?;
+        self.emit(agent, &e);
+        Ok(e)
+    }
+
+    fn relabel(&self, agent: &str, labels: &[(&str, &str)]) -> Result<(), String> {
         let path = self.host.agents.join(agent);
         let capsule = io::load(&path).map_err(|e| e.to_string())?;
         let mut manifest = capsule.manifest.clone();
-        let labels = manifest.labels();
-        let mut changed = false;
-        if let Some(h) = harness {
-            if !self.harnesses.contains_key(h) {
-                return Err(format!("no harness {h:?} on this node"));
-            }
-            if labels.get("harness").and_then(Value::as_str) != Some(h) {
-                manifest.set_label("harness", h);
-                manifest.set_label("model", "");
-                changed = true;
-            }
+        for (k, v) in labels {
+            manifest.set_label(k, v);
         }
-        if let Some(m) = model {
-            if labels.get("model").and_then(Value::as_str) != Some(m) {
-                manifest.set_label("model", m);
-                changed = true;
-            }
+        io::seal(&path, manifest, &capsule.timeline).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    /// Choose who thinks for a thread; changing harness clears its model. Journaled
+    /// as the reference does; false when nothing changed.
+    pub fn set_harness(&self, agent: &str, name: &str) -> Result<bool, String> {
+        if !self.harnesses.contains_key(name) {
+            return Err(format!("no harness {name:?} on this node"));
         }
-        if changed {
-            io::seal(&path, manifest.clone(), &capsule.timeline).map_err(|e| e.to_string())?;
-            let to = format!(
-                "{}:{}",
-                manifest
-                    .labels()
-                    .get("harness")
-                    .and_then(Value::as_str)
-                    .unwrap_or(""),
-                manifest
-                    .labels()
-                    .get("model")
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-            );
-            let c = io::append_event(
-                &path,
-                &format!("{}@{agent}", self.host.node_id),
-                EventKind::ProviderSwitch,
-                json!({"to": to}),
-                now(),
-            )
-            .map_err(|e| e.to_string())?;
-            if let Some(e) = c.timeline.ordered().last() {
-                self.emit(agent, e);
-            }
+        if self.labels(agent).get("harness").and_then(Value::as_str) == Some(name) {
+            return Ok(false);
         }
-        Ok(changed)
+        self.relabel(agent, &[("harness", name), ("model", "")])?;
+        self.journal(
+            agent,
+            EventKind::ProviderSwitch,
+            json!({"from": "", "to": format!("{name}:default"), "harness": name}),
+        )?;
+        Ok(true)
+    }
+
+    /// Remember the model chosen for a thread; false when nothing changed.
+    pub fn set_model(&self, agent: &str, model: &str) -> Result<bool, String> {
+        let previous = self
+            .labels(agent)
+            .get("model")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        if previous == model {
+            return Ok(false);
+        }
+        self.relabel(agent, &[("model", model)])?;
+        self.journal(
+            agent,
+            EventKind::ProviderSwitch,
+            json!({"from": previous, "to": model, "text": format!("model: {model}")}),
+        )?;
+        Ok(true)
+    }
+
+    /// A command the person typed, run in the agent's workspace with a scrubbed
+    /// environment; journaled as a tool call so the agent knows, files kept.
+    pub async fn exec_user(&self, agent: &str, cmd: &str, timeout: Duration) -> Value {
+        let lock = self.lock(agent);
+        let _guard = lock.lock().await;
+        if self.host.status(agent) != "running" {
+            return json!({"ok": false, "output": "this node does not run the agent", "code": -1});
+        }
+        let path = self.host.agents.join(agent);
+        let workdir = self.host.root.join("work").join(agent);
+        let _ = std::fs::remove_dir_all(&workdir);
+        if let Err(e) = io::materialize(&path, &workdir) {
+            return json!({"ok": false, "output": e.to_string(), "code": -1});
+        }
+        let call_id = crate::wire::random_hex(6);
+        let args = json!({"cmd": cmd, "by": "user"});
+        let _ = self.journal(
+            agent,
+            EventKind::ToolCall,
+            json!({"call_id": call_id, "name": "bash", "arguments": args}),
+        );
+        let (code, output, timed_out) = run_scrubbed(&workdir, cmd, timeout).await;
+        let mut output: String = output.chars().take(20_000).collect();
+        if output.is_empty() {
+            output = "(no output)".into();
+        }
+        let _ = self.journal(
+            agent,
+            EventKind::ToolResult,
+            json!({"call_id": call_id, "output": output, "is_error": code != 0}),
+        );
+        if let Err(e) = io::update_snapshot(&path, &workdir) {
+            eprintln!("snapshot of {agent} failed: {e}");
+        }
+        let _ = std::fs::remove_dir_all(&workdir);
+        json!({"ok": code == 0, "output": output, "code": code, "timed_out": timed_out})
+    }
+
+    /// The attachments of a message, from the paths already in the workspace.
+    pub fn attached(&self, agent: &str, paths: &[String]) -> Vec<Attached> {
+        let Ok(c) = io::load(&self.host.agents.join(agent)) else {
+            return vec![];
+        };
+        paths
+            .iter()
+            .filter_map(|p| {
+                let sha = c.snapshot.tree.get(p)?;
+                let data =
+                    std::fs::read(self.host.agents.join(agent).join(io::BLOBS).join(sha)).ok()?;
+                Some(attached_from(p, &data))
+            })
+            .collect()
     }
 
     /// One user turn: journal the message (with its attachments), restore the
@@ -977,6 +1050,47 @@ impl Runner {
         );
         self.set_phase(agent, "idle");
         summary
+    }
+}
+
+const SAFE_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
+
+/// `sh -c cmd` in `cwd` with nothing inherited but a safe PATH; the whole process group
+/// is killed at the deadline, so no child outlives it. Returns code, output, timed out.
+pub async fn run_scrubbed(cwd: &Path, cmd: &str, timeout: Duration) -> (i32, String, bool) {
+    let child = Command::new("/bin/sh")
+        .args(["-c", cmd])
+        .current_dir(cwd)
+        .env_clear()
+        .env("PATH", SAFE_PATH)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .process_group(0)
+        .kill_on_drop(true)
+        .spawn();
+    let child = match child {
+        Ok(c) => c,
+        Err(e) => return (-1, format!("cannot start the shell: {e}"), false),
+    };
+    let pid = child.id();
+    match tokio::time::timeout(timeout, child.wait_with_output()).await {
+        Ok(Ok(out)) => {
+            let mut text = String::from_utf8_lossy(&out.stdout[..out.stdout.len().min(1_000_000)])
+                .into_owned();
+            text.push_str(&String::from_utf8_lossy(
+                &out.stderr[..out.stderr.len().min(1_000_000)],
+            ));
+            (out.status.code().unwrap_or(-1), text, false)
+        }
+        Ok(Err(e)) => (-1, e.to_string(), false),
+        Err(_) => {
+            if let Some(pid) = pid {
+                // SAFETY: signalling the process group this function created.
+                unsafe { libc::kill(-(pid as i32), libc::SIGKILL) };
+            }
+            (-1, format!("timed out after {}s", timeout.as_secs()), true)
+        }
     }
 }
 

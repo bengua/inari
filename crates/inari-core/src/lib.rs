@@ -5,11 +5,16 @@
 //! same bytes for the same state: a capsule written by one is verified by the other.
 
 pub mod agent;
+pub mod approvals;
 pub mod bus;
 pub mod buslink;
 pub mod canon;
 pub mod capsule;
+pub mod gateway;
 pub mod host;
+pub mod mesh;
+pub mod node;
 pub mod rpc;
 pub mod teleport;
+pub mod usage;
 pub mod wire;

@@ -4,6 +4,13 @@
 capsules to peers, runs the agent loop, and joins the bus. A node without `hub` is the
 hub: it also runs the coordinator and, with `gateway_listen`, the web interface.
 
+`inari-core-rs node node.json` is the Rust node. It reads the same file and the same data
+directory, speaks the same bus and endpoint protocols, and serves the same interface, so
+a fleet can mix both and a machine can switch in place. It drives agents through ACP
+harnesses only (`harness` with `"kind": "acp"`, or `harnesses`); the built-in model loop
+(`provider`) and the container sandbox stay in the Python node. It adds
+`"approval_ttl"` (seconds an approval waits for the phone, default 120).
+
 ```json
 {
   "node_id": "workstation",
@@ -75,10 +82,23 @@ are all configuration, and every default is empty.
 | Subject | Effect |
 |---|---|
 | `agent.create` `{thread_id, node, title}` | create an agent on that node, reply `agent.created` |
-| `agent.<id>.run` `{text}` | one user turn on the holder; publishes `agent.<id>.event` as it goes and `agent.<id>.done` |
+| `agent.<id>.run` `{text, attachments?}` | one user turn on the holder; publishes `agent.<id>.event` as it goes and `agent.<id>.done`. `attachments` lists workspace paths sent with the message (Rust node) |
+| `agent.upload.request` `{agent, path, b64, reply}` | put a file in the agent's workspace |
+| `agent.files.request`, `agent.file.request`, `agent.exec.request` | list, read, or run a command in the workspace; the reply goes to `reply` |
+| `agent.<id>.model`, `agent.<id>.harness` | choose the thread's model or harness |
 | `agent.<id>.fork` `{new_thread, upto}` | fork on the holder |
 | `agent.merge` `{target, source}` | union two journals on the same holder |
 | `agent.history.request` `{agent}` | the holder replies `agent.<id>.history` |
 
 Long work runs off the bus: a handler that blocks stalls the link reader, and an agent
 waiting for an approval would be waiting for the very frame it blocks (found by a test).
+
+## Files from the phone
+
+`POST /api/upload` takes `{agent, path, b64}` for a small file, or the same with
+`upload_id`, `offset` and `total` for one part of a larger one (the page sends 512 KiB
+per part, up to 25 MB). Each part must start where the previous one ended; a part sent
+twice is ignored. When the last part arrives the file goes into the agent's workspace,
+and `POST /api/message` with `attachments: [path, …]` sends it to the model with the
+text (Rust node): images as image content to agents that accept it, other files as
+links into the workspace.
