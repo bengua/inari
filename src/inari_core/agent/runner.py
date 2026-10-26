@@ -142,6 +142,7 @@ class AgentRunner:
         runtime: Runtime,
         *,
         harness: Harness | None = None,
+        harnesses: dict[str, Harness] | None = None,
         approvals: NodeApprovals | None = None,
         publish: Publish | None = None,
         context_tokens: int = 32000,
@@ -165,6 +166,7 @@ class AgentRunner:
         self,
         thread_id: str,
         *,
+        harness: str = "",
         system: str = DEFAULT_SYSTEM,
         title: str = "",
         environment: EnvironmentSpec | None = None,
@@ -185,6 +187,12 @@ class AgentRunner:
             holder=Holder(node_id=self.host.node_id, epoch=1),
             access=AccessPolicy(approval_required=approval_required or []),
         )
+        if harness:
+            if harness not in self.harnesses:
+                raise ValueError(f"no harness {harness!r} on this node")
+            made = io.load(staging)
+            labels = {**made.manifest.labels, "harness": harness}
+            io.seal(staging, made.manifest.model_copy(update={"labels": labels}), made.timeline)
         agent = self.host.adopt(staging)
         shutil.rmtree(staging, ignore_errors=True)
         return agent
@@ -329,7 +337,7 @@ class AgentRunner:
         )
         summary = RunSummary("error", error="harness did not finish")
         try:
-            summary = await self.harness.turn(ctx)
+            summary = await self._harness_for(agent).turn(ctx)
         except Exception as exc:  # noqa: BLE001 - a harness bug must not wedge the agent
             self._append(
                 agent, EventKind.CHECKPOINT, {"reason": "harness_error", "detail": str(exc)[:300]}
