@@ -119,8 +119,8 @@ async def test_phone_drags_an_agent_between_machines_end_to_end(tmp_path: Path):
     agent = src.adopt(make_capsule(tmp_path / "seed").root)
     hosts = {"node-a": src, "node-b": dst}
 
-    async def teleporter(agent_id, source, target):
-        return await teleport(hosts[source], hosts[target], agent_id)
+    async def teleporter(agent_id, source, target, progress):
+        return await teleport(hosts[source], hosts[target], agent_id, on_state=progress)
 
     registry = Registry()
     coordinator = MeshCoordinator(home, registry, teleporter)

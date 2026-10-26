@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Awaitable, Callable
 
 from ..errors import TransportError
 from .machine import Machine, State
@@ -15,16 +16,26 @@ async def teleport(
     agent_id: str,
     *,
     session_id: str | None = None,
+    on_state: Callable[[str], Awaitable[None]] | None = None,
 ) -> Outcome:
     sid = session_id or uuid.uuid4().hex
     machine = Machine()
+
+    async def step(event: str) -> None:
+        machine.fire(event)
+        if on_state is not None:
+            try:
+                await on_state(machine.state.value)
+            except Exception:  # noqa: BLE001 - progress is a courtesy, never a failure
+                pass
+
     out = Outcome(session_id=sid, state=machine.state.value)
     epoch = 0
     frozen = None
 
     async def rollback(reason: str) -> Outcome:
         if machine.state in _fail_from:
-            machine.fire("fail")
+            await step("fail")
         out.error = reason
         try:
             await target.abort(sid)
@@ -33,7 +44,7 @@ async def teleport(
         try:
             if frozen is not None:
                 await source.unfreeze(agent_id, frozen.epoch)
-            machine.fire("rollback_ok")
+            await step("rollback_ok")
         except Exception as exc:  # noqa: BLE001
             out.error += f"; source could not resume: {exc}"
             out.needs_attention = True
@@ -41,10 +52,10 @@ async def teleport(
 
     try:
         frozen = await source.freeze(agent_id)
-        machine.fire("freeze_ok")
+        await step("freeze_ok")
         epoch = out.epoch = frozen.epoch + 1
         have = await target.offer(sid, frozen.manifest, epoch)
-        machine.fire("offer_ok")
+        await step("offer_ok")
         for rel in sorted(frozen.manifest.files):
             if rel.startswith(BLOB_PREFIX) and rel[len(BLOB_PREFIX) :] in have:
                 out.blobs_skipped += 1
@@ -53,19 +64,19 @@ async def teleport(
             await target.receive(sid, rel, data)
             out.files_sent += 1
             out.bytes_sent += len(data)
-        machine.fire("transfer_ok")
+        await step("transfer_ok")
         await target.verify(sid)
-        machine.fire("verify_ok")
+        await step("verify_ok")
         await target.prepare(sid)
-        machine.fire("prepare_ok")
+        await step("prepare_ok")
     except Exception as exc:  # noqa: BLE001
         return await rollback(f"{type(exc).__name__}: {exc}")
 
-    machine.fire("commit_sent")
+    await step("commit_sent")
     try:
         await target.activate(sid, epoch)
     except TransportError as exc:
-        machine.fire("ack_lost")
+        await step("ack_lost")
         out.error = f"reply lost: {exc}"
         settled = await resolve_in_doubt(source, target, agent_id, sid, frozen.epoch, epoch)
         out.needs_attention = settled.state == State.IN_DOUBT.value
@@ -73,9 +84,9 @@ async def teleport(
         out.history = [s.value for s in machine.history]
         return out
     except Exception as exc:  # noqa: BLE001 - the target said no, so it did not activate
-        machine.fire("activate_refused")
+        await step("activate_refused")
         return await rollback(f"{type(exc).__name__}: {exc}")
-    machine.fire("activate_ok")
+    await step("activate_ok")
     try:
         await source.tombstone(agent_id, epoch)
     except Exception as exc:  # noqa: BLE001 - fencing already protects us

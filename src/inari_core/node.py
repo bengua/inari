@@ -161,8 +161,10 @@ class Node:
         host, _, port = address.rpartition(":")
         return RemoteEndpoint(node_id, host, int(port), self.key)
 
-    async def _teleporter(self, agent: str, source: str, target: str):
-        return await teleport(self._endpoint(source), self._endpoint(target), agent)
+    async def _teleporter(self, agent: str, source: str, target: str, progress):
+        return await teleport(
+            self._endpoint(source), self._endpoint(target), agent, on_state=progress
+        )
 
     # -- liveness and telemetry ---------------------------------------------------
     async def _beat(self) -> None:
@@ -184,13 +186,30 @@ class Node:
             for agent in self._held():
                 phase = self.runner.phases.get(agent, "idle") if self.runner else "idle"
                 await self.bus.publish(
-                    f"agent.{agent}.state", {"agent": agent, "node": cfg.node_id, "phase": phase}
+                    f"agent.{agent}.state",
+                    {"agent": agent, "node": cfg.node_id, "phase": phase, **self._meta(agent)},
                 )
             if self.is_hub:
                 coordinator_lost = self.registry.expired()
                 for node_id in coordinator_lost:
                     await self.bus.publish("node.lost", {"node": node_id})
             await asyncio.sleep(cfg.heartbeat)
+
+    def _meta(self, agent: str) -> dict:
+        """What a card shows about an agent: cheap facts from its capsule."""
+        try:
+            capsule = io.load(self.host.agents / agent)
+        except (OSError, ValueError):
+            return {}
+        events = capsule.timeline.ordered()
+        last = next((e for e in reversed(events) if e.kind.value == "assistant_message"), None)
+        return {
+            "title": capsule.manifest.title or agent,
+            "events": len(events),
+            "files": len(capsule.snapshot.tree),
+            "last": event_text(last.data)[:160] if last else "",
+            "harness": self.cfg.harness.get("kind") or self.cfg.provider.kind or "none",
+        }
 
     def _held(self) -> list[str]:
         return sorted(
@@ -204,6 +223,8 @@ class Node:
         self.bus.subscribe("agent.*.fork", self._on_fork)
         self.bus.subscribe("agent.merge", self._on_merge)
         self.bus.subscribe("agent.history.request", self._on_history)
+        self.bus.subscribe("agent.files.request", self._on_files)
+        self.bus.subscribe("agent.file.request", self._on_file)
 
     async def _announce_created(self, agent: str, ok: bool = True, error: str = "") -> None:
         await self.bus.publish(
@@ -289,3 +310,31 @@ class Node:
             for e in io.load(self.host.agents / agent).timeline.ordered()
         ]
         await self.bus.publish(f"agent.{agent}.history", {"agent": agent, "events": events})
+
+    async def _on_files(self, m) -> None:
+        agent = str(m.payload["agent"])
+        if self.host.status(agent) != "running":
+            return
+        capsule = io.load(self.host.agents / agent)
+        store = capsule.blobs()
+        files = [
+            {"path": path, "size": store.path(sha).stat().st_size}
+            for path, sha in sorted(capsule.snapshot.tree.items())
+            if store.has(sha)
+        ]
+        await self.bus.publish(m.payload["reply"], {"agent": agent, "files": files})
+
+    async def _on_file(self, m) -> None:
+        agent, rel = str(m.payload["agent"]), str(m.payload["path"])
+        if self.host.status(agent) != "running":
+            return
+        capsule = io.load(self.host.agents / agent)
+        sha = capsule.snapshot.tree.get(rel)
+        text = ""
+        if sha and capsule.blobs().has(sha):
+            raw = capsule.blobs().get(sha)[:100_000]
+            try:
+                text = raw.decode()
+            except UnicodeDecodeError:
+                text = "[binary file]"
+        await self.bus.publish(m.payload["reply"], {"agent": agent, "path": rel, "text": text})
