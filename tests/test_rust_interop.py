@@ -38,12 +38,11 @@ def test_rust_verifies_a_python_capsule_and_reads_the_same_journal(tmp_path):
 
 def test_python_verifies_what_rust_appended_hash_for_hash(tmp_path):
     capsule = make_capsule(tmp_path / "py")
-    assert (
-        rs("append", capsule.root, "rust@thread-1", "decision", "decided in Rust ✓ λ").returncode == 0
-    )
+    text = "decided in Rust ✓ λ"
+    assert rs("append", capsule.root, "rust@thread-1", "decision", text).returncode == 0
     assert verify(capsule.root) == []
     last = load(capsule.root).timeline.ordered()[-1]
-    assert last.node_id == "rust@thread-1" and last.data["text"] == "decided in Rust ✓ λ"
+    assert last.node_id == "rust@thread-1" and last.data["text"] == text
     assert last.hash == last.compute_hash()
 
 
