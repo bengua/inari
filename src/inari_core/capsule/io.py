@@ -22,7 +22,7 @@ from pathlib import Path
 
 from ..canon import sha256_hex
 from ..errors import IntegrityError
-from .blobs import BlobStore
+from .blobs import BlobStore, snapshot_tree
 from .models import (
     AccessPolicy,
     EnvironmentSpec,
@@ -218,3 +218,13 @@ def unpack(archive: Path, dest: Path) -> None:
             extracted = tar.extractfile(member)
             assert extracted is not None
             _atomic_write(target, extracted.read())
+
+
+def update_snapshot(root: Path, workdir: Path) -> Capsule:
+    """Record the workspace as the capsule's new snapshot (differential: only new
+    or changed files add a blob) and reseal."""
+    capsule = load(root)
+    snapshot = snapshot_tree(Path(workdir), capsule.blobs(), parent=capsule.snapshot)
+    _atomic_write(Path(root) / SNAPSHOT, snapshot.model_dump_json(indent=2).encode())
+    seal(Path(root), capsule.manifest, capsule.timeline)
+    return load(root)
