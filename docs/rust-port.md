@@ -28,8 +28,8 @@ Rust nodes and move machine by machine.
 | 1 | Capsule: canonical JSON, journal, manifest, verify, pack/unpack, workspace attachments, uploads in parts | done |
 | 2a | Transport (authenticated frames), capsule host, teleportation with fencing, endpoint server and client — Python and Rust nodes teleport agents to each other over TCP | done |
 | 2b | Bus and TCP bus links (durable replay, duplicates dropped), fork/merge, and **clone to another core with another harness** (fork, switch harness, teleport the copy; the original stays) — Python and Rust buses linked both ways | done |
-| 3 (next) | ACP harness, with attachments passed to the model: images as image content to Claude and Gemini, PDFs and other files placed in the workspace and named in the message | |
-| 4 | Node daemon and gateway (HTTP/SSE, uploads in parts from the Android app's share sheet, camera and file picker), serving the web interface | |
+| 3 | ACP harness and runner turn, with attachments passed to the model: images as image content when the agent accepts it (Claude, Gemini), other files as links into the workspace, all named in the message (`inari-core-rs turn`) | done |
+| 4 (next) | Node daemon and gateway (HTTP/SSE, uploads in parts from the Android app's share sheet, camera and file picker), serving the web interface | |
 | 5 | Switch the three cores to the Rust binary, retire the Python runtime | |
 
 ## Attachments, as the phone sends them
@@ -39,3 +39,11 @@ HEIC — and PDF), camera and file picker. It sends the file to the gateway in p
 core assembles it (`UploadStore`: each part starts where the last ended, retries are
 ignored, a size limit applies), recognises it by its bytes (`sniff`), and attaches it to
 the thread's workspace (`attach`), so it travels with the agent.
+
+Once attached, a file reaches the model with the next message. The text names every
+attachment (path, type, size). An agent whose `initialize` reply says
+`promptCapabilities.image` gets each image as an ACP `image` block; anything else, and
+images for agents without that capability, go as `resource_link` blocks pointing into the
+working directory, where the agent can open them with its own tools. Checked on
+27/10/2026 with a two-colour test image: Claude (claude-agent-acp) and Gemini CLI both
+named the colours.

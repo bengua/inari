@@ -1,7 +1,7 @@
-//! `inari-core-rs`: the Rust core's command line. For now: capsules.
+//! `inari-core-rs`: the Rust core's command line.
 
 use inari_core::capsule::{self, attach, io, EventKind, Timeline};
-use inari_core::{bus, buslink, host, rpc, teleport};
+use inari_core::{agent, bus, buslink, host, rpc, teleport};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -14,7 +14,8 @@ fn usage() -> ExitCode {
          serve-endpoint <root> <node> <key-file> <port>\n  adopt <root> <node> <capsule-dir>\n  \
          status <root> <node> <agent>\n  teleport <root> <node> <agent> <target-node> <host:port> <key-file>\n  \
          fork <src> <dest> <new-thread> [upto-event]\n  merge <dest> <src>\n  \
-         bus-echo <name> <key-file> <expected-peer>\n  bus-say <name> <key-file> <host:port> <subject> <payload-json> <wait-subject>"
+         bus-echo <name> <key-file> <expected-peer>\n  bus-say <name> <key-file> <host:port> <subject> <payload-json> <wait-subject>\n  \
+         turn <root> <node> <agent> <text> [file-to-attach]... -- <acp-agent command...>"
     );
     ExitCode::from(2)
 }
@@ -40,8 +41,52 @@ fn kind(name: &str) -> Option<EventKind> {
     serde_json::from_value(json!(name)).ok()
 }
 
+/// One user turn on an agent this node holds, through an ACP agent; prints the summary.
+fn turn(a: &[&str]) -> capsule::Result<ExitCode> {
+    let Some(split) = a.iter().position(|x| *x == "--") else {
+        return Ok(usage());
+    };
+    let (head, command) = (&a[..split], &a[split + 1..]);
+    let [root, node, agent, text, files @ ..] = head else {
+        return Ok(usage());
+    };
+    if command.is_empty() {
+        return Ok(usage());
+    }
+    let host = std::sync::Arc::new(host::CapsuleHost::new(node, Path::new(root))?);
+    let sessions = Path::new(root).join("acp-sessions.json");
+    let harness = agent::AcpHarness::new(command.iter().map(|c| c.to_string()).collect(), sessions);
+    let runner = agent::Runner::new(host, vec![("acp".into(), harness)], None, None);
+    let summary = tokio::runtime::Runtime::new()?.block_on(async {
+        let mut attached = Vec::new();
+        for f in files {
+            let name = Path::new(f)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            match runner.attach(agent, &name, &std::fs::read(f)?).await {
+                Ok(got) => attached.push(got),
+                Err(e) => return Err(capsule::Error::Integrity(e)),
+            }
+        }
+        Ok(runner.run(agent, text, attached).await)
+    })?;
+    println!(
+        "{}",
+        json!({"stopped": summary.stopped, "text": summary.final_text, "error": summary.error})
+    );
+    Ok(if summary.stopped == "done" {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    })
+}
+
 fn run(args: &[String]) -> capsule::Result<ExitCode> {
     let a: Vec<&str> = args.iter().map(String::as_str).collect();
+    if a.first() == Some(&"turn") {
+        return turn(&a[1..]);
+    }
     match a.as_slice() {
         ["verify", path] => {
             let (root, tmp) = open(Path::new(path))?;

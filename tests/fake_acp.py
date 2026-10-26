@@ -36,7 +36,12 @@ for line in sys.stdin:
             {
                 "jsonrpc": "2.0",
                 "id": ident,
-                "result": {"protocolVersion": 1, "agentCapabilities": {}},
+                "result": {
+                    "protocolVersion": 1,
+                    "agentCapabilities": {
+                        "promptCapabilities": {"image": bool(os.environ.get("FAKE_ACP_IMAGES"))}
+                    },
+                },
             }
         )
     elif m == "session/new":
@@ -70,7 +75,8 @@ for line in sys.stdin:
         sid = p["sessionId"]
         text = p["prompt"][0]["text"]
         with LOG.open("a") as fh:
-            fh.write(json.dumps({"cwd": os.getcwd(), "prompt": text}) + "\n")
+            blocks = [b["type"] for b in p["prompt"]]
+            fh.write(json.dumps({"cwd": os.getcwd(), "prompt": text, "blocks": blocks}) + "\n")
         if "crash" in text:
             sys.exit(3)
         if "slow" in text:
