@@ -123,7 +123,7 @@ class CapsuleHost:
         path = self.agents / agent_id
         capsule_io.append_event(
             path,
-            self.node_id,
+            f"{self.node_id}@{agent_id}",
             EventKind.CHECKPOINT,
             {"reason": "teleport"},
             self.clock(),
