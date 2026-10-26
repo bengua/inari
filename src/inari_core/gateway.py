@@ -347,6 +347,11 @@ class Gateway:
                         timeout=30.0,
                     )
                     return await self._json(writer, 200, reply or {"ok": False})
+                if path == "/api/harness":
+                    await self.bus.publish(
+                        f"agent.{data['agent']}.harness", {"harness": str(data["harness"])}
+                    )
+                    return await self._json(writer, 200, {"ok": True})
                 if path == "/api/model":
                     await self.bus.publish(
                         f"agent.{data['agent']}.model", {"model": str(data["model"])}
@@ -355,7 +360,7 @@ class Gateway:
                 if path == "/api/agent":
                     await self.bus.publish(
                         "agent.create",
-                        {k: data[k] for k in ("thread_id", "node") if k in data}
+                        {k: data[k] for k in ("thread_id", "node", "harness") if k in data}
                         | {"title": str(data.get("title", ""))},
                     )
                     return await self._json(writer, 200, {"ok": True})

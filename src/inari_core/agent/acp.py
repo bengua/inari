@@ -294,7 +294,10 @@ class AcpHarness:
                     line = await proc.stdout.readline()
                     if not line:
                         return {}
-                    message = json.loads(line)
+                    try:
+                        message = json.loads(line)
+                    except ValueError:
+                        continue  # some agents print a banner on stdout first
                     if message.get("id") == ident:
                         return message.get("result") or {}
 

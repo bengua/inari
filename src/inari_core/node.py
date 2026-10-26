@@ -21,7 +21,7 @@ from .approval_bus import NodeApprovals
 from .approvals import ApprovalGate
 from .capsule import fork as fork_capsule
 from .capsule import io, merge
-from .capsule.search import event_text
+from .capsule.search import event_summary, event_text
 from .gateway import Gateway
 from .mesh import Bus, MeshCoordinator, NodeInfo, Registry, Role
 from .sandbox import ContainerRuntime, SubprocessRuntime
@@ -46,6 +46,8 @@ class NodeConfig:
     expected_peers: list[str] = field(default_factory=list)
     provider: ProviderConfig = field(default_factory=ProviderConfig)
     harness: dict = field(default_factory=dict)  # {"kind": "acp", "command": [...], "timeout": 600}
+    # Several named harnesses, the first being the default: {"claude": {"command": [...]}, ...}
+    harnesses: dict = field(default_factory=dict)
     sandbox: str = "subprocess"  # or "container"
     engine: str = "podman"
     gateway_listen: str = ""  # HOST:PORT, hub only
@@ -128,14 +130,21 @@ class Node:
             else SubprocessRuntime(resolver)
         )
         common = dict(approvals=approvals, publish=self.bus.publish)
+        specs = dict(cfg.harnesses)
         if cfg.harness.get("kind") == "acp":
-            harness = AcpHarness(
-                list(cfg.harness["command"]),
-                cfg.data_dir / "host" / "acp_sessions.json",
-                timeout=float(cfg.harness.get("timeout", 600)),
-                extra_env=dict(cfg.harness.get("env", {})),
-            )
-            self.runner = AgentRunner(self.host, None, runtime, harness=harness, **common)
+            specs = {"default": cfg.harness, **specs}
+        if specs:
+            built = {
+                name: AcpHarness(
+                    list(spec["command"]),
+                    cfg.data_dir / "host" / f"acp_sessions.{name}.json",
+                    timeout=float(spec.get("timeout", 600)),
+                    extra_env=dict(spec.get("env", {})),
+                )
+                for name, spec in specs.items()
+            }
+            self.runner = AgentRunner(self.host, None, runtime, harnesses=built, **common)
+            self.host.on_prepare = self._can_host
         elif cfg.provider.kind == "demo" or cfg.provider.base_url:
             self.runner = AgentRunner(
                 self.host, make_provider(cfg.provider, resolver), runtime,
@@ -198,6 +207,7 @@ class Node:
         while True:
             if time.time() - models_at > 300:  # the catalogue changes rarely: look every 5 minutes
                 info.capabilities["models"] = await self._models()
+                info.capabilities["harnesses"] = await self._harness_models()
                 models_at = time.time()
             await self.bus.publish("node.announce" if first else "node.heartbeat", info.to_dict())
             first = False
@@ -219,6 +229,21 @@ class Node:
                 for node_id in coordinator_lost:
                     await self.bus.publish("node.lost", {"node": node_id})
             await asyncio.sleep(cfg.heartbeat)
+
+    def _can_host(self, capsule) -> None:
+        """Refuse an agent whose harness this node lacks, before the point of no return."""
+        wanted = capsule.manifest.labels.get("harness", "")
+        if wanted and self.runner is not None and wanted not in self.runner.harnesses:
+            raise ValueError(f"this core has no {wanted!r} harness")
+
+    async def _harness_models(self) -> dict[str, list[str]]:
+        found: dict[str, list[str]] = {}
+        scratch = self.cfg.data_dir / "scratch"
+        scratch.mkdir(parents=True, exist_ok=True)
+        for name, harness in self.runner.harnesses.items() if self.runner else []:
+            if isinstance(harness, AcpHarness):
+                found[name] = await harness.list_models(scratch, timeout=60)
+        return found
 
     async def _models(self) -> list[str]:
         cfg = self.cfg
@@ -257,8 +282,9 @@ class Node:
             "events": len(events),
             "files": len(capsule.snapshot.tree),
             "last": event_text(last.data)[:160] if last else "",
-            "harness": self.cfg.harness.get("kind") or self.cfg.provider.kind or "none",
             "model": capsule.manifest.labels.get("model", ""),
+            "harness": capsule.manifest.labels.get("harness", "")
+            or (next(iter(self.runner.harnesses)) if self.runner else ""),
         }
 
     def _held(self) -> list[str]:
@@ -278,6 +304,7 @@ class Node:
         self.bus.subscribe("agent.exec.request", self._on_exec)
         self.bus.subscribe("agent.upload.request", self._on_upload)
         self.bus.subscribe("agent.*.model", self._on_model)
+        self.bus.subscribe("agent.*.harness", self._on_harness)
 
     async def _announce_created(self, agent: str, ok: bool = True, error: str = "") -> None:
         await self.bus.publish(
@@ -290,7 +317,9 @@ class Node:
             return
         try:
             agent = self.runner.create(
-                str(p["thread_id"]), title=str(p.get("title", "")),
+                str(p["thread_id"]),
+                title=str(p.get("title", "")),
+                harness=str(p.get("harness", "")),
                 approval_required=list(p.get("approval_required", [])),
             )  # fmt: skip
             await self._announce_created(agent)
@@ -359,7 +388,7 @@ class Node:
         if self.host.status(agent) != "running":
             return
         events = [
-            {"id": e.id, "kind": e.kind.value, "text": event_text(e.data)[:400]}
+            {"id": e.id, "kind": e.kind.value, "text": event_summary(e.kind.value, e.data)[:400]}
             for e in io.load(self.host.agents / agent).timeline.ordered()
         ]
         await self.bus.publish(f"agent.{agent}.history", {"agent": agent, "events": events})
@@ -431,4 +460,17 @@ class Node:
         agent = m.subject.split(".")[1]
         if self.runner is None or self.host.status(agent) != "running":
             return
-        self.runner.set_model(agent, str(m.payload["model"]))
+        event = self.runner.set_model(agent, str(m.payload["model"]))
+        if event is not None:
+            await self.runner._emit(agent, "provider_switch", event.id, event.data)
+
+    async def _on_harness(self, m) -> None:
+        agent = m.subject.split(".")[1]
+        if self.runner is None or self.host.status(agent) != "running":
+            return
+        try:
+            event = self.runner.set_harness(agent, str(m.payload["harness"]))
+        except ValueError:
+            return
+        if event is not None:
+            await self.runner._emit(agent, "provider_switch", event.id, event.data)
