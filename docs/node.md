@@ -36,6 +36,12 @@ are all configuration, and every default is empty.
 - **Keys.** `key_file` is the shared mesh key (all nodes), `device_key_file` the
   approval key shared by the nodes and the gateway. Provider keys are never in this
   file: `api_key_ref` names a secret read from `INARI_SECRET_<NAME>` or the keychain.
+- **Harness.** Instead of the built-in model loop, a node can drive an external agent over
+  the Agent Client Protocol: `"harness": {"kind": "acp", "command": ["openfox-acp"], "timeout": 600}`.
+  OpenFox is the first one. The harness journals the agent's messages and tool calls, sends
+  its permission requests to the phone, cancels it when a teleport freezes the agent, and,
+  on a machine whose agent has no memory of the thread, opens a session primed with the
+  journal so far.
 - **Provider kinds.** `openai` (any compatible gateway), `anthropic`, and `demo` (rules
   only, no network).
 - **Sandbox.** `"sandbox": "subprocess"` (default) or `"container"` with `"engine"`.
