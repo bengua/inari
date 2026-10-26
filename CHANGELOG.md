@@ -9,6 +9,9 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Added
 
+- **Rust port, step 2b**: event bus and TCP bus links (durable subjects replayed, duplicates
+  dropped, expected peers queue before their first visit), fork and merge, and `clone_to`: copy
+  an agent, give the copy another harness, send it to another core; the original stays.
 - **Rust port, step 2a**: authenticated transport, capsule host and teleportation in Rust
   (`inari-core-rs serve-endpoint | adopt | teleport | status`). Python and Rust nodes teleport
   agents to each other over TCP, in both directions.

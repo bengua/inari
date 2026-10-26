@@ -1,7 +1,7 @@
 //! `inari-core-rs`: the Rust core's command line. For now: capsules.
 
 use inari_core::capsule::{self, attach, io, EventKind, Timeline};
-use inari_core::{host, rpc, teleport};
+use inari_core::{bus, buslink, host, rpc, teleport};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -12,7 +12,9 @@ fn usage() -> ExitCode {
          create <dir> <thread-id> [holder]\n  append <dir> <author> <kind> <text>\n  \
          attach <dir> <path-in-workspace> <file>\n  pack <dir> <archive>\n  unpack <archive> <dir>\n  \
          serve-endpoint <root> <node> <key-file> <port>\n  adopt <root> <node> <capsule-dir>\n  \
-         status <root> <node> <agent>\n  teleport <root> <node> <agent> <target-node> <host:port> <key-file>"
+         status <root> <node> <agent>\n  teleport <root> <node> <agent> <target-node> <host:port> <key-file>\n  \
+         fork <src> <dest> <new-thread> [upto-event]\n  merge <dest> <src>\n  \
+         bus-echo <name> <key-file> <expected-peer>\n  bus-say <name> <key-file> <host:port> <subject> <payload-json> <wait-subject>"
     );
     ExitCode::from(2)
 }
@@ -171,6 +173,53 @@ fn run(args: &[String]) -> capsule::Result<ExitCode> {
             } else {
                 ExitCode::from(1)
             })
+        }
+        ["fork", src, dest, thread] | ["fork", src, dest, thread, _] => {
+            capsule::fork::fork(Path::new(src), Path::new(dest), thread, a.get(4).copied())?;
+            Ok(ExitCode::SUCCESS)
+        }
+        ["merge", dest, src] => {
+            println!("{}", capsule::fork::merge(Path::new(dest), Path::new(src))?);
+            Ok(ExitCode::SUCCESS)
+        }
+        ["bus-echo", name, key_file, peer] => {
+            let key = std::fs::read(key_file)?.trim_ascii().to_vec();
+            tokio::runtime::Runtime::new()?.block_on(async {
+                let b = bus::Bus::new(name);
+                let mut all = b.subscribe(">");
+                let server = buslink::BusServer::new(std::sync::Arc::clone(&b), &key, &[peer]);
+                println!("listening {}", server.start("127.0.0.1", 0).await?);
+                use std::io::Write;
+                std::io::stdout().flush()?;
+                while let Some(m) = all.recv().await {
+                    if !m.subject.starts_with("echo.") && m.sender != *name {
+                        b.publish(&format!("echo.{}", m.subject), m.payload);
+                    }
+                }
+                Ok::<_, capsule::Error>(())
+            })?;
+            Ok(ExitCode::SUCCESS)
+        }
+        ["bus-say", name, key_file, addr, subject, payload, wait] => {
+            let key = std::fs::read(key_file)?.trim_ascii().to_vec();
+            let payload: serde_json::Value = serde_json::from_str(payload)?;
+            let got = tokio::runtime::Runtime::new()?.block_on(async {
+                let b = bus::Bus::new(name);
+                let mut rx = b.subscribe(wait);
+                let _client = buslink::BusClient::start(std::sync::Arc::clone(&b), &key, addr);
+                b.publish(subject, payload);
+                tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
+                    .await
+                    .ok()
+                    .flatten()
+            });
+            match got {
+                Some(m) => {
+                    println!("{}", m.to_json());
+                    Ok(ExitCode::SUCCESS)
+                }
+                None => Ok(ExitCode::from(1)),
+            }
         }
         ["pack", dir, archive] => {
             io::pack(Path::new(dir), Path::new(archive)).map(|_| ExitCode::SUCCESS)

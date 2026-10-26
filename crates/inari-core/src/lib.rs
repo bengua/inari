@@ -4,6 +4,8 @@
 //! Python reference (`src/inari_core`) defines and tests. Both must produce the
 //! same bytes for the same state: a capsule written by one is verified by the other.
 
+pub mod bus;
+pub mod buslink;
 pub mod canon;
 pub mod capsule;
 pub mod host;
