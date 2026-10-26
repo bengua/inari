@@ -1,0 +1,144 @@
+"""A tiny ACP agent for tests: scripted by the words in the prompt."""
+
+import json
+import os
+import sys
+import time
+from pathlib import Path
+
+LOG = Path(os.environ["FAKE_ACP_LOG"])
+KNOWN = LOG.with_suffix(".sessions")
+
+
+def send(obj):
+    sys.stdout.write(json.dumps(obj) + "\n")
+    sys.stdout.flush()
+
+
+def update(sid, body):
+    send(
+        {"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": sid, "update": body}}
+    )
+
+
+def known():
+    return KNOWN.read_text().split() if KNOWN.exists() else []
+
+
+for line in sys.stdin:
+    msg = json.loads(line)
+    if "method" not in msg:  # a reply to our permission request
+        PERM_REPLY = msg
+        continue
+    m, ident, p = msg["method"], msg.get("id"), msg.get("params") or {}
+    if m == "initialize":
+        send(
+            {
+                "jsonrpc": "2.0",
+                "id": ident,
+                "result": {"protocolVersion": 1, "agentCapabilities": {}},
+            }
+        )
+    elif m == "session/new":
+        sid = f"s{len(known()) + 1}"
+        KNOWN.write_text(" ".join([*known(), sid]))
+        send({"jsonrpc": "2.0", "id": ident, "result": {"sessionId": sid}})
+    elif m == "session/load":
+        if p["sessionId"] in known():
+            send({"jsonrpc": "2.0", "id": ident, "result": {}})
+        else:
+            send(
+                {
+                    "jsonrpc": "2.0",
+                    "id": ident,
+                    "error": {"code": -32000, "message": "unknown session"},
+                }
+            )
+    elif m == "session/prompt":
+        sid = p["sessionId"]
+        text = p["prompt"][0]["text"]
+        with LOG.open("a") as fh:
+            fh.write(json.dumps({"cwd": os.getcwd(), "prompt": text}) + "\n")
+        if "crash" in text:
+            sys.exit(3)
+        if "slow" in text:
+            for _ in range(100):
+                time.sleep(0.1)
+        update(
+            sid,
+            {
+                "sessionUpdate": "agent_thought_chunk",
+                "content": {"type": "text", "text": "secret thoughts"},
+            },
+        )
+        if "make" in text:
+            Path("made.txt").write_text("made by the fake agent")
+            update(
+                sid,
+                {
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": "k1",
+                    "title": "write made.txt",
+                    "kind": "edit",
+                    "rawInput": {"path": "made.txt"},
+                },
+            )
+            update(
+                sid,
+                {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "k1",
+                    "status": "completed",
+                    "content": [
+                        {"type": "content", "content": {"type": "text", "text": "ok written"}}
+                    ],
+                },
+            )
+        if "perm" in text:
+            send(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 900,
+                    "method": "session/request_permission",
+                    "params": {
+                        "sessionId": sid,
+                        "toolCall": {
+                            "toolCallId": "k2",
+                            "title": "bash: rm -rf x",
+                            "kind": "execute",
+                            "status": "pending",
+                        },
+                        "options": [
+                            {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
+                            {"optionId": "deny", "name": "Deny", "kind": "reject_once"},
+                        ],
+                    },
+                }
+            )
+            reply = json.loads(sys.stdin.readline())
+            chosen = reply["result"]["outcome"].get("optionId")
+            update(
+                sid,
+                {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": {"type": "text", "text": f"permission result: {chosen}"},
+                },
+            )
+        else:
+            update(
+                sid,
+                {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": {"type": "text", "text": "fake reply to: "},
+                },
+            )
+            update(
+                sid,
+                {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": {"type": "text", "text": text.splitlines()[-1][:60]},
+                },
+            )
+        send({"jsonrpc": "2.0", "id": ident, "result": {"stopReason": "end_turn"}})
+    elif m == "session/cancel":
+        pass

@@ -9,6 +9,8 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Added
 
+- **ACP harness**: drive OpenFox (or any Agent Client Protocol agent) as the thinking part of
+  an agent; the runner now separates the shared turn from the harness (`ModelLoop` or ACP).
 - **Agent driver**: OpenAI-compatible and Anthropic providers, workspace-confined tools, the
   loop that journals every step, honours a freeze at step boundaries and asks the phone for
   guarded commands.

@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .agent import AgentRunner, ProviderConfig, make_provider
+from .agent import AcpHarness, AgentRunner, ProviderConfig, make_provider
 from .approval_bus import NodeApprovals
 from .approvals import ApprovalGate
 from .capsule import fork as fork_capsule
@@ -42,6 +42,7 @@ class NodeConfig:
     hub: str = ""  # HOST:PORT of the hub bus; empty means this node is the hub
     expected_peers: list[str] = field(default_factory=list)
     provider: ProviderConfig = field(default_factory=ProviderConfig)
+    harness: dict = field(default_factory=dict)  # {"kind": "acp", "command": [...], "timeout": 600}
     sandbox: str = "subprocess"  # or "container"
     engine: str = "podman"
     gateway_listen: str = ""  # HOST:PORT, hub only
@@ -120,11 +121,19 @@ class Node:
             if cfg.sandbox == "container"
             else SubprocessRuntime(resolver)
         )
-        if cfg.provider.kind == "demo" or cfg.provider.base_url:
+        common = dict(approvals=approvals, publish=self.bus.publish)
+        if cfg.harness.get("kind") == "acp":
+            harness = AcpHarness(
+                list(cfg.harness["command"]),
+                cfg.data_dir / "host" / "acp_sessions.json",
+                timeout=float(cfg.harness.get("timeout", 600)),
+                extra_env=dict(cfg.harness.get("env", {})),
+            )
+            self.runner = AgentRunner(self.host, None, runtime, harness=harness, **common)
+        elif cfg.provider.kind == "demo" or cfg.provider.base_url:
             self.runner = AgentRunner(
                 self.host, make_provider(cfg.provider, resolver), runtime,
-                approvals=approvals, publish=self.bus.publish,
-                context_tokens=cfg.provider.context_tokens,
+                context_tokens=cfg.provider.context_tokens, **common,
             )  # fmt: skip
         self._subscribe()
         if self.is_hub and cfg.gateway_listen:
