@@ -92,3 +92,68 @@ async def test_a_rust_made_capsule_teleports_between_python_nodes(tmp_path):
     out = await teleport(a, b, agent)
     assert out.state == "committed" and verify(b.agents / agent) == []
     assert rs("verify", b.agents / agent).returncode == 0
+
+
+async def rust_endpoint(root, node, key_file):
+    """Start a Rust endpoint server; returns (process, port)."""
+    import asyncio
+
+    proc = await asyncio.create_subprocess_exec(
+        str(BIN), "serve-endpoint", str(root), node, str(key_file), "0",
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )  # fmt: skip
+    line = (await asyncio.wait_for(proc.stdout.readline(), 10)).decode()
+    assert line.startswith("listening "), line
+    return proc, int(line.split()[1])
+
+
+async def test_a_python_node_teleports_an_agent_to_a_rust_node_over_tcp(tmp_path):
+    from inari_core.transport import RemoteEndpoint
+
+    (tmp_path / "mesh.key").write_text("mesh-key")
+    source = CapsuleHost("node-a", tmp_path / "a")
+    agent = source.adopt(make_capsule(tmp_path / "seed").root)
+    proc, port = await rust_endpoint(tmp_path / "r", "node-r", tmp_path / "mesh.key")
+    try:
+        out = await teleport(
+            source, RemoteEndpoint("node-r", "127.0.0.1", port, b"mesh-key"), agent
+        )
+        assert out.state == "committed", out
+        assert source.status(agent) == "tombstoned"
+        assert verify(tmp_path / "r" / "agents" / agent) == []
+        assert rs("status", tmp_path / "r", "node-r", agent).stdout.strip() == "running"
+        # and the wrong key never gets in
+        wrong = await teleport(
+            CapsuleHost("node-c", tmp_path / "c"),
+            RemoteEndpoint("node-r", "127.0.0.1", port, b"x"),
+            "none",
+        )
+        assert wrong.state == "rolled_back"
+    finally:
+        proc.kill()
+        await proc.wait()
+
+
+async def test_a_rust_node_teleports_an_agent_to_a_python_node_over_tcp(tmp_path):
+    import asyncio
+
+    from inari_core.transport import EndpointServer
+
+    (tmp_path / "mesh.key").write_text("mesh-key")
+    seed = make_capsule(tmp_path / "seed")
+    assert rs("adopt", tmp_path / "r", "node-r", seed.root).returncode == 0
+    target = CapsuleHost("node-b", tmp_path / "b")
+    server = EndpointServer(target, b"mesh-key")
+    port = await server.start()
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            str(BIN), "teleport", str(tmp_path / "r"), "node-r", "thread-1", "node-b",
+            f"127.0.0.1:{port}", str(tmp_path / "mesh.key"), stdout=asyncio.subprocess.PIPE,
+        )  # fmt: skip
+        out = json.loads((await asyncio.wait_for(proc.communicate(), 30))[0])
+        assert out["state"] == "committed", out
+        assert await target.holder("thread-1") == ("node-b", 2)
+        assert verify(target.agents / "thread-1") == []
+        assert rs("status", tmp_path / "r", "node-r", "thread-1").stdout.strip() == "tombstoned"
+    finally:
+        await server.stop()

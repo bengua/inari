@@ -9,6 +9,17 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Added
 
+- **Rust port, step 2a**: authenticated transport, capsule host and teleportation in Rust
+  (`inari-core-rs serve-endpoint | adopt | teleport | status`). Python and Rust nodes teleport
+  agents to each other over TCP, in both directions.
+
+### Fixed
+
+- Rust read some timestamps one ULP off (`serde_json` without `float_roundtrip`), so an event's
+  hash changed after another node rewrote the journal.
+
+### Added (earlier)
+
 - **Rust port, step 1**: the capsule format in Rust (`crates/inari-core`, binary
   `inari-core-rs`): canonical JSON, journal, manifest, verification, archives, workspace
   attachments with type detection, uploads in parts. Byte-compatible with the Python
