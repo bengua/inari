@@ -140,6 +140,8 @@ pub struct Turn {
     pub attachments: Vec<Attached>,
     pub workdir: PathBuf,
     pub model: String,
+    /// The pass this thread runs under (empty: the owner's own thread).
+    pub pass: String,
 }
 
 impl Turn {
@@ -183,6 +185,10 @@ pub struct AcpHarness {
     /// what makes the model ready (load it on a GPU, say). A non-zero exit ends the turn.
     pub prepare: Vec<String>,
     pub prepare_timeout: Duration,
+    /// Environment of a thread that runs under a pass, replacing the owner's (`{pass}` is the
+    /// pass id): a HOME of its own, so the agent reads none of the owner's instructions,
+    /// tools or credentials. Empty: pass threads share the owner's environment.
+    pub pass_env: BTreeMap<String, String>,
     models_set: Mutex<HashMap<String, String>>,
 }
 
@@ -242,6 +248,7 @@ impl AcpHarness {
             extra_env: BTreeMap::new(),
             prepare: Vec::new(),
             prepare_timeout: Duration::from_secs(600),
+            pass_env: BTreeMap::new(),
             models_set: Mutex::default(),
         }
     }
@@ -262,7 +269,7 @@ impl AcpHarness {
         );
     }
 
-    fn spawn(&self, cwd: &Path) -> std::io::Result<Child> {
+    fn spawn(&self, cwd: &Path, pass: &str) -> std::io::Result<Child> {
         let mut cmd = Command::new(&self.command[0]);
         cmd.args(&self.command[1..])
             .current_dir(cwd)
@@ -278,6 +285,15 @@ impl AcpHarness {
             }
         }
         cmd.envs(&self.extra_env);
+        if !pass.is_empty() {
+            for (k, v) in &self.pass_env {
+                let v = v.replace("{pass}", pass);
+                if k == "HOME" || k.starts_with("XDG_") {
+                    let _ = std::fs::create_dir_all(&v);
+                }
+                cmd.env(k, v);
+            }
+        }
         cmd.spawn()
     }
 
@@ -332,7 +348,7 @@ impl AcpHarness {
 
     /// The model ids the agent offers, read from a throw-away session.
     pub async fn list_models(&self, cwd: &Path) -> Vec<String> {
-        let Ok(mut child) = self.spawn(cwd) else {
+        let Ok(mut child) = self.spawn(cwd, "") else {
             return vec![];
         };
         let pending = Arc::new(Mutex::new(HashMap::new()));
@@ -443,7 +459,7 @@ impl AcpHarness {
                 ..Default::default()
             };
         }
-        let mut child = match self.spawn(&t.workdir) {
+        let mut child = match self.spawn(&t.workdir, &t.pass) {
             Ok(c) => c,
             Err(e) => {
                 return RunSummary {
@@ -1131,6 +1147,11 @@ impl Runner {
                     attachments,
                     workdir: workdir.clone(),
                     model,
+                    pass: labels
+                        .get("pass")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
                 };
                 h.turn(&turn).await
             }

@@ -41,6 +41,9 @@ pub struct HarnessSpec {
     pub prepare: Vec<String>,
     #[serde(default = "default_timeout")]
     pub prepare_timeout: f64,
+    /// Environment of pass threads (`{pass}` = pass id), replacing the owner's: see AcpHarness.
+    #[serde(default)]
+    pub pass_env: BTreeMap<String, String>,
     /// Where the harness comes from, to offer and install its updates.
     #[serde(default)]
     pub update: Option<UpdateSpec>,
@@ -405,6 +408,7 @@ impl Node {
                     h.timeout = Duration::from_secs_f64(spec.timeout.max(1.0));
                     h.extra_env = spec.env.clone();
                     h.prepare = spec.prepare.clone();
+                    h.pass_env = spec.pass_env.clone();
                     h.prepare_timeout = Duration::from_secs_f64(spec.prepare_timeout.max(1.0));
                     (name.clone(), h)
                 })

@@ -150,7 +150,12 @@ for line in sys.stdin:
             )
         else:
             # "long": a reply far longer than any summary, ending on a known word
-            tail = ("word " * 300).strip() if "long" in last else text.splitlines()[-1][:60]
+            if "long" in last:
+                tail = ("word " * 300).strip()
+            elif "whereami" in last:
+                tail = os.environ.get("HOME", "")
+            else:
+                tail = text.splitlines()[-1][:60]
             update(
                 sid,
                 {
