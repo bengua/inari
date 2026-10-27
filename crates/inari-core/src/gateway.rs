@@ -45,6 +45,52 @@ struct State {
     passes: Vec<Value>,
 }
 
+/// A clone onto a harness the thread's core lacks: fork it there, teleport the copy to a
+/// core that has the harness, and switch the copy's harness on arrival.
+async fn clone_across(
+    bus: Arc<Bus>,
+    agent: String,
+    new: String,
+    title: String,
+    harness: String,
+    here: String,
+    there: String,
+) {
+    let mut created = bus.subscribe("agent.created");
+    bus.publish(
+        &format!("agent.{agent}.fork"),
+        json!({"new_thread": new, "title": title}),
+    );
+    let made = tokio::time::timeout(Duration::from_secs(30), async {
+        while let Some(m) = created.recv().await {
+            if m.payload["agent"] == new.as_str() {
+                return m.payload["ok"] == true;
+            }
+        }
+        false
+    });
+    if !made.await.unwrap_or(false) {
+        return;
+    }
+    let request = crate::wire::random_hex(16);
+    let mut results = bus.subscribe("teleport.result");
+    bus.publish(
+        "teleport.request",
+        json!({"request": request, "agent": new, "source": here, "target": there}),
+    );
+    let moved = tokio::time::timeout(Duration::from_secs(180), async {
+        while let Some(m) = results.recv().await {
+            if m.payload["request"] == request.as_str() {
+                return m.payload["ok"] == true;
+            }
+        }
+        false
+    });
+    if moved.await.unwrap_or(false) {
+        bus.publish(&format!("agent.{new}.harness"), json!({"harness": harness}));
+    }
+}
+
 /// Who is asking: the core's owner, or the holder of a pass (only its own threads).
 #[derive(Clone)]
 pub enum Access {
@@ -1066,10 +1112,56 @@ impl Gateway {
                 } else {
                     format!("{title} · {label}")
                 };
-                self.bus.publish(
-                    &format!("agent.{agent}.fork"),
-                    json!({"new_thread": new, "harness": harness, "title": title}),
-                );
+                // which core thinks with that harness: the thread's own, or another one of the mesh
+                let (here, there) = {
+                    let st = self.state.lock().expect("not poisoned");
+                    let here = st
+                        .telemetry
+                        .agents
+                        .get(&agent)
+                        .and_then(|a| a.get("node"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
+                    let has = |n: &Value| {
+                        n.pointer(&format!("/capabilities/harnesses/{harness}"))
+                            .is_some()
+                    };
+                    let home_has = st
+                        .nodes
+                        .iter()
+                        .any(|n| n["node_id"] == here.as_str() && has(n));
+                    let there = if home_has {
+                        here.clone()
+                    } else {
+                        st.nodes
+                            .iter()
+                            .find(|n| has(n))
+                            .and_then(|n| n["node_id"].as_str())
+                            .unwrap_or("")
+                            .to_string()
+                    };
+                    (here, there)
+                };
+                if there.is_empty() {
+                    return Some((
+                        404,
+                        json!({"error": "no core of the mesh has this harness"}),
+                    ));
+                }
+                if there == here {
+                    self.bus.publish(
+                        &format!("agent.{agent}.fork"),
+                        json!({"new_thread": new, "harness": harness, "title": title}),
+                    );
+                } else {
+                    // copy here, carry the copy to the core that has the harness, switch it there
+                    let bus = Arc::clone(&self.bus);
+                    let (new2, harness2) = (new.clone(), harness.clone());
+                    tokio::spawn(async move {
+                        clone_across(bus, agent, new2, title, harness2, here, there).await
+                    });
+                }
                 Some((200, json!({"ok": true, "thread_id": new})))
             }
             "/api/share" => {
