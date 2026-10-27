@@ -212,6 +212,8 @@ function badge(model, size) {
 function usageFor(model) { const f = family(model).id; return snap && (snap.usage || []).find((u) => u.provider_id === f || (f === "openai" && u.provider_id === "codex")); }
 function pctOf(u) { return u && u.windows && u.windows.length ? Math.max(...u.windows.map((w) => w.used_percent)) : null; }
 function ring(model) { const p = pctOf(usageFor(model)); if (p == null) return null; const r = document.createElement("span"); r.className = "ring"; r.style.setProperty("--p", p); r.style.setProperty("--rc", p > 85 ? "var(--bad)" : p > 60 ? "var(--warn)" : "var(--copper)"); r.innerHTML = "<i></i>"; r.title = Math.round(p) + "% used"; return r; }
+function harnessesOf(node) { const n = snap.nodes.find((x) => x.node_id === node); return (n && n.capabilities && n.capabilities.harnesses) || {}; }
+function harnessModels(node, h) { return (harnessesOf(node)[h] || []); }
 function nodeModels(node) { const n = snap.nodes.find((x) => x.node_id === node); return (n && n.capabilities && n.capabilities.models) || []; }
 
 function api(path, body) { const headers = { "Content-Type": "application/json" }; if (pass) headers["X-Inari-Pass"] = pass; else if (token) headers.Authorization = "Bearer " + token; return fetch(path, { method: body ? "POST" : "GET", headers, body: body ? JSON.stringify(body) : undefined }).then((r) => r.json()); }
@@ -399,18 +401,26 @@ function fillModelChip(chip, model) { chip.textContent = ""; chip.append(badge(m
 function drawComposer() {
   const a = selected && snap.agents[selected], cc = $("coreChip"), pm = $("pickModel"); $("msg").placeholder = a ? "Message the agent…" : "Build anything…";
   const own = snap.nodes.find((n) => n.node_id === snap.ui.self && n.role === "heavy"), core = a ? a.node : (pendingCore || (own || snap.nodes.find((n) => n.role === "heavy") || {}).node_id || ""); if (!a) pendingCore = core; cc.textContent = core ? "⌂ " + core : "⌂ no core"; cc.style.display = a ? "none" : "";
-  fillModelChip(pm, a ? a.model : pendingModel); $("attached").innerHTML = attachments.map((f) => `<span class="chip" style="cursor:default">📎 ${esc(f.name)}</span>`).join("");
+  fillModelChip(pm, a ? a.model : pendingModel); if (!a && pendingHarness) { const n = pm.querySelector(".n"); if (n) n.textContent = harnessName(pendingHarness) + (pendingModel ? " · " + shortModel(pendingModel) : " · default"); } $("attached").innerHTML = attachments.map((f) => `<span class="chip" style="cursor:default">📎 ${esc(f.name)}</span>`).join("");
 }
-function modelPicker(anchor, node, current, onPick) {
-  openPop(anchor, (pop) => { pop.insertAdjacentHTML("beforeend", '<h3>Model</h3><input id="mfilter" placeholder="Filter models…" aria-label="Filter models"><div id="mlist"></div>'); const list = pop.querySelector("#mlist"), models = [...new Map(nodeModels(node).map((m) => [shortModel(m), m])).values()];
+function modelPicker(anchor, node, current, onPick, harness) {
+  openPop(anchor, (pop) => { pop.insertAdjacentHTML("beforeend", `<h3>${harness ? esc(harnessName(harness)) + " — model" : "Model"}</h3><input id="mfilter" placeholder="Filter models…" aria-label="Filter models"><div id="mlist"></div>`); const list = pop.querySelector("#mlist"), models = [...new Map((harness ? harnessModels(node, harness) : nodeModels(node)).map((m) => [shortModel(m), m])).values()];
     const draw = (q) => { list.textContent = ""; const all = [""].concat(models).filter((m) => !q || shortModel(m).toLowerCase().includes(q)); let lastF = null;
       for (const m of all) { const f = m ? family(m).id : "default"; if (f !== lastF) { list.insertAdjacentHTML("beforeend", `<div class="fam">${m ? f : "harness default"}</div>`); lastF = f; }
         const b = document.createElement("button"); b.className = "mrow" + (m === (current || "") ? " on" : ""); b.append(badge(m, 20)); const n = document.createElement("span"); n.textContent = m ? shortModel(m) : "Default model"; b.append(n); const r = ring(m); if (r) { r.style.marginLeft = "auto"; b.append(r); } b.onclick = () => { $("pop").classList.remove("open"); onPick(m); }; list.append(b); }
       if (!models.length) list.insertAdjacentHTML("beforeend", '<div class="empty" style="padding:8px">This core did not list its models.</div>'); }; draw(""); pop.querySelector("#mfilter").oninput = (e) => draw(e.target.value.toLowerCase()); });
 }
-$("modelChip").onclick = () => { const a = snap.agents[selected]; modelPicker($("modelChip"), a.node, a.model, (m) => { api("/api/model", { agent: selected, model: m }); toast("Model: " + shortModel(m)); }); };
-$("pickModel").onclick = () => { const a = selected && snap.agents[selected], node = a ? a.node : pendingCore; modelPicker($("pickModel"), node, a ? a.model : pendingModel, (m) => { if (a) api("/api/model", { agent: selected, model: m }); else { pendingModel = m; drawComposer(); } }); };
-$("coreChip").onclick = () => { const heavy = snap.nodes.filter((n) => n.role === "heavy"); sheet("Run it on…", heavy.map((n) => [n.node_id, () => { pendingCore = n.node_id; drawComposer(); }])); };
+$("modelChip").onclick = () => { const a = snap.agents[selected]; modelPicker($("modelChip"), a.node, a.model, (m) => { api("/api/model", { agent: selected, model: m }); toast("Model: " + shortModel(m)); }, a.harness); };
+$("pickModel").onclick = () => { const a = selected && snap.agents[selected]; if (!a) return chooseSession(pendingCore); modelPicker($("pickModel"), a.node, a.model, (m) => api("/api/model", { agent: selected, model: m }), a.harness); };
+/* The step that opens a new thread: which agent, then which of its models. */
+let pendingHarness = "";
+function chooseSession(node, then) { const hs = Object.keys(harnessesOf(node));
+  const pickModel = (h) => { pendingHarness = h; pendingModel = ""; drawComposer();
+    const models = harnessModels(node, h); if (!models.length) { if (then) then(); return; }
+    modelPicker($("pickModel"), node, "", (m) => { pendingModel = m; drawComposer(); if (then) then(); }, h); };
+  if (hs.length <= 1) return pickModel(hs[0] || "");
+  sheet(`New thread on ${node} — which agent?`, hs.map((h) => [`${harnessName(h)} · ${harnessModels(node, h).length || "?"} models`, () => pickModel(h)]), "Then choose its model; you can change both later."); }
+$("coreChip").onclick = () => { const heavy = snap.nodes.filter((n) => n.role === "heavy"); sheet("Run it on…", heavy.map((n) => [n.node_id, () => { pendingCore = n.node_id; pendingHarness = ""; pendingModel = ""; drawComposer(); chooseSession(n.node_id); }])); };
 $("attach").onclick = () => $("file").click();
 $("file").onchange = (e) => { for (const f of e.target.files) { if (f.size > 25e6) { toast(f.name + " is over 25 MB"); continue; } attachments.push({ name: f.name, file: f }); } e.target.value = ""; drawComposer(); };
 // A file goes in parts of 512 KiB: no large request, and a part that failed is simply sent again.
@@ -429,8 +439,9 @@ window.inariShare = (p) => { const names = [];
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition; if (SR) { $("mic").hidden = false; let rec = null; $("mic").onclick = () => { if (rec) { rec.stop(); return; } rec = new SR(); rec.interimResults = false; rec.lang = navigator.language; rec.onresult = (e) => { $("msg").value += (($("msg").value ? " " : "") + e.results[0][0].transcript); }; rec.onend = () => { rec = null; $("mic").classList.remove("on"); }; $("mic").classList.add("on"); rec.start(); }; }
 $("composer").onsubmit = async (e) => { e.preventDefault(); let text = $("msg").value.trim(); if (!text && !attachments.length) return; $("sendBtn").disabled = true;
   try { let id = selected;
-    if (!id) { const core = pendingCore; if (!core) return toast("No core available"); id = (text.split(/\s+/).slice(0, 4).join("-").replace(/[^\w-]+/g, "") || "thread").slice(0, 28) + "-" + (Date.now() % 1000); const made = await api("/api/agent", { thread_id: id, node: core, title: text.slice(0, 40) }); id = made.thread_id || id; composing = false;
-      for (let i = 0; i < 40 && !(snap.agents[id]); i++) await new Promise((r) => setTimeout(r, 150)); if (pendingModel) await api("/api/model", { agent: id, model: pendingModel }); await select(id); }
+    if (!id && !pendingHarness && Object.keys(harnessesOf(pendingCore)).length > 1) { $("sendBtn").disabled = false; return chooseSession(pendingCore, () => $("composer").requestSubmit()); }
+    if (!id) { const core = pendingCore; if (!core) return toast("No core available"); id = (text.split(/\s+/).slice(0, 4).join("-").replace(/[^\w-]+/g, "") || "thread").slice(0, 28) + "-" + (Date.now() % 1000); const made = await api("/api/agent", { thread_id: id, node: core, title: text.slice(0, 40), ...(pendingHarness ? { harness: pendingHarness } : {}) }); id = made.thread_id || id; composing = false;
+      for (let i = 0; i < 40 && !(snap.agents[id]); i++) await new Promise((r) => setTimeout(r, 150)); if (pendingModel) await api("/api/model", { agent: id, model: pendingModel }); pendingHarness = ""; pendingModel = ""; await select(id); }
     const sent = []; for (const f of attachments) if (await sendFile(id, f)) sent.push(f.name); attachments = [];
     $("msg").value = ""; await api("/api/message", { agent: id, text: text.trim(), attachments: sent }); tlStamp = 0; setTimeout(() => { $("thread").scrollTop = $("thread").scrollHeight; }, 60);
   } finally { $("sendBtn").disabled = false; } };
@@ -463,7 +474,8 @@ $("back").onclick = () => { selected = null; composing = false; renderTop(); dra
 $("newThread").onclick = () => newThreadOn(pendingCore || (snap && snap.ui && snap.ui.self) || "");
 /* A new thread on a given core: the composer opens (on a phone too, where the page only shows with a thread), aimed at it. */
 let composing = false;
-function newThreadOn(node) { selected = null; composing = true; if (node) pendingCore = node; renderTop(); drawChat(); drawBench(); if (snap) renderCores(Object.entries(snap.agents)); drawComposer(); setTimeout(() => $("msg").focus(), 50); if (node) toast(`New thread on ${node}`); }
+function newThreadOn(node) { selected = null; composing = true; if (node) pendingCore = node; pendingHarness = ""; pendingModel = ""; renderTop(); drawChat(); drawBench(); if (snap) renderCores(Object.entries(snap.agents)); drawComposer();
+  setTimeout(() => chooseSession(pendingCore, () => $("msg").focus()), 80); }
 /* A long press on a core opens a new thread on it. */
 let coreHold = null;
 $("cores").addEventListener("pointerdown", (e) => { const head = e.target.closest(".chead"); if (!head) return; const node = head.closest(".core").dataset.node, x = e.clientX, y = e.clientY;

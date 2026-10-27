@@ -9,6 +9,10 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Added
 
+- **Choosing the agent and the model is a step of creating a thread**: which agent of that core
+  (Claude Code, Gemini CLI, OpenFox…), then which of its models (filterable). Asked by *New
+  thread*, by a long press on a core, and before a first message sent without a choice. The model
+  picker of a thread lists its own harness's models.
 - **A long press on a core opens a new thread on it**; *New thread* now shows the composer on a
   phone too (the page only showed with a thread open).
 - **Delete a thread** from the long-press menu (owner only): it leaves Inari and is kept in the
