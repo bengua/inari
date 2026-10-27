@@ -9,6 +9,10 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Added
 
+- **Pass threads can run in an environment of their own** (`pass_env` on a harness): a separate
+  HOME per pass, so a child or a guest never inherits the owner's instructions, tools or
+  credentials, and can bring their own login there.
+
 - **On a phone, the mascot has a stage at the top of an open thread** (about 200 px instead of
   56) and folds into the top bar while the keyboard is up. The page follows a keyboard the
   Android app reports (`window.inariKeyboard(height)`): the composer rides it with a transform,

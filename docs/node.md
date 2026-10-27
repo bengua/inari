@@ -59,6 +59,11 @@ are all configuration, and every default is empty.
   loaded onto a GPU before the agent asks it anything; the thread shows *loading the model*
   meanwhile, and a non-zero exit ends the turn with the command's message. The command gets
   the harness's environment, no shell.
+- **Pass threads.** `"pass_env": {"HOME": "/path/pass-homes/{pass}"}` on a harness gives the
+  threads that run under a core pass an environment of their own (`{pass}` = the pass id; the
+  directory is created). The agent then reads none of the owner's instructions, skills or
+  credentials: a child or a guest starts from nothing, and brings their own login or API key
+  in that home. Without it, pass threads share the owner's environment.
 - **Model names.** `"model_labels": [["-c0", " · GPU 0"], ["-x2", " · both GPUs"]]` renames,
   on every page, the models whose id ends with a suffix — to say which card a slot uses, say.
   `"model_hidden": ["-cpu"]` keeps models out of the menus: helpers the harness uses on its

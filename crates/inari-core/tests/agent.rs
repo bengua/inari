@@ -354,3 +354,28 @@ fn changes_made_at_once_to_a_capsule_are_all_kept() {
     assert_eq!(c.manifest.labels()["model"], "fam/m14");
     assert!(io::verify(&root).is_empty(), "{:?}", io::verify(&root));
 }
+
+#[tokio::test]
+async fn a_thread_under_a_pass_runs_in_a_home_of_its_own() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("acp.log");
+    let host = Arc::new(CapsuleHost::new("n1", &dir.path().join("node")).unwrap());
+    let mut harness = fake(&log, &dir.path().join("sessions.json"), false);
+    harness
+        .extra_env
+        .insert("HOME".into(), "/owner/home".into());
+    harness.pass_env.insert(
+        "HOME".into(),
+        format!("{}/pass-homes/{{pass}}", dir.path().display()),
+    );
+    let runner = Runner::new(host, vec![("fake".into(), harness)], None, None);
+    let own = runner.create("own", "", "mine").unwrap();
+    let out = runner.run(&own, "whereami", vec![]).await;
+    assert_eq!(out.final_text, "fake reply to: /owner/home", "{out:?}");
+    let guest = runner.create("guest", "", "theirs").unwrap();
+    runner.label(&guest, "pass", "leo").unwrap();
+    let out = runner.run(&guest, "whereami", vec![]).await;
+    let want = format!("{}/pass-homes/leo", dir.path().display());
+    assert_eq!(out.final_text, format!("fake reply to: {want}"), "{out:?}");
+    assert!(std::path::Path::new(&want).is_dir(), "its home was made");
+}
