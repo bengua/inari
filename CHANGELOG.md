@@ -9,6 +9,9 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Added
 
+- **Core passes**: a person gets threads on your core — *supervision* (a child: you follow every
+  thread and answer the agents' requests; they always see the banner) or *collaboration*. Passes
+  name the allowed harnesses and may end on a date; created and revoked from **+**.
 - **Attach a core from the interface**: **+** next to the cores creates a one-time invitation;
   `inari-core-rs join <hub>:<port> <code> --service` on the new machine receives the mesh's keys,
   writes its configuration and starts it (`enroll_port` on the hub).

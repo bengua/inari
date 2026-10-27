@@ -74,7 +74,11 @@ button,input,textarea,select { font:inherit; color:inherit; }
 .ghost { position:fixed; pointer-events:none; z-index:80; opacity:.95; width:230px; transform:translate(-50%,-50%) rotate(-1.5deg); background:var(--panel-solid); box-shadow:var(--shadow); }
 /* ---- main ---- */
 #main { display:grid; grid-template-rows:auto 1fr auto; min-width:0; min-height:0; } #app.wbmax #main { display:none; } #app.wbmax { grid-template-columns:var(--side) 0 minmax(0,1fr); } #app.wbmax #bench { width:auto; }
-#top { display:flex; align-items:center; gap:8px; padding:10px 16px; border-bottom:1px solid var(--hair); flex-wrap:wrap; min-height:56px; } #top h2 { margin:0; font-size:16px; flex:1; min-width:100px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#passBanner { padding:8px 16px; font-size:13px; background:var(--raise); border-bottom:1px solid var(--hair); color:var(--dim); } #passBanner b { color:var(--ink); } #passBanner button { margin-left:8px; }
+.guest #addCore, .guest [data-tab="terminal"], .guest #pill, .guest #usageBtn, .guest #usageCard, .guest #actionsBtn { display:none !important; }
+.ptag { font-size:11px; padding:1px 6px; border-radius:999px; background:var(--raise); border:1px solid var(--hair); color:var(--dim); white-space:nowrap; }
+.passform { display:grid; gap:8px; } .passform label { display:flex; gap:8px; align-items:center; } .passform input[type=text], .passform input[type=date] { width:100%; }
+#top { align-items:center; gap:8px; padding:10px 16px; border-bottom:1px solid var(--hair); flex-wrap:wrap; min-height:56px; } #top h2 { margin:0; font-size:16px; flex:1; min-width:100px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 #back,#showside { display:none; } #app.noside #showside { display:inline-grid; } .phase { font-size:12px; color:var(--c,var(--dim)); display:inline-flex; gap:5px; align-items:center; white-space:nowrap; }
 #thread { overflow:auto; padding:18px 8px; min-height:0; scroll-behavior:smooth; } #msgs { max-width:900px; margin:0 auto; padding:0 14px; }
 .hero { max-width:760px; margin:9vh auto 0; text-align:center; } .hero h2 { font:600 26px/1.2 "Bricolage Grotesque",Georgia,serif; margin:0 0 6px; } .hero p { color:var(--dim); margin:0 0 18px; }
@@ -117,7 +121,7 @@ pre.code span.l::before { counter-increment:l; content:counter(l); position:abso
 </style>
 </head>
 <body>
-<div id="login" class="glass" hidden><h2>Inari</h2><label for="tokenInput">Access token</label><input id="tokenInput" type="password" autocomplete="current-password"><button class="btn go" id="tokenGo">Connect</button></div>
+<div id="login" class="glass" hidden><h2>Inari</h2><label for="tokenInput">Access token or pass</label><small id="loginWhy" class="empty"></small><input id="tokenInput" type="password" autocomplete="current-password"><button class="btn go" id="tokenGo">Connect</button></div>
 <div id="app" class="nosel" hidden>
   <aside id="side">
     <div id="sidetop"><button class="btn icon" id="hideside" title="Hide the sidebar" aria-label="Hide the sidebar" data-icon="sidebar"></button><h1>Inari</h1><span class="sp"></span><span class="chip" id="stats" aria-live="polite" style="cursor:default">…</span></div>
@@ -131,6 +135,7 @@ pre.code span.l::before { counter-increment:l; content:counter(l); position:abso
       <div id="brandfoot"></div></div>
   </aside>
   <section id="main">
+    <div id="passBanner" role="status" hidden></div>
     <div id="top"><button class="btn icon" id="showside" title="Show the sidebar" aria-label="Show the sidebar" data-icon="sidebar"></button><button class="btn small" id="back">‹ Back</button><h2 id="ptitle">Inari</h2><span id="pphase"></span>
       <button class="chip" id="modelChip" hidden></button><button class="btn small" id="actionsBtn" data-icon="more" hidden><span>Actions</span></button><button class="btn small" id="benchBtn" data-icon="panel"><span>Artifacts</span></button></div>
     <div id="thread"><div id="msgs"></div></div>
@@ -171,6 +176,9 @@ const STEPS = ["planned","frozen","offered","transferred","verified","ready","co
 const $ = (id) => document.getElementById(id), esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const store = { get: (k, d) => { try { return JSON.parse(localStorage.getItem("inari-" + k)) ?? d; } catch (e) { return d; } }, set: (k, v) => { try { localStorage.setItem("inari-" + k, JSON.stringify(v)); } catch (e) {} } };
 let token = new URLSearchParams(location.hash.slice(1)).get("token") || sessionStorage.getItem("inari-token") || "";
+// A core pass: kept on this device (the phone's app keeps it across launches); it never falls back to the owner's access.
+let pass = new URLSearchParams(location.hash.slice(1)).get("pass") || store.get("pass", "");
+const authQuery = () => (pass ? "pass=" + encodeURIComponent(pass) : token ? "token=" + encodeURIComponent(token) : "");
 let snap = null, selected = null, tab = "artifacts", events = [], files = null, viewing = null, forkAt = null, drag = null, termHist = [], termPos = 0, pendingModel = "", pendingCore = "", attachments = [];
 const loadHist = {}, shut = store.get("shut", {}), feed = [], seen = new Set(); let firstSnap = true, tlStamp = 0, tlBusy = false, lastFiles = "";
 
@@ -181,7 +189,7 @@ const shortModel = (m) => String(m || "").replace(/^turnstile\//, "").replace(/^
 function badge(model, size) {
   const f = family(model), el = document.createElement("span"); el.className = "mb"; if (size) { el.style.width = el.style.height = size + "px"; }
   const hasLogo = snap && (snap.usage || []).some((u) => u.provider_id === f.id && u.logo);
-  if (hasLogo) el.innerHTML = `<img alt="" src="/api/logo/${f.id}?token=${encodeURIComponent(token)}">`; else { el.style.background = f.c; el.textContent = f.g; }
+  if (hasLogo) el.innerHTML = `<img alt="" src="/api/logo/${f.id}?${authQuery()}">`; else { el.style.background = f.c; el.textContent = f.g; }
   el.title = f.id; return el;
 }
 function usageFor(model) { const f = family(model).id; return snap && (snap.usage || []).find((u) => u.provider_id === f || (f === "openai" && u.provider_id === "codex")); }
@@ -189,7 +197,7 @@ function pctOf(u) { return u && u.windows && u.windows.length ? Math.max(...u.wi
 function ring(model) { const p = pctOf(usageFor(model)); if (p == null) return null; const r = document.createElement("span"); r.className = "ring"; r.style.setProperty("--p", p); r.style.setProperty("--rc", p > 85 ? "var(--bad)" : p > 60 ? "var(--warn)" : "var(--copper)"); r.innerHTML = "<i></i>"; r.title = Math.round(p) + "% used"; return r; }
 function nodeModels(node) { const n = snap.nodes.find((x) => x.node_id === node); return (n && n.capabilities && n.capabilities.models) || []; }
 
-function api(path, body) { const headers = { "Content-Type": "application/json" }; if (token) headers.Authorization = "Bearer " + token; return fetch(path, { method: body ? "POST" : "GET", headers, body: body ? JSON.stringify(body) : undefined }).then((r) => r.json()); }
+function api(path, body) { const headers = { "Content-Type": "application/json" }; if (pass) headers["X-Inari-Pass"] = pass; else if (token) headers.Authorization = "Bearer " + token; return fetch(path, { method: body ? "POST" : "GET", headers, body: body ? JSON.stringify(body) : undefined }).then((r) => r.json()); }
 function toast(t) { const e = $("toast"); e.textContent = t; e.style.display = "block"; clearTimeout(toast.h); toast.h = setTimeout(() => (e.style.display = "none"), 4200); }
 function log(text, tone) { feed.unshift({ t: new Date(), text, tone: tone || "" }); feed.length = Math.min(feed.length, 30); }
 function theme(v) { if (v === "auto") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", v); store.set("theme", v); }
@@ -197,13 +205,18 @@ theme(store.get("theme", "auto"));
 // Behind a gate that adds the access itself (the phone's way in), the page needs no token:
 // it asks once without one and only shows the login when the server says no.
 async function connect() {
-  if (!token) { const ok = await fetch("/api/search?q=").then((r) => r.ok).catch(() => false); if (!ok) { $("login").hidden = false; return; } }
+  if (pass) { const ok = await fetch("/api/whoami", { headers: { "X-Inari-Pass": pass } }).then((r) => r.ok).catch(() => false);
+    if (!ok) { store.set("pass", ""); pass = ""; $("loginWhy").textContent = "This pass is no longer valid."; $("login").hidden = false; return; } store.set("pass", pass); }
+  else if (!token) { const ok = await fetch("/api/search?q=").then((r) => r.ok).catch(() => false); if (!ok) { $("login").hidden = false; return; } }
   else sessionStorage.setItem("inari-token", token);
   history.replaceState(null, "", location.pathname); $("login").hidden = true; $("app").hidden = false; layout();
-  const es = new EventSource(token ? "/events?token=" + encodeURIComponent(token) : "/events");
+  const q = authQuery(), es = new EventSource(q ? "/events?" + q : "/events");
   es.onmessage = (e) => { snap = JSON.parse(e.data); render(); }; es.onerror = () => { $("stats").textContent = "offline"; $("app").style.opacity = ".6"; }; es.onopen = () => ($("app").style.opacity = "1");
 }
-$("tokenGo").onclick = () => { token = $("tokenInput").value.trim(); connect(); };
+// One field for both: a pass if the core knows it as one, the owner's token otherwise.
+$("tokenGo").onclick = async () => { const v = $("tokenInput").value.trim(); if (!v) return;
+  const asPass = await fetch("/api/whoami", { headers: { "X-Inari-Pass": v } }).then((r) => r.ok).catch(() => false);
+  if (asPass) { pass = v; token = ""; } else { token = v; pass = ""; } connect(); };
 
 /* ---------- layout: sidebar, artifacts pane (fold / expand / resize) ---------- */
 function layout() {
@@ -227,7 +240,7 @@ function absorb() {
   firstSnap = false;
 }
 function render() {
-  absorb(); $("brandfoot").textContent = (snap.ui && snap.ui.footer) || "";
+  absorb(); $("brandfoot").textContent = (snap.ui && snap.ui.footer) || ""; renderPassBanner();
   for (const n of snap.nodes) { const h = (loadHist[n.node_id] = loadHist[n.node_id] || []); h.push((snap.load[n.node_id] || {}).gpu || 0); if (h.length > 40) h.shift(); }
   const agents = Object.entries(snap.agents), busy = agents.filter(([, a]) => a.phase !== "idle").length;
   $("stats").textContent = `${agents.length} agents · ${busy} working`;
@@ -238,7 +251,8 @@ function render() {
 const inFlight = (mv) => mv && !["committed", "rolled_back"].includes(mv.state);
 function row(id, a, mv) {
   const el = document.createElement("div"); el.className = "row" + (selected === id ? " selected" : "") + (inFlight(mv) ? " moving" : ""); el.dataset.agent = id; el.dataset.phase = a.phase; el.dataset.node = a.node; el.tabIndex = 0;
-  el.setAttribute("aria-label", `${a.title || id}, ${LABEL[a.phase]}, on ${a.node}`); el.innerHTML = `<span class="pdot"></span><span class="t"></span>`; el.querySelector(".t").textContent = a.title || id; el.title = (a.last || "") + "\n" + (a.events ?? 0) + " events · " + (a.files ?? 0) + " files";
+  el.setAttribute("aria-label", `${a.title || id}, ${LABEL[a.phase]}, on ${a.node}`); el.innerHTML = `<span class="pdot"></span><span class="t"></span>`; el.querySelector(".t").textContent = a.title || id;
+  const pp = a.pass && (snap.passes || []).find((x) => x.id === a.pass); if (pp) el.insertAdjacentHTML("beforeend", `<span class="ptag" title="${esc(pp.role)} pass">${esc(pp.name)}</span>`); el.title = (a.last || "") + "\n" + (a.events ?? 0) + " events · " + (a.files ?? 0) + " files";
   if (inFlight(mv)) el.insertAdjacentHTML("beforeend", `<span class="prog">→ ${esc(mv.target)} ${Math.round(Math.max(0, STEPS.indexOf(mv.state)) / 7 * 100)}%</span>`); else el.append(badge(a.model || ""), ...(ring(a.model || "") ? [ring(a.model || "")] : []));
   el.onpointerdown = (e) => startDrag(e, el, id, a.node); el.onkeydown = (e) => { if (e.key === "t" || e.key === "T") openMove(id, a.node); if (e.key === "Enter") select(id); }; return el;
 }
@@ -264,8 +278,14 @@ function drawTethers() {
     const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect(), x = ra.right - 6, y1 = ra.top + ra.height / 2, y2 = rb.top + rb.height / 2; svg.insertAdjacentHTML("beforeend", `<path d="M${x},${y1} C${x + 60},${y1} ${x + 60},${y2} ${x},${y2}"/>`); }
 }
 function renderFeed() { $("feed").innerHTML = feed.length ? feed.slice(0, 6).map((e) => `<div class="${e.tone}"><time>${e.t.toTimeString().slice(0, 5)}</time>${esc(e.text)}</div>`).join("") : '<div class="empty">Moves, approvals and finished turns show here.</div>'; $("feed").style.display = feed.length ? "block" : "none"; }
+/* A pass holder always sees who can read its threads: supervision is said, never hidden. */
+function renderPassBanner() { const p = snap.ui && snap.ui.pass, b = $("passBanner"); document.body.classList.toggle("guest", !!p); b.hidden = !p; if (!p) return;
+  const owner = esc(snap.ui.owner || "the owner of this core");
+  b.innerHTML = p.role === "supervision" ? `<b>Supervised</b> — ${owner} can read these threads and answers the agents' requests.` : `<b>Shared</b> — ${owner} sees these threads and can take part.`;
+  const out = document.createElement("button"); out.className = "btn small"; out.textContent = "Leave this pass"; out.onclick = () => { store.set("pass", ""); location.hash = ""; location.reload(); }; b.append(out); }
 function renderApprovals() {
-  const box = $("approvals"); box.textContent = "";
+  const box = $("approvals"); box.textContent = ""; const guest = snap.ui && snap.ui.pass;
+  if (guest && guest.role === "supervision") { for (const r of snap.approvals) { const d = document.createElement("div"); d.className = "ask glass"; d.innerHTML = "<strong>Waiting for approval</strong><code></code>"; d.querySelector("code").textContent = r.command; box.append(d); } return; }
   for (const r of snap.approvals) { const d = document.createElement("div"); d.className = "ask glass"; d.setAttribute("role", "alert"); d.innerHTML = '<strong>Approve this?</strong><code></code><div class="row2"><button class="btn">Deny</button><button class="btn go">Approve</button></div>';
     d.querySelector("code").textContent = r.command + " · " + r.agent_id; const [no, yes] = d.querySelectorAll("button"); no.onclick = () => api("/api/approval", { request_id: r.request_id, approved: false }); yes.onclick = () => api("/api/approval", { request_id: r.request_id, approved: true }); box.append(d); }
 }
@@ -369,7 +389,7 @@ window.inariShare = (p) => { const names = [];
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition; if (SR) { $("mic").hidden = false; let rec = null; $("mic").onclick = () => { if (rec) { rec.stop(); return; } rec = new SR(); rec.interimResults = false; rec.lang = navigator.language; rec.onresult = (e) => { $("msg").value += (($("msg").value ? " " : "") + e.results[0][0].transcript); }; rec.onend = () => { rec = null; $("mic").classList.remove("on"); }; $("mic").classList.add("on"); rec.start(); }; }
 $("composer").onsubmit = async (e) => { e.preventDefault(); let text = $("msg").value.trim(); if (!text && !attachments.length) return; $("sendBtn").disabled = true;
   try { let id = selected;
-    if (!id) { const core = pendingCore; if (!core) return toast("No core available"); id = (text.split(/\s+/).slice(0, 4).join("-").replace(/[^\w-]+/g, "") || "thread").slice(0, 28) + "-" + (Date.now() % 1000); await api("/api/agent", { thread_id: id, node: core, title: text.slice(0, 40) });
+    if (!id) { const core = pendingCore; if (!core) return toast("No core available"); id = (text.split(/\s+/).slice(0, 4).join("-").replace(/[^\w-]+/g, "") || "thread").slice(0, 28) + "-" + (Date.now() % 1000); const made = await api("/api/agent", { thread_id: id, node: core, title: text.slice(0, 40) }); id = made.thread_id || id;
       for (let i = 0; i < 40 && !(snap.agents[id]); i++) await new Promise((r) => setTimeout(r, 150)); if (pendingModel) await api("/api/model", { agent: id, model: pendingModel }); await select(id); }
     const sent = []; for (const f of attachments) if (await sendFile(id, f)) sent.push(f.name); attachments = [];
     $("msg").value = ""; await api("/api/message", { agent: id, text: text.trim(), attachments: sent }); tlStamp = 0; setTimeout(() => { $("thread").scrollTop = $("thread").scrollHeight; }, 60);
@@ -444,8 +464,29 @@ $("search").oninput = () => { clearTimeout(hitTimer); hitTimer = setTimeout(asyn
 function sheet(title, options, note, extra) { $("sheetTitle").textContent = title; const opts = $("sheetOpts"); opts.textContent = ""; if (extra) opts.append(extra); if (note) { const p = document.createElement("small"); p.className = "empty"; p.textContent = note; opts.append(p); } for (const [label, fn] of options) { const b = document.createElement("button"); b.className = "btn"; b.textContent = label; b.onclick = () => { $("sheet").classList.remove("open"); fn(); }; opts.append(b); } const c = document.createElement("button"); c.className = "btn"; c.textContent = "Cancel"; c.onclick = () => $("sheet").classList.remove("open"); opts.append(c); $("sheet").classList.add("open"); (extra || opts.querySelector("button")).focus(); }
 /* Add a core: attach one you deployed (a VPS, a new VM, another workstation) through your
    private network, or a core pass (coming next). */
-function addCore() { sheet("Add a core", [["Attach a core you deployed", attachCore], ["Core pass — share threads with another person (next)", () => toast("Core pass comes next")]],
-  "A new core joins through your private network (Tailscale, WireGuard, an SSH tunnel)."); }
+function addCore() { const n = (snap.passes || []).length;
+  sheet("Add a core", [["Attach a core you deployed", attachCore], ["Core pass for a person", corePass], ...(n ? [[`Passes (${n})`, passList]] : [])],
+  "A deployed core joins through your private network (Tailscale, WireGuard, an SSH tunnel). A pass lets a person have threads on your core: you see them."); }
+/* A core pass: a person gets threads on this core. Supervision (a child): you follow every thread and answer
+   the agents' requests, local models by default. Collaboration: you both see and act on the shared threads. */
+function corePass() { const names = [...new Set(snap.nodes.flatMap((n) => Object.keys((n.capabilities || {}).harnesses || {})))];
+  const box = document.createElement("div"); box.className = "passform";
+  box.innerHTML = `<label for="passName">Person</label><input id="passName" type="text" maxlength="40" placeholder="First name" autocomplete="off">
+    <label><input type="radio" name="passRole" value="supervision" checked> Supervision — a child: you follow the threads and approve</label>
+    <label><input type="radio" name="passRole" value="collaboration"> Collaboration — another adult: shared threads</label>
+    <small class="empty">Harnesses allowed</small>${names.map((h) => `<label><input type="checkbox" name="passH" value="${esc(h)}"${h === "openfox" ? " checked" : ""}> ${esc(harnessName(h))}</label>`).join("")}
+    <label for="passUntil">Until (optional)</label><input id="passUntil" type="date">`;
+  sheet("Core pass", [["Create the pass", async () => {
+    const name = $("passName").value.trim(), role = (document.querySelector("input[name=passRole]:checked") || {}).value, harnesses = [...document.querySelectorAll("input[name=passH]:checked")].map((i) => i.value);
+    if (!name) return toast("Name the person"); if (!harnesses.length) return toast("Allow at least one harness");
+    const until = $("passUntil").value ? new Date($("passUntil").value + "T23:59:59").getTime() / 1000 : 0;
+    const r = await api("/api/pass", { name, role, harnesses, until }); if (!r.token) return toast("The pass was refused");
+    const link = `${location.origin}${location.pathname}#pass=${r.token}`, out = document.createElement("div"); out.className = "invite";
+    out.innerHTML = `<small class="empty">Give ${esc(name)} this pass — in the Inari app or a browser, it opens their threads on this core${role === "supervision" ? "; they will see that you follow them" : ""}:</small><code></code><small class="empty">Or the link:</small><code></code>`;
+    const [c1, c2] = out.querySelectorAll("code"); c1.textContent = r.token; c2.textContent = link;
+    sheet(`Pass for ${name}`, [["Copy the link", () => navigator.clipboard && navigator.clipboard.writeText(link).then(() => toast("Copied"))]], "Shown once: keep it until it is given.", out);
+  }]], "", box); }
+function passList() { sheet("Passes", (snap.passes || []).map((p) => [`Revoke ${p.name} (${p.role}${p.until ? ", until " + new Date(p.until * 1000).toLocaleDateString() : ""})`, () => api("/api/pass/revoke", { id: p.id }).then(() => toast(`${p.name}'s pass is revoked`))]), "Revoking ends the access at once; the threads stay on this core."); }
 function attachCore() { const hub = snap.nodes.find((n) => (n.capabilities || {}).enroll); if (!hub) return toast("The hub takes no invitations: set enroll_port in its configuration");
   const box = document.createElement("div"); box.className = "invite"; box.innerHTML = '<label for="coreName">Name of the new core</label><input id="coreName" placeholder="vps-1" maxlength="32" autocomplete="off"><div id="inviteOut"></div>';
   sheet("Attach a core", [["Create the invitation", async () => {
@@ -457,7 +498,7 @@ function attachCore() { const hub = snap.nodes.find((n) => (n.capabilities || {}
   }]], "", box); }
 function openMove(agent, from) { sheet(`Move ${agent} to…`, snap.nodes.filter((n) => n.node_id !== from && n.role === "heavy").map((n) => [n.node_id, () => teleport(agent, from, n.node_id)])); }
 async function teleport(agent, source, target) { const r = await api("/api/teleport", { agent, source, target }); if (r.request) { toast(`Moving ${agent} to ${target}…`); log(`Moving ${agent}: ${source} → ${target}`); } else toast("Request refused"); }
-function startDrag(e, el, id, from) { if (e.button > 0) return; drag = { id, from, x: e.clientX, y: e.clientY, active: false, el, ghost: null, hold: null }; drag.hold = setTimeout(() => { if (drag && !drag.active) { openMove(id, from); drag = null; } }, 650); window.onpointermove = onMove; window.onpointerup = onUp; }
+function startDrag(e, el, id, from) { if (e.button > 0 || (snap.ui && snap.ui.pass)) { if (e.button === 0) select(id); return; } drag = { id, from, x: e.clientX, y: e.clientY, active: false, el, ghost: null, hold: null }; drag.hold = setTimeout(() => { if (drag && !drag.active) { openMove(id, from); drag = null; } }, 650); window.onpointermove = onMove; window.onpointerup = onUp; }
 function onMove(e) { if (!drag) return; if (!drag.active && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 8) { clearTimeout(drag.hold); drag.active = true; drag.ghost = drag.el.cloneNode(true); drag.ghost.classList.add("ghost", "glass"); document.body.append(drag.ghost); drag.el.style.opacity = ".35"; document.querySelectorAll(".core").forEach((n) => n.classList.add(n.dataset.node === drag.from ? "invalid" : "valid")); } if (drag.active) { drag.ghost.style.left = e.clientX + "px"; drag.ghost.style.top = e.clientY + "px"; } }
 function onUp(e) { window.onpointermove = window.onpointerup = null; if (!drag) return; clearTimeout(drag.hold); const d = drag; drag = null; document.querySelectorAll(".core").forEach((n) => n.classList.remove("valid", "invalid")); if (!d.active) { select(d.id); return; } d.ghost.remove(); d.el.style.opacity = ""; const t = document.elementsFromPoint(e.clientX, e.clientY).find((x) => x.classList && x.classList.contains("core")); if (t && t.dataset.node !== d.from) teleport(d.id, d.from, t.dataset.node); else if (snap) renderCores(Object.entries(snap.agents)); }
 addEventListener("resize", () => snap && drawTethers());

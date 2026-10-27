@@ -143,3 +143,21 @@ token, the harnesses it finds, Claude quotas when Claude Code is logged in), and
 `--service` installs and starts a user service. The new core joins through the private
 network the cores share (Tailscale, WireGuard, an SSH tunnel): the keys travel on it, as the
 bus does, so the hub's bus and enroll ports must be reachable there and nowhere else.
+
+## Core passes: family supervision and collaboration
+
+A pass lets a person who is not the core's owner have threads on it. **+** next to the cores,
+then *Core pass for a person*: their name, the role, the harnesses their threads may use, and
+an optional end date. The page shows the pass once (a code and a link); the person enters it
+in the Inari app or a browser.
+
+- **Supervision** (a child, say): the owner reads every thread of the pass and answers the
+  agents' permission requests; local models are offered by default. The person always sees
+  a banner saying so — supervision is stated, never hidden.
+- **Collaboration** (another adult): both see the shared threads and act on them.
+
+Whatever the role, a pass holder sees only the pass's threads (named `<pass id>-…`), the
+cores, and the allowed harnesses; no terminal, no teleport, no updates, no quotas, no other
+pass. A pass presented never falls back to the owner's access. The hub keeps the passes in
+`passes.json` (each known by the hash of its token) and tells every gateway; revoking ends
+the access at once, the threads stay. `gateway_ui.owner` names the owner in the banner.

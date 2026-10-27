@@ -353,6 +353,9 @@ impl Node {
         } else {
             client = Some(BusClient::start(Arc::clone(&bus), &key, &cfg.hub));
         }
+        if is_hub {
+            crate::passes::PassBook::start(&bus, &cfg.data_dir);
+        }
         let mut enroll_port = 0;
         if is_hub && cfg.enroll_port > 0 {
             let counter = crate::enroll::Enroll::start(&bus, &key, &device_key, bus_port);
@@ -523,6 +526,7 @@ impl Node {
         );
         m.insert("model".into(), json!(label("model")));
         m.insert("harness".into(), json!(harness));
+        m.insert("pass".into(), json!(label("pass")));
         m
     }
 
@@ -747,7 +751,13 @@ impl Node {
                 return;
             };
             match r.create(&s(p, "thread_id"), &s(p, "harness"), &s(p, "title")) {
-                Ok(agent) => n.created(&agent, true, ""),
+                Ok(agent) => {
+                    let pass = s(p, "pass");
+                    if !pass.is_empty() {
+                        let _ = r.label(&agent, "pass", &pass);
+                    }
+                    n.created(&agent, true, "")
+                }
                 Err(e) => n.created(&s(p, "thread_id"), false, &e),
             }
         });
