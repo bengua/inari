@@ -110,13 +110,13 @@ impl CapsuleHost {
     }
 
     fn set_holder(&self, capsule_dir: &Path, epoch: u64) -> CallResult<()> {
-        let capsule = io::load(capsule_dir).map_err(|e| err("IntegrityError", e))?;
-        let mut manifest = capsule.manifest;
-        manifest.extra.insert(
-            "holder".into(),
-            json!({"node_id": self.node_id, "epoch": epoch}),
-        );
-        io::seal(capsule_dir, manifest, &capsule.timeline).map_err(|e| err("IntegrityError", e))?;
+        io::edit_manifest(capsule_dir, |m| {
+            m.extra.insert(
+                "holder".into(),
+                json!({"node_id": self.node_id, "epoch": epoch}),
+            );
+        })
+        .map_err(|e| err("IntegrityError", e))?;
         Ok(())
     }
 

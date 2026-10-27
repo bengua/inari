@@ -9,6 +9,10 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Added
 
+- **A chosen model is made ready before the turn**: a harness may run a `prepare` command
+  (`{model}` replaced by the id) — to load a local model onto its GPU, say — while the thread
+  shows *loading the model*; a refusal ends the turn with its reason. `model_labels` renames
+  models by suffix on every page (which GPU a slot uses).
 - **Choosing the agent and the model is a step of creating a thread**: which agent of that core
   (Claude Code, Gemini CLI, OpenFox…), then which of its models (filterable). Asked by *New
   thread*, by a long press on a core, and before a first message sent without a choice. The model
@@ -59,6 +63,12 @@ Newest first. An entry says what changed for someone using the thing.
   agents to each other over TCP, in both directions.
 
 ### Fixed
+
+- Two changes to one capsule at once (a model chosen while a message arrives) overwrote each
+  other: the model label or the user's message was lost. Every read-change-seal of a capsule
+  now holds a per-capsule lock.
+- The model chosen when creating a thread travels with the creation, so the first turn uses it
+  (it used to race the first message and lose).
 
 - The web page sent attachments in one request, which the 64 KiB body limit refused above
   about 48 KB; it now sends them in parts and names them in the message. Parts need the Rust

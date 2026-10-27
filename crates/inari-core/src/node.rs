@@ -36,6 +36,11 @@ pub struct HarnessSpec {
     pub timeout: f64,
     #[serde(default)]
     pub env: BTreeMap<String, String>,
+    /// Command run before a turn with a chosen model, `{model}` replaced by its id.
+    #[serde(default)]
+    pub prepare: Vec<String>,
+    #[serde(default = "default_timeout")]
+    pub prepare_timeout: f64,
     /// Where the harness comes from, to offer and install its updates.
     #[serde(default)]
     pub update: Option<UpdateSpec>,
@@ -123,6 +128,10 @@ pub struct NodeConfig {
     pub mascot_dir: Option<PathBuf>,
     #[serde(default)]
     pub usage: Vec<Value>,
+    /// How pages name this machine's models: `[suffix, label]` pairs, the first matching
+    /// suffix of a model id is replaced by its label (`["-c0", " · RTX 5080"]`, say).
+    #[serde(default)]
+    pub model_labels: Vec<[String; 2]>,
     #[serde(default = "default_beat")]
     pub heartbeat: f64,
     #[serde(default = "default_ttl")]
@@ -391,6 +400,8 @@ impl Node {
                     let mut h = AcpHarness::new(spec.command.clone(), file);
                     h.timeout = Duration::from_secs_f64(spec.timeout.max(1.0));
                     h.extra_env = spec.env.clone();
+                    h.prepare = spec.prepare.clone();
+                    h.prepare_timeout = Duration::from_secs_f64(spec.prepare_timeout.max(1.0));
                     (name.clone(), h)
                 })
                 .collect();
@@ -567,6 +578,10 @@ impl Node {
         };
         info.capabilities
             .insert("endpoint".into(), json!(advertise));
+        if !cfg.model_labels.is_empty() {
+            info.capabilities
+                .insert("model_labels".into(), json!(cfg.model_labels));
+        }
         if self.enroll_port > 0 {
             let host = advertise
                 .rsplit_once(':')
@@ -756,6 +771,11 @@ impl Node {
                     let pass = s(p, "pass");
                     if !pass.is_empty() {
                         let _ = r.label(&agent, "pass", &pass);
+                    }
+                    // the model chosen with the thread is its model before any message
+                    let model = s(p, "model");
+                    if !model.is_empty() {
+                        let _ = r.set_model(&agent, &model);
                     }
                     n.created(&agent, true, "")
                 }

@@ -192,6 +192,49 @@ async fn the_model_choice_reaches_the_agent() {
 }
 
 #[tokio::test]
+async fn the_chosen_model_is_made_ready_before_the_agent_runs() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("acp.log");
+    let ready = dir.path().join("ready.log");
+    let host = Arc::new(CapsuleHost::new("n1", &dir.path().join("node")).unwrap());
+    let mut harness = fake(&log, &dir.path().join("sessions.json"), false);
+    // records the model, and refuses one called fam/bad
+    harness.prepare = vec![
+        "/bin/sh".into(),
+        "-c".into(),
+        format!(
+            "echo \"$1\" >> {}; [ \"$1\" != fam/bad ] || {{ echo no card free >&2; exit 3; }}",
+            ready.display()
+        ),
+        "sh".into(),
+        "{model}".into(),
+    ];
+    let runner = Runner::new(host, vec![("fake".into(), harness)], None, None);
+    let agent = runner.create("t1", "", "a title").unwrap();
+    let out = runner.run(&agent, "no model chosen", vec![]).await;
+    assert_eq!(out.stopped, "done");
+    assert!(!ready.exists(), "nothing to prepare without a chosen model");
+
+    runner.set_model(&agent, "fam/beta").unwrap();
+    let out = runner.run(&agent, "hi", vec![]).await;
+    assert_eq!(out.stopped, "done", "{out:?}");
+    assert_eq!(std::fs::read_to_string(&ready).unwrap(), "fam/beta\n");
+
+    runner.set_model(&agent, "fam/bad").unwrap();
+    let before = prompts(&log).len();
+    let out = runner.run(&agent, "hello", vec![]).await;
+    assert_eq!(out.stopped, "error");
+    assert!(out.error.contains("no card free"), "{}", out.error);
+    assert_eq!(prompts(&log).len(), before, "the agent was not asked");
+    let c = io::load(&runner.host.agents.join(&agent)).unwrap();
+    assert!(c
+        .timeline
+        .ordered()
+        .iter()
+        .any(|e| e.kind.as_str() == "checkpoint" && e.data["reason"] == "model_unavailable"));
+}
+
+#[tokio::test]
 async fn a_freeze_cancels_the_turn_and_a_crash_is_an_error() {
     let l = lab(false, None);
     let runner = Arc::clone(&l.runner);
@@ -276,4 +319,38 @@ async fn whatever_the_agent_started_ends_with_it() {
     let alive =
         std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|s| !s.contains(") Z "));
     assert!(!alive, "the agent's child {pid} outlived the turn");
+}
+
+#[test]
+fn changes_made_at_once_to_a_capsule_are_all_kept() {
+    let l = lab(false, None);
+    let root = l.runner.host.agents.join(&l.agent);
+    let before = journal(&l).len();
+    std::thread::scope(|s| {
+        for w in 0..6 {
+            let root = &root;
+            s.spawn(move || {
+                for i in 0..15 {
+                    io::append_event(
+                        root,
+                        "n1@t1",
+                        inari_core::capsule::model::EventKind::Checkpoint,
+                        serde_json::json!({"reason": format!("w{w}-{i}")}),
+                        1.0,
+                    )
+                    .unwrap();
+                }
+            });
+        }
+        s.spawn(|| {
+            for i in 0..15 {
+                l.runner.set_model(&l.agent, &format!("fam/m{i}")).unwrap();
+            }
+        });
+    });
+    // 90 checkpoints and 15 model switches, none lost; the label is the last model chosen
+    assert_eq!(journal(&l).len(), before + 90 + 15);
+    let c = io::load(&root).unwrap();
+    assert_eq!(c.manifest.labels()["model"], "fam/m14");
+    assert!(io::verify(&root).is_empty(), "{:?}", io::verify(&root));
 }

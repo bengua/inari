@@ -160,8 +160,49 @@ pub fn verify(root: &Path) -> Vec<String> {
     problems
 }
 
+/// Every change to a live capsule reads it, changes it and reseals it: two changes at
+/// once (a model chosen while a message arrives) would each overwrite the other. One
+/// lock per capsule directory, held for the whole read-change-seal.
+fn lock(root: &Path) -> std::sync::Arc<std::sync::Mutex<()>> {
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex, OnceLock};
+    static LOCKS: OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> = OnceLock::new();
+    let mut all = LOCKS
+        .get_or_init(Mutex::default)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    Arc::clone(all.entry(root.to_path_buf()).or_default())
+}
+
+/// Run `f` while no other change to the capsule at `root` runs.
+pub fn locked<T>(root: &Path, f: impl FnOnce() -> T) -> T {
+    let l = lock(root);
+    let _held = l.lock().unwrap_or_else(|e| e.into_inner());
+    f()
+}
+
+/// Change a live capsule's manifest (labels, title, holder) and reseal it.
+pub fn edit_manifest(root: &Path, f: impl FnOnce(&mut Manifest)) -> Result<Manifest> {
+    locked(root, || {
+        let capsule = load(root)?;
+        let mut manifest = capsule.manifest;
+        f(&mut manifest);
+        seal(root, manifest, &capsule.timeline)
+    })
+}
+
 /// Add one event to a live capsule and reseal it.
 pub fn append_event(
+    root: &Path,
+    author: &str,
+    kind: EventKind,
+    data: Value,
+    ts: f64,
+) -> Result<Capsule> {
+    locked(root, || append_event_unlocked(root, author, kind, data, ts))
+}
+
+fn append_event_unlocked(
     root: &Path,
     author: &str,
     kind: EventKind,
@@ -301,6 +342,10 @@ pub fn materialize(root: &Path, dest: &Path) -> Result<()> {
 
 /// Record `workdir` as the capsule's new snapshot (only new content adds a blob) and reseal.
 pub fn update_snapshot(root: &Path, workdir: &Path) -> Result<Capsule> {
+    locked(root, || update_snapshot_unlocked(root, workdir))
+}
+
+fn update_snapshot_unlocked(root: &Path, workdir: &Path) -> Result<Capsule> {
     let capsule = load(root)?;
     let mut files = Vec::new();
     if workdir.is_dir() {

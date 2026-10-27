@@ -41,6 +41,10 @@ pub struct Attached {
 
 /// Put `data` at `rel` in the capsule's workspace and reseal.
 pub fn attach(root: &Path, rel: &str, data: &[u8]) -> Result<Attached> {
+    super::io::locked(root, || attach_unlocked(root, rel, data))
+}
+
+fn attach_unlocked(root: &Path, rel: &str, data: &[u8]) -> Result<Attached> {
     let clean = safe_relative(rel)
         .ok_or_else(|| Error::Integrity(format!("path leaves the workspace: {rel}")))?;
     let name = clean

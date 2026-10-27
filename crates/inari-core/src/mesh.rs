@@ -107,13 +107,27 @@ impl Registry {
     }
 }
 
-pub const PHASES: [&str; 5] = ["idle", "listening", "inference", "success", "error"];
-const PRIORITY: [&str; 5] = ["error", "inference", "listening", "success", "idle"];
+pub const PHASES: [&str; 6] = [
+    "idle",
+    "listening",
+    "loading",
+    "inference",
+    "success",
+    "error",
+];
+const PRIORITY: [&str; 6] = [
+    "error",
+    "inference",
+    "loading",
+    "listening",
+    "success",
+    "idle",
+];
 
 fn colour(phase: &str) -> &'static str {
     match phase {
         "listening" => "#e879f9",
-        "inference" => "#fbbf24",
+        "inference" | "loading" => "#fbbf24",
         "success" => "#34d399",
         "error" => "#f87171",
         _ => "#22d3ee",
