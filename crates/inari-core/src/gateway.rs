@@ -363,6 +363,15 @@ impl Gateway {
             st.log
                 .insert(agent, history.into_iter().chain(live).collect()); // a late reply keeps newer events
         });
+        self.on("agent.merged", |g, _, m| {
+            // the target's journal grew by another one: read it again
+            if m.payload.get("ok").and_then(Value::as_bool) == Some(true) {
+                g.bus.publish(
+                    "agent.history.request",
+                    json!({"agent": s(&m.payload, "target")}),
+                );
+            }
+        });
         for subject in ["agent.*.done", "agent.created", "agent.merged"] {
             self.on(subject, |_, st, m| {
                 let mut notice = Map::new();
@@ -441,13 +450,20 @@ impl Gateway {
             })
             .unwrap_or_default();
         if let Some(agents) = snap["agents"].as_object_mut() {
-            agents.retain(|id, _| access.owns(id));
+            let pid = pass["id"].as_str().unwrap_or("");
+            agents.retain(|id, a| {
+                self.owned(&access, id) || a.get("pass").and_then(Value::as_str) == Some(pid)
+            });
         }
+        let mine: HashSet<String> = snap["agents"]
+            .as_object()
+            .map(|a| a.keys().cloned().collect())
+            .unwrap_or_default();
         if let Some(list) = snap["approvals"].as_array_mut() {
-            list.retain(|r| access.owns(r.get("agent_id").and_then(Value::as_str).unwrap_or("")));
+            list.retain(|r| mine.contains(r.get("agent_id").and_then(Value::as_str).unwrap_or("")));
         }
         if let Some(list) = snap["notices"].as_array_mut() {
-            list.retain(|n| access.owns(n.get("agent").and_then(Value::as_str).unwrap_or("")));
+            list.retain(|n| mine.contains(n.get("agent").and_then(Value::as_str).unwrap_or("")));
         }
         if let Some(nodes) = snap["nodes"].as_array_mut() {
             for n in nodes.iter_mut() {
@@ -743,7 +759,7 @@ impl Gateway {
         }
         if get && parts.len() == 5 && parts[1] == "api" && parts[2] == "agent" {
             let agent = parts[3].to_string();
-            if !access.owns(&agent) {
+            if !self.owned(&access, &agent) {
                 return send_json(w, 403, &json!({"error": "not your thread"})).await;
             }
             return match parts[4] {
@@ -791,7 +807,12 @@ impl Gateway {
             let hits: Vec<Value> = self
                 .search(&q, &agent)
                 .into_iter()
-                .filter(|h| access.owns(h.get("agent").and_then(Value::as_str).unwrap_or("")))
+                .filter(|h| {
+                    self.owned(
+                        &access,
+                        h.get("agent").and_then(Value::as_str).unwrap_or(""),
+                    )
+                })
                 .collect();
             return send_json(w, 200, &json!({"hits": hits})).await;
         }
@@ -818,6 +839,24 @@ impl Gateway {
             }
         }
         send_json(w, 404, &json!({"error": "not found"})).await
+    }
+
+    /// A thread is the access's own: always for the owner; for a pass, named after it or
+    /// shared with it (its `pass` label).
+    pub fn owned(&self, access: &Access, agent: &str) -> bool {
+        if access.owns(agent) {
+            return true;
+        }
+        let Some(id) = access.pass_id() else {
+            return false;
+        };
+        let st = self.state.lock().expect("not poisoned");
+        st.telemetry
+            .agents
+            .get(agent)
+            .and_then(|a| a.get("pass"))
+            .and_then(Value::as_str)
+            == Some(id)
     }
 
     /// What a pass holder may do, and how its requests are bound to its pass. The owner
@@ -867,15 +906,15 @@ impl Gateway {
                 d["pass"] = json!(id);
                 Ok(d)
             }
-            "/api/message" | "/api/upload" | "/api/model" => {
-                if access.owns(&s(&d, "agent")) {
+            "/api/message" | "/api/upload" | "/api/model" | "/api/archive" => {
+                if self.owned(&access, &s(&d, "agent")) {
                     Ok(d)
                 } else {
                     Err((403, "not your thread"))
                 }
             }
             "/api/harness" => {
-                if access.owns(&s(&d, "agent")) && harness_ok(&s(&d, "harness")) {
+                if self.owned(&access, &s(&d, "agent")) && harness_ok(&s(&d, "harness")) {
                     Ok(d)
                 } else {
                     Err((403, "not allowed by the pass"))
@@ -891,7 +930,10 @@ impl Gateway {
                     .get(&s(&d, "request_id"))
                     .cloned();
                 let mine = req.is_some_and(|r| {
-                    access.owns(r.get("agent_id").and_then(Value::as_str).unwrap_or(""))
+                    self.owned(
+                        &access,
+                        r.get("agent_id").and_then(Value::as_str).unwrap_or(""),
+                    )
                 });
                 if mine && pass["role"] == "collaboration" {
                     Ok(d)
@@ -998,6 +1040,60 @@ impl Gateway {
                 self.bus.publish(
                     "agent.merge",
                     json!({"target": s(d, "target"), "source": s(d, "source")}),
+                );
+                ok
+            }
+            "/api/clone" => {
+                if !need(&["agent", "harness"]) {
+                    return bad;
+                }
+                let (agent, harness) = (s(d, "agent"), s(d, "harness"));
+                let new = format!("{agent}-{harness}-{}", crate::wire::random_hex(2));
+                let title = self
+                    .state
+                    .lock()
+                    .expect("not poisoned")
+                    .telemetry
+                    .agents
+                    .get(&agent)
+                    .and_then(|a| a.get("title"))
+                    .and_then(Value::as_str)
+                    .unwrap_or(&agent)
+                    .to_string();
+                let label: String = s(d, "label").chars().take(30).collect();
+                let title = if label.is_empty() {
+                    title
+                } else {
+                    format!("{title} · {label}")
+                };
+                self.bus.publish(
+                    &format!("agent.{agent}.fork"),
+                    json!({"new_thread": new, "harness": harness, "title": title}),
+                );
+                Some((200, json!({"ok": true, "thread_id": new})))
+            }
+            "/api/share" => {
+                if !need(&["agent"]) {
+                    return bad;
+                }
+                self.bus.publish(
+                    &format!("agent.{}.label", s(d, "agent")),
+                    json!({"key": "pass", "value": s(d, "pass")}),
+                );
+                ok
+            }
+            "/api/archive" => {
+                if !need(&["agent"]) {
+                    return bad;
+                }
+                let value = if d.get("archived").and_then(Value::as_bool).unwrap_or(true) {
+                    "1"
+                } else {
+                    ""
+                };
+                self.bus.publish(
+                    &format!("agent.{}.label", s(d, "agent")),
+                    json!({"key": "archived", "value": value}),
                 );
                 ok
             }

@@ -527,6 +527,7 @@ impl Node {
         m.insert("model".into(), json!(label("model")));
         m.insert("harness".into(), json!(harness));
         m.insert("pass".into(), json!(label("pass")));
+        m.insert("archived".into(), json!(label("archived") == "1"));
         m
     }
 
@@ -800,9 +801,38 @@ impl Node {
             .map_err(|e| e.to_string())
             .and_then(|_| n.host.adopt(&staging).map_err(|e| e.to_string()));
             let _ = std::fs::remove_dir_all(&staging);
+            // a clone: the same journal and files, thought on by another harness
+            let harness = s(&m.payload, "harness");
+            let made = match (made, n.runner.as_ref()) {
+                (Ok(id), Some(r)) if !harness.is_empty() => {
+                    let title = s(&m.payload, "title");
+                    r.set_harness(&id, &harness)
+                        .and_then(|_| {
+                            if title.is_empty() {
+                                Ok(())
+                            } else {
+                                r.set_title(&id, &title)
+                            }
+                        })
+                        .map(|_| id)
+                }
+                (made, _) => made,
+            };
             match made {
                 Ok(id) => n.created(&id, true, ""),
                 Err(e) => n.created(&new, false, &e),
+            }
+        });
+        self.on("agent.*.label", |n, m| async move {
+            // the labels a person may set from the interface: who it is shared with, asleep or not
+            let agent = m.subject.split('.').nth(1).unwrap_or("").to_string();
+            let key = s(&m.payload, "key");
+            if let Some(r) = n
+                .runner
+                .as_ref()
+                .filter(|_| n.running(&agent) && ["pass", "archived"].contains(&key.as_str()))
+            {
+                let _ = r.label(&agent, &key, &s(&m.payload, "value"));
             }
         });
         self.on("agent.merge", |n, m| async move {
