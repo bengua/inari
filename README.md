@@ -36,8 +36,23 @@ makes different choices:
 | Accounts and services | None: no sign-in, no relay, no telemetry; your own subscriptions and keys, secrets named in the capsule and read from the host's vault | An account with the app's service, often required even for local use |
 | Models and cost | Local first, free tiers next, paid frontier when chosen; quotas shown per provider; harnesses updated from the interface | One vendor's models, or one subscription per tool |
 | Sharing | Send a thread to a friend or a family member as a capsule; they continue it on their own core | Shared links into a hosted service |
+| Family | Core passes: a child uses AI on the family core, the parent follows every thread and approves the agents' actions, and the child always sees that it is so; adults share threads in collaboration | Per-account parental settings, if any, inside one vendor's service |
 | Runtime | One static Rust binary per machine (~6 MB of memory) | A desktop app and a server stack |
 | License | MIT, for every part of this repository | Varies |
+
+## A family's agent network
+
+A **core pass** gives a person threads on your core without giving them your core:
+
+- **Supervision**, for a child: their threads run on the family core, on the models you
+  allow (local ones by default, never your paid subscriptions unless you say so). You read
+  every thread and answer the agents' permission requests. They always see a banner saying
+  who follows them: supervision is stated, never hidden. A pass can end on a date.
+- **Collaboration**, between adults: both see the shared threads and take part.
+
+A pass holder sees only their own threads and the harnesses the pass allows — no terminal,
+no teleport, no settings, nothing of yours. Create and revoke passes from **+** next to the
+cores; see [docs/node.md](docs/node.md).
 
 ## Acknowledgments
 
