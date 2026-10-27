@@ -153,6 +153,22 @@ impl CapsuleHost {
     }
 
     /// After a crash: trust the capsule on disk, drop half-finished staging.
+    /// Put a thread this node runs in the trash: kept on disk (`trash/<agent>-<time>`), no
+    /// longer run here, not brought back by `recover`.
+    pub fn discard(&self, agent: &str) -> CallResult<()> {
+        let (holder, epoch, status) = self
+            .record(agent)
+            .ok_or_else(|| err("KeyError", format!("unknown agent {agent}")))?;
+        if status != "running" {
+            return Err(err("StateError", format!("{agent} is {status} here")));
+        }
+        let trash = self.root.join("trash");
+        fs::create_dir_all(&trash).map_err(|e| err("OSError", e))?;
+        let dest = trash.join(format!("{agent}-{}", now() as u64));
+        fs::rename(self.agents.join(agent), &dest).map_err(|e| err("OSError", e))?;
+        self.set(agent, &holder, epoch, "deleted")
+    }
+
     pub fn recover(&self) -> Vec<String> {
         if let Ok(entries) = fs::read_dir(&self.staging) {
             for entry in entries.flatten() {

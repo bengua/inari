@@ -828,6 +828,15 @@ impl Node {
                 Err(e) => n.created(&new, false, &e),
             }
         });
+        self.on("agent.*.delete", |n, m| async move {
+            let agent = m.subject.split('.').nth(1).unwrap_or("").to_string();
+            if n.running(&agent) && n.host.discard(&agent).is_ok() {
+                n.bus.publish(
+                    "agent.deleted",
+                    json!({"agent": agent, "node": n.cfg.node_id}),
+                );
+            }
+        });
         self.on("agent.*.label", |n, m| async move {
             // the labels a person may set from the interface: who it is shared with, asleep or not
             let agent = m.subject.split('.').nth(1).unwrap_or("").to_string();
