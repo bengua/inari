@@ -1,14 +1,51 @@
-# inari-core
+# Inari
 
-A distributed agent core built around one idea: **an agent's state is a portable
-file, not a row in someone's database.** Everything else follows from it — hot
-provider switching, moving a running agent between machines, a phone that
-supervises without computing, nodes that keep working when the network does not.
+**A local-first network of AI agents for the machines you already own.** Start an agent
+on one computer, move it to another one mid-task, hand a copy to a friend — and keep
+paying only for what you choose: local models for free, free tiers where they exist,
+a frontier subscription when the task deserves it.
 
-It is a clean-slate design (see [ADR 0001](docs/adr/0001-clean-break.md)), not a
-patch of an earlier engine. This repository holds the foundation: the capsule
-format, the handover engine, the teleportation protocol, the mesh, and the
-specification of the interfaces that sit on top.
+Inari is built around one idea: **an agent's state is a portable file, not a row in
+someone's database.** Everything else follows from it — switching model or provider
+in the middle of a thread, moving a running agent between machines, a phone that
+supervises without computing, machines that keep working when the network does not.
+
+## Where it stands
+
+- **Home-made, end to end.** The capsule format, the teleport protocol, the mesh, the
+  core (one static Rust binary of about 5 MB, about 6 MB of memory) and the web interface
+  were written for this project. The Python package in `src/inari_core` is the reference
+  implementation; its tests are the specification the Rust core is checked against.
+- **Every agent harness through one protocol.** Claude Code (through
+  `claude-agent-acp`), Gemini CLI and OpenFox all speak the Agent Client Protocol, so a
+  thread can change harness or model without losing its history.
+- **Each machine serves its own interface**, the phone reaches any of them, and the
+  Android app shares photos and documents with the model.
+
+## How Inari differs from other agent cores
+
+Agent platforms already run coding agents remotely, move them between a laptop and a
+cloud, or let one app drive several models. Inari does not reuse their code, and it
+makes different choices:
+
+| | Inari | Common approach |
+|---|---|---|
+| Where the agent's state lives | A capsule: a plain tar of JSON and Markdown with a hash-chained journal (`ssc/1`, [docs/ssc.md](docs/ssc.md)), readable without Inari | A server-side database of the provider or the app |
+| Moving a running agent | Peer to peer between your own machines: two-phase commit with a fencing epoch, rollback and in-doubt resolution ([docs/teleport.md](docs/teleport.md)); a failed move falls back to a clone | Between one device and the vendor's cloud |
+| Topology | A mesh of equal cores (laptop, desktop, server, any number), one of them the hub, linked by an authenticated bus; each keeps working offline | One client and one service |
+| Accounts and services | None: no sign-in, no relay, no telemetry; your own subscriptions and keys, secrets named in the capsule and read from the host's vault | An account with the app's service, often required even for local use |
+| Models and cost | Local first, free tiers next, paid frontier when chosen; quotas shown per provider; harnesses updated from the interface | One vendor's models, or one subscription per tool |
+| Sharing | Send a thread to a friend or a family member as a capsule; they continue it on their own core | Shared links into a hosted service |
+| Runtime | One static Rust binary per machine (~6 MB of memory) | A desktop app and a server stack |
+| License | MIT, for every part of this repository | Varies |
+
+## Acknowledgments
+
+Inari owes a great deal to **David Ondrej** and his work on
+[Cloudroom](https://github.com/davidondrej/cloudroom-gui): watching an agent teleport
+between machines there is what started this project. Cloudroom serves teams with larger
+needs and several frontier subscriptions; Inari takes another path — local first,
+cost-conscious, hybrid and family-sized — under the MIT license. Thank you, David.
 
 ## What is here
 
@@ -25,9 +62,9 @@ specification of the interfaces that sit on top.
 | Capsule signatures (Ed25519), approvals over the bus | `signature.py`, `approval_bus.py` | implemented, tested |
 | NATS / Zenoh adapters | — | not written: same two seams (`Link`, `Endpoint`) |
 
-Read [docs/architecture.md](docs/architecture.md) first. The core is being ported to Rust
-(`crates/inari-core`), byte-compatible with the Python reference: see
-[docs/rust-port.md](docs/rust-port.md).
+Read [docs/architecture.md](docs/architecture.md) first. The running core is the Rust crate
+(`crates/inari-core`, binary `inari-core-rs`), byte-compatible with the Python reference:
+see [docs/rust-port.md](docs/rust-port.md) and [docs/node.md](docs/node.md).
 
 ## Try it
 

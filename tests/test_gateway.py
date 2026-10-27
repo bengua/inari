@@ -19,6 +19,8 @@ async def http(port, method, path, body=None, token="t"):
     reader, writer = await asyncio.open_connection("127.0.0.1", port)
     data = json.dumps(body).encode() if body is not None else b""
     auth = f"Authorization: Bearer {token}\r\n" if token else ""
+    if body is not None:
+        auth += "Content-Type: application/json\r\n"
     writer.write(
         f"{method} {path} HTTP/1.1\r\nHost: x\r\n{auth}Content-Length: {len(data)}\r\n\r\n".encode()
         + data

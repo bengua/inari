@@ -10,7 +10,7 @@ use crate::approvals::NodeApprovals;
 use crate::bus::{Bus, Message};
 use crate::buslink::{BusClient, BusServer};
 use crate::capsule::{io, EventKind};
-use crate::gateway::Gateway;
+use crate::gateway::{Gateway, GatewayOptions};
 use crate::host::CapsuleHost;
 use crate::mesh::{Coordinator, NodeInfo, Progress, Registry, Teleporter};
 use crate::rpc::{EndpointServer, RemoteEndpoint};
@@ -113,6 +113,9 @@ pub struct NodeConfig {
     pub gateway_token_file: Option<PathBuf>,
     #[serde(default)]
     pub gateway_ui: Map<String, Value>,
+    /// Pages opened on this machine (http://127.0.0.1:…) need no token.
+    #[serde(default)]
+    pub gateway_trust_loopback: bool,
     #[serde(default)]
     pub mascot_dir: Option<PathBuf>,
     #[serde(default)]
@@ -383,7 +386,8 @@ impl Node {
             ))
         };
         let mut gateway_port = 0;
-        let gateway = if is_hub && !cfg.gateway_listen.is_empty() {
+        // any node may serve the interface: its bus sees the whole mesh through the hub
+        let gateway = if !cfg.gateway_listen.is_empty() {
             let token = match &cfg.gateway_token_file {
                 Some(p) => std::fs::read_to_string(p)
                     .map_err(|e| format!("gateway token: {e}"))?
@@ -393,12 +397,15 @@ impl Node {
             };
             let g = Gateway::new(
                 Arc::clone(&bus),
-                token,
-                device_key.clone(),
-                cfg.gateway_ui.clone(),
-                cfg.mascot_dir.clone(),
-                &cfg.usage,
-                &cfg.data_dir,
+                GatewayOptions {
+                    token,
+                    key: device_key.clone(),
+                    ui: cfg.gateway_ui.clone(),
+                    mascot_dir: cfg.mascot_dir.clone(),
+                    usage: cfg.usage.clone(),
+                    data_dir: cfg.data_dir.clone(),
+                    trust_loopback: cfg.gateway_trust_loopback,
+                },
             );
             let (lhost, lport) = cfg
                 .gateway_listen

@@ -110,6 +110,136 @@ pub enum Source {
         base: String,
         providers: Vec<String>,
     },
+    /// Claude's own usage endpoint, with the Claude Code login of this machine.
+    Claude { credentials: std::path::PathBuf },
+}
+
+const CLAUDE_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
+
+/// The usage entry for Claude from the endpoint's reply (`five_hour`, `seven_day`,
+/// `extra_usage`); `plan` is the subscription type from the login.
+pub fn claude_entry(reply: &Value, plan: &str) -> Value {
+    let mut windows = Vec::new();
+    for (key, label) in [
+        ("five_hour", "Five-hour limit"),
+        ("seven_day", "Weekly limit"),
+    ] {
+        if let Some(used) = reply
+            .pointer(&format!("/{key}/utilization"))
+            .and_then(Value::as_f64)
+        {
+            let resets = reply
+                .pointer(&format!("/{key}/resets_at"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            windows.push(json!({"label": label, "used_percent": used, "resets_at": resets}));
+        }
+    }
+    let mut plan_label = match plan {
+        "" => String::new(),
+        p => p[..1].to_uppercase() + &p[1..],
+    };
+    // Extra usage takes over at the limit, paid per token: shown with what it cost so far.
+    let extra = reply
+        .get("extra_usage")
+        .filter(|e| e.get("is_enabled").and_then(Value::as_bool) == Some(true));
+    if let Some(e) = extra {
+        let places = e
+            .get("decimal_places")
+            .and_then(Value::as_i64)
+            .unwrap_or(2)
+            .clamp(0, 6) as i32;
+        let used = e
+            .get("used_credits")
+            .and_then(Value::as_f64)
+            .map(|c| c / 10f64.powi(places));
+        let currency = e.get("currency").and_then(Value::as_str).unwrap_or("");
+        let note = match used {
+            Some(u) => format!("extra usage {u:.2} {currency}")
+                .trim_end()
+                .to_string(),
+            None => "extra usage".to_string(),
+        };
+        plan_label = if plan_label.is_empty() {
+            note
+        } else {
+            format!("{plan_label} · {note}")
+        };
+        if let (Some(used), Some(limit)) = (
+            used,
+            e.get("monthly_limit")
+                .and_then(Value::as_f64)
+                .map(|l| l / 10f64.powi(places))
+                .filter(|l| *l > 0.0),
+        ) {
+            windows.push(json!({"label": "Extra usage this month", "used_percent": (used / limit * 100.0).min(100.0), "resets_at": ""}));
+        }
+    }
+    json!({"provider_id": "claude", "name": "Claude Code", "status": "ok", "plan": plan_label, "tint": "", "logo": "", "windows": windows})
+}
+
+async fn claude_usage(credentials: &std::path::Path) -> Result<Value, String> {
+    let unavailable = |status: &str| json!({"provider_id": "claude", "name": "Claude Code", "status": status, "plan": "", "tint": "", "logo": "", "windows": []});
+    let Ok(raw) = std::fs::read(credentials) else {
+        return Ok(unavailable("unauthenticated"));
+    };
+    let login: Value = serde_json::from_slice(&raw).map_err(|e| e.to_string())?;
+    let oauth = login.get("claudeAiOauth").cloned().unwrap_or(Value::Null);
+    let Some(token) = oauth.get("accessToken").and_then(Value::as_str) else {
+        return Ok(unavailable("unauthenticated"));
+    };
+    let expires_ms = oauth
+        .get("expiresAt")
+        .and_then(Value::as_f64)
+        .unwrap_or(f64::MAX);
+    if crate::approvals::now() * 1000.0 >= expires_ms {
+        return Ok(unavailable("expired"));
+    }
+    // curl reads the headers from its input: the token never appears in a command line.
+    let mut child = tokio::process::Command::new("curl")
+        .args([
+            "-sS",
+            "-m",
+            "15",
+            "-H",
+            "@-",
+            "-w",
+            "\n%{http_code}",
+            CLAUDE_USAGE_URL,
+        ])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| format!("curl: {e}"))?;
+    let headers = format!(
+        "Authorization: Bearer {token}\nAccept: application/json\nanthropic-beta: oauth-2025-04-20\nUser-Agent: claude-code/2.1.0\n"
+    );
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(headers.as_bytes())
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    let out = tokio::time::timeout(Duration::from_secs(20), child.wait_with_output())
+        .await
+        .map_err(|_| "timed out".to_string())?
+        .map_err(|e| e.to_string())?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let (body, code) = text.rsplit_once('\n').unwrap_or(("", &text));
+    let plan = oauth
+        .get("subscriptionType")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    match code.trim() {
+        "200" => Ok(claude_entry(
+            &serde_json::from_str(body).map_err(|e| e.to_string())?,
+            plan,
+        )),
+        "401" => Ok(unavailable("expired")),
+        other => Err(format!("Claude usage: HTTP {other}")),
+    }
 }
 
 fn family(provider: &str) -> &str {
@@ -128,6 +258,16 @@ impl Source {
                     .cloned()
                     .unwrap_or_default(),
             )),
+            "claude" => Some(Self::Claude {
+                credentials: spec
+                    .get("credentials")
+                    .and_then(Value::as_str)
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or_else(|| {
+                        std::path::Path::new(&std::env::var("HOME").unwrap_or_default())
+                            .join(".claude/.credentials.json")
+                    }),
+            }),
             "cloudroom" => Some(Self::Cloudroom {
                 base: spec.get("url")?.as_str()?.trim_end_matches('/').to_string(),
                 providers: spec
@@ -147,6 +287,7 @@ impl Source {
     /// The usage entries, and the logo URLs found (family -> absolute URL).
     pub async fn fetch(&self) -> Result<(Vec<Value>, Map<String, Value>), String> {
         match self {
+            Self::Claude { credentials } => Ok((vec![claude_usage(credentials).await?], Map::new())),
             Self::Static(items) => Ok((
                 items
                     .iter()
@@ -215,6 +356,33 @@ impl Source {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn claude_usage_becomes_windows() {
+        let reply = json!({"five_hour": {"utilization": 6.0, "resets_at": "2026-10-27T15:10:00Z"},
+                           "seven_day": {"utilization": 100.0, "resets_at": "2026-10-30T21:00:00Z"},
+                           "extra_usage": {"is_enabled": true, "monthly_limit": 5000.0, "used_credits": 500.0, "currency": "EUR", "decimal_places": 2}});
+        let e = claude_entry(&reply, "pro");
+        assert_eq!(e["plan"], "Pro · extra usage 5.00 EUR");
+        let used: Vec<f64> = e["windows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|w| w["used_percent"].as_f64().unwrap())
+            .collect();
+        assert_eq!(used, [6.0, 100.0, 10.0]);
+        assert_eq!(claude_entry(&json!({}), "")["windows"], json!([]));
+    }
+
+    #[tokio::test]
+    async fn no_login_means_unauthenticated() {
+        let s = Source::from_config(
+            &json!({"kind": "claude", "credentials": "/nonexistent/creds.json"}),
+        )
+        .unwrap();
+        let (items, _) = s.fetch().await.unwrap();
+        assert_eq!(items[0]["status"], "unauthenticated");
+    }
 
     #[test]
     fn chunks_are_joined() {

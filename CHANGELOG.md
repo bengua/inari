@@ -9,6 +9,13 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Added
 
+- **Inari is this project**: the README presents Inari, how it differs from other agent cores,
+  and thanks David Ondrej for Cloudroom. MIT throughout.
+- **Each machine serves its own interface** (`gateway_listen` on any node,
+  `gateway_trust_loopback` for pages opened on the machine). Behind a gate that adds the
+  access itself, the page needs no token.
+- **Claude quotas from Claude itself** (`usage` kind `claude`): five-hour and weekly windows and
+  extra usage, read with the machine's Claude Code login; the token goes to curl on its input.
 - **Harness updates**: a harness may name the npm package it comes from (`update` in its
   configuration); each Rust node reports installed and latest versions, and the sidebar badge
   (download mark and the logos of what is out of date) installs the update on any core, runs the
