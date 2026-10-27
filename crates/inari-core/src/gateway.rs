@@ -452,7 +452,7 @@ impl Gateway {
         if let Some(agents) = snap["agents"].as_object_mut() {
             let pid = pass["id"].as_str().unwrap_or("");
             agents.retain(|id, a| {
-                self.owned(&access, id) || a.get("pass").and_then(Value::as_str) == Some(pid)
+                self.owned(access, id) || a.get("pass").and_then(Value::as_str) == Some(pid)
             });
         }
         let mine: HashSet<String> = snap["agents"]
@@ -907,14 +907,14 @@ impl Gateway {
                 Ok(d)
             }
             "/api/message" | "/api/upload" | "/api/model" | "/api/archive" => {
-                if self.owned(&access, &s(&d, "agent")) {
+                if self.owned(access, &s(&d, "agent")) {
                     Ok(d)
                 } else {
                     Err((403, "not your thread"))
                 }
             }
             "/api/harness" => {
-                if self.owned(&access, &s(&d, "agent")) && harness_ok(&s(&d, "harness")) {
+                if self.owned(access, &s(&d, "agent")) && harness_ok(&s(&d, "harness")) {
                     Ok(d)
                 } else {
                     Err((403, "not allowed by the pass"))
@@ -931,7 +931,7 @@ impl Gateway {
                     .cloned();
                 let mine = req.is_some_and(|r| {
                     self.owned(
-                        &access,
+                        access,
                         r.get("agent_id").and_then(Value::as_str).unwrap_or(""),
                     )
                 });

@@ -178,7 +178,7 @@ async fn clone_share_and_sleep() {
     )
     .await;
     until("the merged journal", || {
-        g.search("draft it", "essay").len() >= 1
+        !g.search("draft it", "essay").is_empty()
             && g.snapshot()["notices"]
                 .as_array()
                 .is_some_and(|n| n.iter().any(|x| x["subject"] == "agent.merged"))
