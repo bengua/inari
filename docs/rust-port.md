@@ -31,7 +31,7 @@ Rust nodes and move machine by machine.
 | 2b | Bus and TCP bus links (durable replay, duplicates dropped), fork/merge, and **clone to another core with another harness** (fork, switch harness, teleport the copy; the original stays) — Python and Rust buses linked both ways | done |
 | 3 | ACP harness and runner turn, with attachments passed to the model: images as image content when the agent accepts it (Claude, Gemini), other files as links into the workspace, all named in the message (`inari-core-rs turn`) | done |
 | 4 | Node daemon and gateway (HTTP/SSE, uploads in parts from the Android app's share sheet, camera and file picker), serving the web interface (`inari-core-rs node`). A Python node joins a Rust hub and agents move between them | done |
-| 5 (next) | Switch the three cores to the Rust binary, retire the Python runtime | |
+| 5 | Switch the three cores to the Rust binary (a static musl build runs unchanged on every Linux host), retire the Python runtime; the Python package stays as the tested reference | done |
 
 ## Attachments, as the phone sends them
 
