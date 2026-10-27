@@ -79,6 +79,10 @@ button,input,textarea,select { font:inherit; color:inherit; }
 #main { display:grid; grid-template-rows:auto auto minmax(0,1fr) auto; min-width:0; min-height:0; }
 #app.measuring, #app.measuring #side, #app.measuring #bench { transition:none !important; } #app.morphing #main { overflow:hidden; } #app.morphing #main > * { width:var(--freeze); max-width:none; }
 #app.noside .hero { margin-top:150px; transition:margin-top .38s cubic-bezier(.22,.8,.24,1); } /* room for the mascot above it */
+#dropdock { position:fixed; left:50%; bottom:22px; transform:translateX(-50%); z-index:80; display:flex; flex-wrap:wrap; justify-content:center; gap:8px; max-width:min(92vw,820px); padding:10px; border-radius:16px; background:var(--panel-solid); border:1px solid var(--hair); box-shadow:0 10px 40px rgba(0,0,0,.35); }
+#dropdock .dz { display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border-radius:12px; border:1px dashed var(--hair); font-size:13px; color:var(--dim); white-space:nowrap; } #dropdock .dz.hot { border-style:solid; border-color:var(--copper); color:var(--ink); background:var(--copper-soft); }
+#dropdock small { flex-basis:100%; text-align:center; color:var(--faint); font-size:11.5px; } .row.hot { outline:2px solid var(--copper); outline-offset:-2px; } #fox.hot { filter:drop-shadow(0 0 18px var(--copper)); } .core.filehot { outline:2px dashed var(--copper); }
+.row { touch-action:pan-y; } #sleepers { margin-left:auto; margin-right:6px; font-size:12px; text-transform:none; }
 #passBanner { grid-row:1; } #top { grid-row:2; } #thread { grid-row:3; } #dock { grid-row:4; }
 body:not(.open) #top { display:none; } /* no thread open: the top of the page is the mascot's */ #app.wbmax #main { display:none; } #app.wbmax { grid-template-columns:var(--side) 0 minmax(0,1fr); } #app.wbmax #bench { width:auto; }
 #passBanner { padding:8px 16px; font-size:13px; background:var(--raise); border-bottom:1px solid var(--hair); color:var(--dim); } #passBanner b { color:var(--ink); } #passBanner button { margin-left:8px; }
@@ -130,13 +134,14 @@ pre.code span.l::before { counter-increment:l; content:counter(l); position:abso
 <body>
 <div id="login" class="glass" hidden><h2>Inari</h2><label for="tokenInput">Access token or pass</label><small id="loginWhy" class="empty"></small><input id="tokenInput" type="password" autocomplete="current-password"><button class="btn go" id="tokenGo">Connect</button></div>
 <div id="fox" aria-label="Mascot"></div>
+<div id="dropdock" role="region" aria-label="Drop the thread here" hidden></div>
 <div id="app" class="nosel" hidden>
   <header id="appbar"><button class="btn icon" id="sideToggle" title="Sidebar" aria-label="Show or hide the sidebar" data-icon="sidebar"></button><div class="brand"><h1>Inari</h1><small id="brandName"></small></div><span class="sp"></span><span class="chip" id="stats" aria-live="polite" style="cursor:default">…</span><button class="btn icon" id="benchBtn" title="Artifacts, terminal, journal" aria-label="Show or hide the artifacts pane" data-icon="panel"></button></header>
   <aside id="side">
     <div id="foxSlot"></div>
     <nav class="nav"><button id="newThread" data-icon="edit"><span>New thread</span></button><button id="searchBtn" data-icon="search"><span>Search threads</span></button><input id="search" type="search" placeholder="Search all journals…" aria-label="Search journals"></nav>
     <div id="hits" class="glass"></div>
-    <div class="sect shead" id="coresHead">Threads by core<button class="btn icon small" id="addCore" title="Add a core" aria-label="Add a core">+</button></div>
+    <div class="sect shead" id="coresHead">Threads by core<button class="btn small" id="sleepers" title="Sleeping threads" hidden></button><button class="btn icon small" id="addCore" title="Add a core" aria-label="Add a core">+</button></div>
     <div id="cores"></div>
     <div id="foot"><div id="approvals"></div><div id="feed" aria-label="Activity"></div>
       <section id="usageCard" hidden aria-label="Provider usage"><header><span data-icon="bars"></span><b>Provider usage</b><button class="btn icon small" id="usageFold" title="Collapse provider usage" aria-label="Collapse provider usage" data-icon="chevron"></button></header><div id="usageBody"></div></section>
@@ -287,7 +292,8 @@ function row(id, a, mv) {
   el.onpointerdown = (e) => startDrag(e, el, id, a.node); el.onkeydown = (e) => { if (e.key === "t" || e.key === "T") openMove(id, a.node); if (e.key === "Enter") select(id); }; return el;
 }
 function renderCores(agents) {
-  const box = $("cores"); box.textContent = "";
+  const box = $("cores"); box.textContent = ""; const asleep = agents.filter(([, a]) => a.archived); agents = agents.filter(([, a]) => !a.archived);
+  $("sleepers").hidden = !asleep.length; $("sleepers").textContent = `Sleeping ${asleep.length}`;
 
   if (!snap.nodes.length) { box.insertAdjacentHTML("beforeend", '<div class="empty-core">Waiting for a core to announce itself…</div>'); return; }
   for (const n of snap.nodes) {
@@ -438,7 +444,7 @@ function drawChat() {
   let lastNote = "";
   const note = (html) => { if (html === lastNote) return; lastNote = html; box.insertAdjacentHTML("beforeend", `<div class="note">${html}</div>`); };
   for (let i = 0; i < events.length; i++) { const e = events[i];
-    if (e.kind === "user_message" || e.kind === "assistant_message") { lastNote = ""; const d = document.createElement("div"); d.className = "msg " + (e.kind === "user_message" ? "user" : "assistant"); d.innerHTML = md(e.text); box.append(d); }
+    if (e.kind === "user_message" || e.kind === "assistant_message") { lastNote = ""; const d = document.createElement("div"); d.className = "msg " + (e.kind === "user_message" ? "user" : "assistant"); d.dataset.event = e.id; d.innerHTML = md(e.text); box.append(d); }
     else if (e.kind === "tool_call") { lastNote = ""; const r = events[i + 1] && events[i + 1].kind === "tool_result" ? events[++i] : null, err = r && /^(denied|\w+Error)/.test(r.text);
       const d = document.createElement("details"); d.className = "tool" + (err ? " err" : ""); const shell = /^(\$ |bash|execute|shell|run)/.test(e.text);
       d.innerHTML = `<summary>${icon(shell ? "terminal" : "tool")}<span class="tn"></span><span class="ts">${r ? (err ? "failed" : "done") : "running…"}</span><span class="cv">${icon("chevron")}</span></summary><pre></pre>`;
@@ -529,9 +535,74 @@ function attachCore() { const hub = snap.nodes.find((n) => (n.capabilities || {}
   }]], "", box); }
 function openMove(agent, from) { sheet(`Move ${agent} to…`, snap.nodes.filter((n) => n.node_id !== from && n.role === "heavy").map((n) => [n.node_id, () => teleport(agent, from, n.node_id)])); }
 async function teleport(agent, source, target) { const r = await api("/api/teleport", { agent, source, target }); if (r.request) { toast(`Moving ${agent} to ${target}…`); log(`Moving ${agent}: ${source} → ${target}`); } else toast("Request refused"); }
-function startDrag(e, el, id, from) { if (e.button > 0 || (snap.ui && snap.ui.pass)) { if (e.button === 0) select(id); return; } drag = { id, from, x: e.clientX, y: e.clientY, active: false, el, ghost: null, hold: null }; drag.hold = setTimeout(() => { if (drag && !drag.active) { openMove(id, from); drag = null; } }, 650); window.onpointermove = onMove; window.onpointerup = onUp; }
-function onMove(e) { if (!drag) return; if (!drag.active && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 8) { clearTimeout(drag.hold); drag.active = true; drag.ghost = drag.el.cloneNode(true); drag.ghost.classList.add("ghost", "glass"); document.body.append(drag.ghost); drag.el.style.opacity = ".35"; document.querySelectorAll(".core").forEach((n) => n.classList.add(n.dataset.node === drag.from ? "invalid" : "valid")); } if (drag.active) { drag.ghost.style.left = e.clientX + "px"; drag.ghost.style.top = e.clientY + "px"; } }
-function onUp(e) { window.onpointermove = window.onpointerup = null; if (!drag) return; clearTimeout(drag.hold); const d = drag; drag = null; document.querySelectorAll(".core").forEach((n) => n.classList.remove("valid", "invalid")); if (!d.active) { select(d.id); return; } d.ghost.remove(); d.el.style.opacity = ""; const t = document.elementsFromPoint(e.clientX, e.clientY).find((x) => x.classList && x.classList.contains("core")); if (t && t.dataset.node !== d.from) teleport(d.id, d.from, t.dataset.node); else if (snap) renderCores(Object.entries(snap.agents)); }
+/* ---------- gestures: complex things anchored in simple moves ----------
+   Drag a thread onto a core: it moves there. Onto another thread: they merge. Onto the dock that appears:
+   clone it to another model, share it with a person, put it to sleep. Onto the mascot: summarise or sleep.
+   On a phone: swipe a thread left to move it, right for its artifacts; long-press a message to start again
+   from it; drop a file on a core to begin a thread with it. */
+function startDrag(e, el, id, from) { if (e.button > 0) return;
+  drag = { id, from, x: e.clientX, y: e.clientY, active: false, el, ghost: null, hold: null, touch: e.pointerType === "touch", guest: !!(snap.ui && snap.ui.pass) };
+  drag.hold = setTimeout(() => { if (drag && !drag.active) { const d = drag; drag = null; window.onpointermove = window.onpointerup = null; if (d.guest) select(d.id); else openMove(d.id, d.from); } }, 650);
+  window.onpointermove = onMove; window.onpointerup = onUp; }
+function onMove(e) { if (!drag) return; const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+  if (drag.touch) { // a phone swipes; vertical moves are the list scrolling
+    if (!drag.active && Math.abs(dx) > 14 && Math.abs(dx) > Math.abs(dy) * 1.5) { clearTimeout(drag.hold); drag.active = "swipe"; }
+    if (drag.active === "swipe") { drag.el.style.transform = `translateX(${dx}px)`; drag.el.style.opacity = String(1 - Math.min(Math.abs(dx), 160) / 320); }
+    else if (Math.abs(dy) > 12) { clearTimeout(drag.hold); drag = null; window.onpointermove = window.onpointerup = null; }
+    return; }
+  if (!drag.active && Math.hypot(dx, dy) > 8) { clearTimeout(drag.hold); if (drag.guest) { drag = null; return; }
+    drag.active = true; drag.ghost = drag.el.cloneNode(true); drag.ghost.classList.add("ghost", "glass"); document.body.append(drag.ghost); drag.el.style.opacity = ".35";
+    document.querySelectorAll(".core").forEach((n) => n.classList.add(n.dataset.node === drag.from ? "invalid" : "valid")); showDock(drag.id); }
+  if (drag.active) { drag.ghost.style.left = e.clientX + "px"; drag.ghost.style.top = e.clientY + "px"; hot(dropTarget(e.clientX, e.clientY, drag)); } }
+function onUp(e) { window.onpointermove = window.onpointerup = null; if (!drag) return; clearTimeout(drag.hold); const d = drag; drag = null;
+  document.querySelectorAll(".core").forEach((n) => n.classList.remove("valid", "invalid"));
+  if (d.active === "swipe") { const dx = e.clientX - d.x; d.el.style.transform = ""; d.el.style.opacity = "";
+    if (dx < -80 && !d.guest) openMove(d.id, d.from); else if (dx > 80) select(d.id).then(() => { store.set("nobench", false); document.body.classList.add("bench-open"); layout(); }); return; }
+  if (!d.active) { select(d.id); return; }
+  d.ghost.remove(); d.el.style.opacity = ""; const t = dropTarget(e.clientX, e.clientY, d); hot(null); $("dropdock").hidden = true;
+  if (!t) { if (snap) renderCores(Object.entries(snap.agents)); return; }
+  if (t.kind === "core") { if (t.node !== d.from) teleport(d.id, d.from, t.node); }
+  else if (t.kind === "thread") mergeInto(t.id, d.id);
+  else if (t.kind === "clone") cloneTo(d.id, t.harness);
+  else if (t.kind === "share") shareWith(d.id, t.pass);
+  else if (t.kind === "sleep") sleepThread(d.id, true);
+  else if (t.kind === "fox") foxMenu(d.id); }
+function dropTarget(x, y, d) { for (const el of document.elementsFromPoint(x, y)) { if (el === d.ghost || (d.ghost && d.ghost.contains(el))) continue;
+    if (el.id === "fox" || el.closest("#fox")) return { kind: "fox", el: $("fox") };
+    const dz = el.closest && el.closest(".dz"); if (dz) return { kind: dz.dataset.kind, harness: dz.dataset.harness, pass: dz.dataset.pass, el: dz };
+    const r = el.closest && el.closest(".row[data-agent]"); if (r && r.dataset.agent !== d.id) return { kind: "thread", id: r.dataset.agent, el: r };
+    const c = el.closest && el.closest(".core"); if (c) return { kind: "core", node: c.dataset.node, el: c }; } return null; }
+function hot(t) { document.querySelectorAll(".hot").forEach((n) => n.classList.remove("hot")); if (t && t.kind !== "core") t.el.classList.add("hot"); }
+function showDock(id) { const a = snap.agents[id], node = snap.nodes.find((n) => n.node_id === a.node) || {}, dock = $("dropdock");
+  const harnesses = Object.keys((node.capabilities || {}).harnesses || {}).filter((h) => h !== a.harness);
+  dock.innerHTML = harnesses.map((h) => `<span class="dz" data-kind="clone" data-harness="${esc(h)}">Clone to ${esc(harnessName(h))}</span>`).join("")
+    + (snap.passes || []).map((p) => a.pass === p.id ? `<span class="dz" data-kind="share" data-pass="">Stop sharing with ${esc(p.name)}</span>` : `<span class="dz" data-kind="share" data-pass="${esc(p.id)}">Share with ${esc(p.name)}</span>`).join("")
+    + '<span class="dz" data-kind="sleep">Sleep</span><small>Drop on a core to move it · on a thread to merge · on the fox to summarise</small>';
+  dock.querySelectorAll(".dz[data-kind=clone]").forEach((z) => z.prepend(badge((HARNESS[z.dataset.harness] || [z.dataset.harness])[0], 18))); dock.hidden = false; }
+const until = (test, ms) => new Promise((ok) => { const end = Date.now() + ms; const tick = () => (test() ? ok(true) : Date.now() > end ? ok(false) : setTimeout(tick, 300)); tick(); });
+function mergeInto(target, source) { const t = snap.agents[target], s = snap.agents[source]; if (!t || !s) return;
+  sheet(`Merge “${s.title || source}” into “${t.title || target}”?`, [["Merge", async () => {
+    if (s.node !== t.node) { toast(`Bringing ${source} to ${t.node} first…`); await teleport(source, s.node, t.node); if (!(await until(() => snap.agents[source] && snap.agents[source].node === t.node, 90000))) return toast("The move did not finish"); }
+    await api("/api/merge", { target, source }); toast("Merged: the journals are one"); select(target); }]], "The second thread's events join the first one's journal; both threads stay."); }
+async function cloneTo(id, harness) { const r = await api("/api/clone", { agent: id, harness, label: harnessName(harness) }); if (!r.thread_id) return toast("The clone was refused");
+  toast(`Cloning to ${harnessName(harness)}…`); if (await until(() => snap.agents[r.thread_id], 20000)) select(r.thread_id); }
+async function shareWith(id, pass) { await api("/api/share", { agent: id, pass }); const p = (snap.passes || []).find((x) => x.id === pass); toast(p ? `Shared with ${p.name}` : "No longer shared"); }
+async function sleepThread(id, on) { await api("/api/archive", { agent: id, archived: on }); toast(on ? "Asleep — find it under Sleeping" : "Awake again"); if (on && selected === id) { selected = null; render(); } }
+function foxMenu(id) { const a = snap.agents[id]; sheet(a.title || id, [["Summarise it", async () => { await api("/api/message", { agent: id, text: "Summarise this thread so far in a few short lines." }); select(id); }], ["Put it to sleep", () => sleepThread(id, true)]]); }
+$("sleepers").onclick = () => sheet("Sleeping threads", Object.entries(snap.agents).filter(([, a]) => a.archived).map(([id, a]) => [`Wake ${a.title || id}`, () => sleepThread(id, false)]));
+/* A file dropped on a core starts a thread there, the file attached, ready for what to do with it. */
+$("cores").addEventListener("dragover", (e) => { if (!e.dataTransfer || ![...e.dataTransfer.types].includes("Files")) return; e.preventDefault(); const c = e.target.closest(".core"); document.querySelectorAll(".filehot").forEach((n) => n !== c && n.classList.remove("filehot")); if (c) c.classList.add("filehot"); });
+$("cores").addEventListener("dragleave", (e) => { if (!$("cores").contains(e.relatedTarget)) document.querySelectorAll(".filehot").forEach((n) => n.classList.remove("filehot")); });
+$("cores").addEventListener("drop", async (e) => { const c = e.target.closest(".core"); document.querySelectorAll(".filehot").forEach((n) => n.classList.remove("filehot")); if (!c || !e.dataTransfer || !e.dataTransfer.files.length) return; e.preventDefault();
+  const files = [...e.dataTransfer.files].filter((f) => f.size <= 25e6), name = (files[0].name.replace(/\.[^.]+$/, "").replace(/[^\w-]+/g, "-").slice(0, 28) || "file") + "-" + (Date.now() % 1000);
+  const made = await api("/api/agent", { thread_id: name, node: c.dataset.node, title: files[0].name }), id = made.thread_id || name;
+  if (!(await until(() => snap.agents[id], 15000))) return toast("The thread did not start"); await select(id);
+  for (const f of files) attachments.push({ name: f.name, file: f }); drawComposer(); $("msg").focus(); toast("Say what to do with it"); });
+/* A long press on a message: start again from there (a fork up to it). */
+$("msgs").addEventListener("pointerdown", (e) => { const m = e.target.closest(".msg[data-event]"); if (!m || (snap.ui && snap.ui.pass)) return;
+  const done = () => { clearTimeout(t); removeEventListener("pointerup", done); removeEventListener("pointermove", far); }, far = (ev) => { if (Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) > 10) done(); };
+  const t = setTimeout(() => { done(); forkAt = m.dataset.event; sheet("Start again from here?", [["Fork from this message", forkNow]], "A new thread with the journal up to this message; this one stays as it is."); }, 600);
+  addEventListener("pointerup", done); addEventListener("pointermove", far); });
 addEventListener("resize", () => snap && drawTethers());
 connect();
 </script>

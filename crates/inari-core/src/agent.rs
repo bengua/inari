@@ -866,6 +866,17 @@ impl Runner {
         Ok(e)
     }
 
+    /// Rename a thread (its title in the manifest).
+    pub fn set_title(&self, agent: &str, title: &str) -> Result<(), String> {
+        let path = self.host.agents.join(agent);
+        let capsule = io::load(&path).map_err(|e| e.to_string())?;
+        let mut manifest = capsule.manifest.clone();
+        manifest.extra.insert("title".into(), json!(title));
+        io::seal(&path, manifest, &capsule.timeline)
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+
     /// Set one label on an agent's capsule (its pass, say).
     pub fn label(&self, agent: &str, key: &str, value: &str) -> Result<(), String> {
         self.relabel(agent, &[(key, value)])
