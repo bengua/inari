@@ -9,6 +9,9 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Added
 
+- **Attach a core from the interface**: **+** next to the cores creates a one-time invitation;
+  `inari-core-rs join <hub>:<port> <code> --service` on the new machine receives the mesh's keys,
+  writes its configuration and starts it (`enroll_port` on the hub).
 - **Inari is this project**: the README presents Inari, how it differs from other agent cores,
   and thanks David Ondrej for Cloudroom. MIT throughout.
 - **Each machine serves its own interface** (`gateway_listen` on any node,

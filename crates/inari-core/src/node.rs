@@ -113,6 +113,9 @@ pub struct NodeConfig {
     pub gateway_token_file: Option<PathBuf>,
     #[serde(default)]
     pub gateway_ui: Map<String, Value>,
+    /// Hub only: where new cores present their invitation (0: no invitations).
+    #[serde(default)]
+    pub enroll_port: u16,
     /// Pages opened on this machine (http://127.0.0.1:…) need no token.
     #[serde(default)]
     pub gateway_trust_loopback: bool,
@@ -261,6 +264,8 @@ pub struct Node {
     pub bus_port: u16,
     pub gateway: Option<Arc<Gateway>>,
     pub gateway_port: u16,
+    /// Where new cores present their invitation (hub only, 0 when off).
+    pub enroll_port: u16,
     _client: Mutex<Option<BusClient>>,
     /// Per harness: installed and latest version, and the state of an update in progress.
     updates: Mutex<Map<String, Value>>,
@@ -348,6 +353,14 @@ impl Node {
         } else {
             client = Some(BusClient::start(Arc::clone(&bus), &key, &cfg.hub));
         }
+        let mut enroll_port = 0;
+        if is_hub && cfg.enroll_port > 0 {
+            let counter = crate::enroll::Enroll::start(&bus, &key, &device_key, bus_port);
+            enroll_port = counter
+                .listen(&cfg.bind_host, cfg.enroll_port)
+                .await
+                .map_err(|e| format!("enroll: {e}"))?;
+        }
         let approver: Option<Approver> = if device_key.is_empty() {
             None
         } else {
@@ -434,6 +447,7 @@ impl Node {
             bus_port,
             gateway,
             gateway_port,
+            enroll_port,
             _client: Mutex::new(client),
             updates: Mutex::default(),
             refresh: std::sync::atomic::AtomicBool::new(false),
@@ -548,6 +562,15 @@ impl Node {
         };
         info.capabilities
             .insert("endpoint".into(), json!(advertise));
+        if self.enroll_port > 0 {
+            let host = advertise
+                .rsplit_once(':')
+                .map_or(advertise.as_str(), |(h, _)| h);
+            info.capabilities.insert(
+                "enroll".into(),
+                json!(format!("{host}:{}", self.enroll_port)),
+            );
+        }
         let mut models_at: Option<std::time::Instant> = None;
         let mut last_packets = packets();
         let mut first = true;

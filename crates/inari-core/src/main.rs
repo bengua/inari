@@ -16,7 +16,8 @@ fn usage() -> ExitCode {
          fork <src> <dest> <new-thread> [upto-event]\n  merge <dest> <src>\n  \
          bus-echo <name> <key-file> <expected-peer>\n  bus-say <name> <key-file> <host:port> <subject> <payload-json> <wait-subject>\n  \
          turn <root> <node> <agent> <text> [file-to-attach]... -- <acp-agent command...>\n  \
-         node <config.json>"
+         node <config.json>\n  \
+         join <hub-enroll host:port> <code> [--endpoint-port N] [--gateway-port N] [--service]"
     );
     ExitCode::from(2)
 }
@@ -83,8 +84,84 @@ fn turn(a: &[&str]) -> capsule::Result<ExitCode> {
     })
 }
 
+/// Attach this machine to a mesh with an invitation from the Inari page.
+fn join(a: &[&str]) -> capsule::Result<ExitCode> {
+    let [addr, code, rest @ ..] = a else {
+        return Ok(usage());
+    };
+    let opt = |name: &str, default: u16| -> u16 {
+        rest.iter()
+            .position(|x| *x == name)
+            .and_then(|i| rest.get(i + 1))
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(default)
+    };
+    let home = PathBuf::from(std::env::var("HOME").unwrap_or_default());
+    let config_dir = home.join(".config/inari-core");
+    let data_dir = home.join(".local/share/inari-core/data");
+    let grant = match tokio::runtime::Runtime::new()?.block_on(inari_core::enroll::join(addr, code))
+    {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!("{e}");
+            return Ok(ExitCode::from(1));
+        }
+    };
+    let file = inari_core::enroll::write_config(
+        &grant,
+        &config_dir,
+        &data_dir,
+        opt("--endpoint-port", 7411),
+        opt("--gateway-port", 7487),
+    )?;
+    println!(
+        "joined as {} (hub {}), configuration in {}",
+        grant.node_id,
+        grant.hub,
+        file.display()
+    );
+    if rest.contains(&"--service") {
+        let exe = std::env::current_exe()?;
+        let unit = format!(
+            "[Unit]\nDescription=Inari core ({})\nAfter=network-online.target\n[Service]\n\
+             ExecStart={} node {}\nRestart=always\nRestartSec=5\n[Install]\nWantedBy=default.target\n",
+            grant.node_id,
+            exe.display(),
+            file.display()
+        );
+        let path = home.join(".config/systemd/user/inari-core.service");
+        io::atomic_write(&path, unit.as_bytes())?;
+        let ok = std::process::Command::new("systemctl")
+            .args(["--user", "daemon-reload"])
+            .status()
+            .is_ok_and(|s| s.success())
+            && std::process::Command::new("systemctl")
+                .args(["--user", "enable", "--now", "inari-core.service"])
+                .status()
+                .is_ok_and(|s| s.success());
+        println!(
+            "{}",
+            if ok {
+                "service started: inari-core.service"
+            } else {
+                "service written; start it with: systemctl --user enable --now inari-core.service"
+            }
+        );
+    } else {
+        println!(
+            "start it with: {} node {}",
+            std::env::current_exe()?.display(),
+            file.display()
+        );
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
 fn run(args: &[String]) -> capsule::Result<ExitCode> {
     let a: Vec<&str> = args.iter().map(String::as_str).collect();
+    if a.first() == Some(&"join") {
+        return join(&a[1..]);
+    }
     if a.first() == Some(&"turn") {
         return turn(&a[1..]);
     }
