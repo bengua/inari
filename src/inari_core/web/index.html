@@ -35,12 +35,15 @@ button,input,textarea,select { font:inherit; color:inherit; }
 .btn { background:var(--raise); border:1px solid var(--hair); border-radius:11px; padding:8px 13px; min-height:38px; cursor:pointer; }
 .btn:hover { border-color:var(--copper); } .btn.go { background:var(--copper); border-color:var(--copper); color:#fff; } :root[data-theme=dark] .btn.go { color:#17161a; }
 .btn.small { padding:3px 10px; min-height:30px; font-size:13px; } .btn.on { border-color:var(--copper); color:var(--copper-text); } .btn.icon { width:36px; min-height:36px; padding:0; display:inline-grid; place-items:center; }
-#app { height:100%; display:grid; grid-template-columns:var(--side) minmax(0,1fr) auto; grid-template-areas:"side main bench"; gap:0; }
-#side { grid-area:side; } #main { grid-area:main; } #bench { grid-area:bench; }
-#app.noside { --side:0px; } #app.noside #side { display:none; }
-#side { display:grid; grid-template-rows:auto auto auto auto 1fr auto; gap:8px; min-height:0; padding:12px 10px 10px; border-right:1px solid var(--hair); background:var(--panel); backdrop-filter:blur(18px); overflow-x:hidden; }
+#app { height:100%; display:grid; grid-template-columns:var(--side) minmax(0,1fr) auto; grid-template-rows:auto minmax(0,1fr); grid-template-areas:"bar bar bar" "side main bench"; gap:0; transition:grid-template-columns .28s ease; }
+#appbar { grid-area:bar; } #side { grid-area:side; } #main { grid-area:main; } #bench { grid-area:bench; }
+#appbar { display:flex; align-items:center; gap:10px; height:52px; padding:0 12px; border-bottom:1px solid var(--hair); background:var(--panel); position:relative; z-index:46; }
+#appbar .brand { display:flex; align-items:baseline; gap:8px; min-width:0; } #appbar .brand small { color:var(--faint); font-size:12px; white-space:nowrap; } #appbar .sp { flex:1; }
+#app.noside { --side:0px; } #side { width:300px; transition:transform .28s ease, opacity .22s ease; } #app.noside #side { transform:translateX(-100%); opacity:0; pointer-events:none; }
+#sideToggle.on { border-color:var(--copper); color:var(--copper-text); }
+#side { display:grid; grid-template-rows:auto auto auto 1fr auto; gap:8px; min-height:0; padding:12px 10px 10px; border-right:1px solid var(--hair); background:var(--panel); backdrop-filter:blur(18px); overflow-x:hidden; }
 #sidetop { display:flex; align-items:center; gap:8px; } #sidetop .sp { flex:1; } h1 { margin:0; font-size:15px; letter-spacing:.4px; color:var(--copper-text); }
-#fox { position:relative; height:190px; margin:0 -4px; } #fox iframe { width:100%; height:100%; border:0; background:transparent; color-scheme:normal; } #fox canvas { height:100%; width:auto; aspect-ratio:1; display:block; margin:0 auto; }
+#foxSlot { height:190px; } #fox { position:fixed; z-index:56; opacity:0; transition:opacity .18s ease; } #fox.shown { opacity:1; } #fox iframe { width:100%; height:100%; border:0; background:transparent; color-scheme:normal; } #fox canvas { height:100%; width:auto; aspect-ratio:1; display:block; margin:0 auto; }
 .nav { display:grid; gap:2px; } .nav button { display:flex; align-items:center; gap:10px; background:none; border:0; border-radius:9px; padding:8px 10px; cursor:pointer; text-align:left; color:var(--ink); } .nav button:hover { background:var(--copper-soft); }
 #search { display:none; width:100%; padding:8px 10px; border-radius:10px; border:1px solid var(--hair); background:var(--raise); } #search.on { display:block; }
 #hits { position:absolute; left:10px; right:10px; z-index:45; padding:6px; display:none; } #hits button { display:block; width:100%; text-align:left; background:none; border:0; padding:7px 8px; border-radius:8px; cursor:pointer; } #hits button:hover { background:var(--copper-soft); } #hits small { color:var(--dim); display:block; }
@@ -79,7 +82,7 @@ button,input,textarea,select { font:inherit; color:inherit; }
 .ptag { font-size:11px; padding:1px 6px; border-radius:999px; background:var(--raise); border:1px solid var(--hair); color:var(--dim); white-space:nowrap; }
 .passform { display:grid; gap:8px; } .passform label { display:flex; gap:8px; align-items:center; } .passform input[type=text], .passform input[type=date] { width:100%; }
 #top { align-items:center; gap:8px; padding:10px 16px; border-bottom:1px solid var(--hair); flex-wrap:wrap; min-height:56px; } #top h2 { margin:0; font-size:16px; flex:1; min-width:100px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-#back,#showside { display:none; } #app.noside #showside { display:inline-grid; } .phase { font-size:12px; color:var(--c,var(--dim)); display:inline-flex; gap:5px; align-items:center; white-space:nowrap; }
+#back { display:none; } .phase { font-size:12px; color:var(--c,var(--dim)); display:inline-flex; gap:5px; align-items:center; white-space:nowrap; }
 #thread { overflow:auto; padding:18px 8px; min-height:0; scroll-behavior:smooth; } #msgs { max-width:900px; margin:0 auto; padding:0 14px; }
 .hero { max-width:760px; margin:9vh auto 0; text-align:center; } .hero h2 { font:600 26px/1.2 "Bricolage Grotesque",Georgia,serif; margin:0 0 6px; } .hero p { color:var(--dim); margin:0 0 18px; }
 .msg { max-width:80%; margin:10px 0; padding:11px 15px; border-radius:16px; overflow-wrap:anywhere; line-height:1.55; }
@@ -115,17 +118,18 @@ pre.code span.l::before { counter-increment:l; content:counter(l); position:abso
 #toast { position:fixed; top:12px; left:50%; transform:translateX(-50%); z-index:90; padding:10px 16px; display:none; background:var(--panel-solid); } #sheet { position:fixed; inset:auto 14px calc(16px + env(safe-area-inset-bottom)) 14px; z-index:70; padding:16px; display:none; max-width:540px; margin:0 auto; background:var(--panel-solid); } #sheet.open { display:block; } #sheet h2 { margin:0 0 10px; font-size:15px; } #sheet .opts { display:grid; gap:8px; } #sheet input { width:100%; padding:10px; border-radius:10px; border:1px solid var(--hair); background:var(--raise); }
 #login { max-width:420px; margin:20vh auto; padding:22px; } #login input { width:100%; padding:12px; margin:10px 0; border-radius:10px; border:1px solid var(--hair); background:var(--raise); }
 @media (max-width:1100px) { #app, #app.wbmax { grid-template-columns:var(--side) minmax(0,1fr); grid-template-areas:"side main"; } #app.wbmax #main { display:grid; } #bench { position:fixed; inset:0; z-index:55; width:auto; background:var(--panel-solid); display:none; } body.bench-open #bench { display:grid; } #split { display:none; } }
-@media (max-width:760px) { body { overflow:auto; } #app, #app.wbmax, #app.noside { grid-template-columns:1fr; grid-template-areas:"side"; height:auto; min-height:100%; } #side { min-height:100vh; border-right:0; } #fox { height:150px; } #app.noside #side { display:grid; }
-  #main { position:fixed; inset:0; z-index:50; background:var(--canvas); display:none; } body.open #main { display:grid; } #back { display:inline-grid; } #showside { display:none !important; } .msg,details.tool { max-width:94%; } #pill { margin-left:auto; } }
-@media (prefers-reduced-motion:reduce) { .core,.row { transition:none; } .pdot,#tethers path,.typing i { animation:none !important; } #thread { scroll-behavior:auto; } }
+@media (max-width:760px) { body { overflow:auto; } #app, #app.wbmax, #app.noside { grid-template-columns:1fr; grid-template-areas:"bar" "side"; height:auto; min-height:100%; } #side { width:auto; min-height:calc(100vh - 52px); border-right:0; } #foxSlot { height:150px; } #app.noside #side { transform:none; opacity:1; pointer-events:auto; } #sideToggle { display:none; }
+  #main { position:fixed; inset:0; z-index:50; background:var(--canvas); display:none; } body.open #main { display:grid; } #back { display:inline-grid; } .msg,details.tool { max-width:94%; } #pill { margin-left:auto; } }
+@media (prefers-reduced-motion:reduce) { .core,.row,#app,#side,#fox { transition:none; } .pdot,#tethers path,.typing i { animation:none !important; } #thread { scroll-behavior:auto; } }
 </style>
 </head>
 <body>
 <div id="login" class="glass" hidden><h2>Inari</h2><label for="tokenInput">Access token or pass</label><small id="loginWhy" class="empty"></small><input id="tokenInput" type="password" autocomplete="current-password"><button class="btn go" id="tokenGo">Connect</button></div>
+<div id="fox" aria-label="Mascot"></div>
 <div id="app" class="nosel" hidden>
+  <header id="appbar"><button class="btn icon" id="sideToggle" title="Sidebar" aria-label="Show or hide the sidebar" data-icon="sidebar"></button><div class="brand"><h1>Inari</h1><small id="brandName"></small></div><span class="sp"></span><span class="chip" id="stats" aria-live="polite" style="cursor:default">…</span></header>
   <aside id="side">
-    <div id="sidetop"><button class="btn icon" id="hideside" title="Hide the sidebar" aria-label="Hide the sidebar" data-icon="sidebar"></button><h1>Inari</h1><span class="sp"></span><span class="chip" id="stats" aria-live="polite" style="cursor:default">…</span></div>
-    <div id="fox" aria-label="Mascot"></div>
+    <div id="foxSlot"></div>
     <nav class="nav"><button id="newThread" data-icon="edit"><span>New thread</span></button><button id="searchBtn" data-icon="search"><span>Search threads</span></button><input id="search" type="search" placeholder="Search all journals…" aria-label="Search journals"></nav>
     <div id="hits" class="glass"></div>
     <div class="sect shead" id="coresHead">Threads by core<button class="btn icon small" id="addCore" title="Add a core" aria-label="Add a core">+</button></div>
@@ -136,7 +140,7 @@ pre.code span.l::before { counter-increment:l; content:counter(l); position:abso
       <div id="brandfoot"></div></div>
   </aside>
   <section id="main">
-    <div id="top"><div id="passBanner" role="status" hidden></div><button class="btn icon" id="showside" title="Show the sidebar" aria-label="Show the sidebar" data-icon="sidebar"></button><button class="btn small" id="back">‹ Back</button><h2 id="ptitle">Inari</h2><span id="pphase"></span>
+    <div id="top"><div id="passBanner" role="status" hidden></div><button class="btn small" id="back">‹ Back</button><h2 id="ptitle">Inari</h2><span id="pphase"></span>
       <button class="chip" id="modelChip" hidden></button><button class="btn small" id="actionsBtn" data-icon="more" hidden><span>Actions</span></button><button class="btn small" id="benchBtn" data-icon="panel"><span>Artifacts</span></button></div>
     <div id="thread"><div id="msgs"></div></div>
     <div id="dock"><form class="composer" id="composer"><div class="attached" id="attached"></div><textarea id="msg" rows="2" placeholder="Build anything…" aria-label="Message"></textarea>
@@ -222,8 +226,19 @@ $("tokenGo").onclick = async () => { const v = $("tokenInput").value.trim(); if 
 function layout() {
   const app = $("app"); app.classList.toggle("noside", !!store.get("noside", false)); app.classList.toggle("nobench", !!store.get("nobench", false)); app.classList.toggle("wbmax", !!store.get("wbmax", false));
   app.style.setProperty("--benchw", store.get("benchw", "42vw")); $("benchBtn").classList.toggle("on", !app.classList.contains("nobench")); requestAnimationFrame(drawTethers);
+  $("sideToggle").classList.toggle("on", !app.classList.contains("noside")); placeFox();
 }
-$("hideside").onclick = () => { store.set("noside", true); layout(); }; $("showside").onclick = () => { store.set("noside", false); layout(); };
+$("sideToggle").onclick = () => { store.set("noside", !store.get("noside", false)); layout(); };
+/* The mascot is one element that moves (its frame is never reloaded): in the sidebar's slot when the sidebar
+   is open, at the top centre of the page when it is shut — it fades out, moves, and fades back in. */
+let foxAt = "";
+function placeFox() { const fox = $("fox"), app = $("app"); if (app.hidden) return; const mobile = matchMedia("(max-width:760px)").matches;
+  const docked = mobile ? document.body.classList.contains("open") : app.classList.contains("noside"); let r;
+  if (docked) { const m = (mobile ? document.body : $("main")).getBoundingClientRect(), size = mobile ? 72 : 92; r = { left: m.left + m.width / 2 - size / 2, top: 2, width: size, height: size }; }
+  else { const slot = $("foxSlot").getBoundingClientRect(); r = { left: slot.left, top: slot.top, width: slot.width, height: slot.height }; }
+  const key = docked ? "dock" : "slot", apply = () => { Object.assign(fox.style, { left: r.left + "px", top: r.top + "px", width: r.width + "px", height: r.height + "px" }); fox.classList.add("shown"); };
+  if (key !== foxAt && foxAt) { fox.classList.remove("shown"); setTimeout(() => { placeFox.again = true; requestAnimationFrame(apply); }, 300); } else apply(); foxAt = key; }
+addEventListener("resize", () => placeFox()); window.addEventListener("scroll", () => placeFox(), { passive: true });
 $("benchClose").onclick = () => { store.set("nobench", true); store.set("wbmax", false); document.body.classList.remove("bench-open"); layout(); };
 $("benchBtn").onclick = () => { if (innerWidth <= 1100) document.body.classList.add("bench-open"); else { store.set("nobench", !store.get("nobench", false)); layout(); } };
 $("wbmax").onclick = () => { store.set("wbmax", !store.get("wbmax", false)); layout(); };
@@ -240,7 +255,7 @@ function absorb() {
   firstSnap = false;
 }
 function render() {
-  absorb(); $("brandfoot").textContent = (snap.ui && snap.ui.footer) || ""; renderPassBanner();
+  absorb(); $("brandfoot").textContent = (snap.ui && snap.ui.footer) || ""; $("brandName").textContent = (snap.ui && snap.ui.brand) || ""; renderPassBanner(); if (!$("fox").classList.contains("shown")) placeFox();
   for (const n of snap.nodes) { const h = (loadHist[n.node_id] = loadHist[n.node_id] || []); h.push((snap.load[n.node_id] || {}).gpu || 0); if (h.length > 40) h.shift(); }
   const agents = Object.entries(snap.agents), busy = agents.filter(([, a]) => a.phase !== "idle").length;
   $("stats").textContent = `${agents.length} agents · ${busy} working`;
@@ -353,7 +368,7 @@ function frame(t) { if (!orbEl || !orbEl.isConnected) return; const ctx = orbCtx
 function renderTop() {
   const a = selected && snap.agents[selected], app = $("app"); app.classList.toggle("nosel", !a); $("ptitle").textContent = a ? (a.title || selected) : "Inari";
   $("pphase").innerHTML = a ? `<span class="state${["listening", "inference"].includes(a.phase) ? " live" : ""}" style="--c:var(--${{ inference: "copper", listening: "purple", success: "ok", error: "bad" }[a.phase] || "dim"})">${LABEL[a.phase]} <small>on ${esc(a.node)}</small></span>` : "";
-  $("actionsBtn").hidden = !a; const chip = $("modelChip"); chip.hidden = !a; if (a) fillModelChip(chip, a.model); document.body.classList.toggle("open", !!a); drawComposer();
+  $("actionsBtn").hidden = !a; const chip = $("modelChip"); chip.hidden = !a; if (a) fillModelChip(chip, a.model); document.body.classList.toggle("open", !!a); placeFox(); drawComposer();
 }
 function fillModelChip(chip, model) { chip.textContent = ""; chip.append(badge(model, 18)); const n = document.createElement("span"); n.className = "n"; n.textContent = shortModel(model); chip.append(n); const r = ring(model); if (r) chip.append(r); }
 function drawComposer() {
