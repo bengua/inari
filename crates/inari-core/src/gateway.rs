@@ -351,6 +351,7 @@ impl Gateway {
         let tail = |v: &Vec<Value>| -> Vec<Value> { v[v.len().saturating_sub(5)..].to_vec() };
         let mut ui = self.ui.clone();
         ui.insert("mascot".into(), json!(self.mascot_dir.is_some()));
+        ui.insert("self".into(), json!(self.bus.name)); // the core serving this page: the default for new threads
         json!({
             "nodes": st.nodes,
             "agents": st.telemetry.agents,

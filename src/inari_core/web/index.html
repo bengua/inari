@@ -44,7 +44,7 @@ button,input,textarea,select { font:inherit; color:inherit; }
 .nav { display:grid; gap:2px; } .nav button { display:flex; align-items:center; gap:10px; background:none; border:0; border-radius:9px; padding:8px 10px; cursor:pointer; text-align:left; color:var(--ink); } .nav button:hover { background:var(--copper-soft); }
 #search { display:none; width:100%; padding:8px 10px; border-radius:10px; border:1px solid var(--hair); background:var(--raise); } #search.on { display:block; }
 #hits { position:absolute; left:10px; right:10px; z-index:45; padding:6px; display:none; } #hits button { display:block; width:100%; text-align:left; background:none; border:0; padding:7px 8px; border-radius:8px; cursor:pointer; } #hits button:hover { background:var(--copper-soft); } #hits small { color:var(--dim); display:block; }
-#cores { overflow-y:auto; overflow-x:hidden; min-height:0; display:grid; gap:10px; align-content:start; padding-right:2px; }
+#cores { overflow-y:auto; overflow-x:hidden; min-height:0; display:grid; grid-auto-rows:max-content; gap:10px; align-content:start; padding-right:2px; }
 .sect { font-size:11.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--faint); padding:0 4px; }
 .core { border:1px solid var(--hair); border-radius:12px; background:var(--raise); overflow:hidden; min-width:0; transition:box-shadow .3s,border-color .3s,opacity .2s; }
 .core.valid { border-color:var(--copper); box-shadow:0 0 0 2px var(--glow); } .core.invalid { opacity:.5; }
@@ -336,7 +336,7 @@ function renderTop() {
 function fillModelChip(chip, model) { chip.textContent = ""; chip.append(badge(model, 18)); const n = document.createElement("span"); n.className = "n"; n.textContent = shortModel(model); chip.append(n); const r = ring(model); if (r) chip.append(r); }
 function drawComposer() {
   const a = selected && snap.agents[selected], cc = $("coreChip"), pm = $("pickModel"); $("msg").placeholder = a ? "Message the agent…" : "Build anything…";
-  const core = a ? a.node : (pendingCore || (snap.nodes.find((n) => n.role === "heavy") || {}).node_id || ""); if (!a) pendingCore = core; cc.textContent = core ? "⌂ " + core : "⌂ no core"; cc.style.display = a ? "none" : "";
+  const own = snap.nodes.find((n) => n.node_id === snap.ui.self && n.role === "heavy"), core = a ? a.node : (pendingCore || (own || snap.nodes.find((n) => n.role === "heavy") || {}).node_id || ""); if (!a) pendingCore = core; cc.textContent = core ? "⌂ " + core : "⌂ no core"; cc.style.display = a ? "none" : "";
   fillModelChip(pm, a ? a.model : pendingModel); $("attached").innerHTML = attachments.map((f) => `<span class="chip" style="cursor:default">📎 ${esc(f.name)}</span>`).join("");
 }
 function modelPicker(anchor, node, current, onPick) {
