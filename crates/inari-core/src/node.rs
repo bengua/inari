@@ -905,7 +905,7 @@ impl Node {
                 .timeline
                 .ordered()
                 .iter()
-                .map(|e| json!({"id": e.id, "kind": e.kind.as_str(), "text": summary(e).chars().take(400).collect::<String>()}))
+                .map(|e| json!({"id": e.id, "kind": e.kind.as_str(), "text": crate::agent::page_text(e)}))
                 .collect();
             n.bus.publish(&format!("agent.{agent}.history"), json!({"agent": agent, "events": events}));
         });

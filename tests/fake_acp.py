@@ -160,7 +160,8 @@ for line in sys.stdin:
                 sid,
                 {
                     "sessionUpdate": "agent_message_chunk",
-                    "content": {"type": "text", "text": text.splitlines()[-1][:60]},
+                    # "long": a reply far longer than any summary, ending on a known word
+                    "content": {"type": "text", "text": ("word " * 300).strip() if "long" in last else text.splitlines()[-1][:60]},
                 },
             )
         send({"jsonrpc": "2.0", "id": ident, "result": {"stopReason": "end_turn"}})
