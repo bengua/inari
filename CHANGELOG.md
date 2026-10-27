@@ -9,6 +9,8 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Added
 
+- **Delete a thread** from the long-press menu (owner only): it leaves Inari and is kept in the
+  core's `trash/` folder, never brought back by a restart (`/api/delete`).
 - **Gestures**: drag a thread onto another to merge them (moved first if they live on two cores);
   onto the dock that appears to clone it to another harness, share it with a pass holder, or put it
   to sleep; onto the mascot to summarise it. Drop a file on a core to start a thread with it. On a

@@ -417,6 +417,12 @@ impl Gateway {
             st.log
                 .insert(agent, history.into_iter().chain(live).collect()); // a late reply keeps newer events
         });
+        self.on("agent.deleted", |_, st, m| {
+            let agent = s(&m.payload, "agent");
+            st.telemetry.agents.remove(&agent);
+            st.log.remove(&agent);
+            st.holder.remove(&agent);
+        });
         self.on("agent.merged", |g, _, m| {
             // the target's journal grew by another one: read it again
             if m.payload.get("ok").and_then(Value::as_bool) == Some(true) {
@@ -1173,6 +1179,14 @@ impl Gateway {
                     });
                 }
                 Some((200, json!({"ok": true, "thread_id": new})))
+            }
+            "/api/delete" => {
+                if !need(&["agent"]) {
+                    return bad;
+                }
+                self.bus
+                    .publish(&format!("agent.{}.delete", s(d, "agent")), json!({}));
+                ok
             }
             "/api/share" => {
                 if !need(&["agent"]) {

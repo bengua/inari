@@ -588,6 +588,7 @@ function actionSheet(id) { const a = snap.agents[id]; if (!a) return; const node
   opts.push(["Summarise it", async () => { await api("/api/message", { agent: id, text: "Summarise this thread so far in a few short lines." }); select(id); }]);
   opts.push(["Start a copy from here (fork)", () => { selected = id; forkAt = null; forkNow(); }]);
   opts.push(["Put it to sleep", () => sleepThread(id, true)]);
+  if (!(snap.ui && snap.ui.pass)) opts.push(["Delete…", () => sheet(`Delete “${a.title || id}”?`, [["Delete it", async () => { await api("/api/delete", { agent: id }); if (selected === id) { selected = null; render(); } toast("Deleted — kept in the core's trash"); }]], "It leaves Inari. The core keeps it in its trash folder, so it can still be restored by hand.")]);
   sheet(a.title || id, opts, "To move it, drag it onto another core."); }
 function dropTarget(x, y, d) { for (const el of document.elementsFromPoint(x, y)) { if (el === d.ghost || (d.ghost && d.ghost.contains(el))) continue;
     if (el.id === "fox" || el.closest("#fox")) return { kind: "fox", el: $("fox") };

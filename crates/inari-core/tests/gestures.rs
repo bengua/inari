@@ -185,6 +185,47 @@ async fn clone_share_and_sleep() {
     })
     .await;
 
+    // delete: gone from the mesh, kept in the core's trash
+    post(
+        port,
+        owner,
+        "/api/agent",
+        json!({"thread_id": "scratch", "node": "home", "harness": "local"}),
+    )
+    .await;
+    until("the scratch thread", || {
+        g.snapshot()["agents"].get("scratch").is_some()
+    })
+    .await;
+    let (status, _) = post(
+        port,
+        &format!("pass={token}"),
+        "/api/delete",
+        json!({"agent": "essay"}),
+    )
+    .await;
+    assert_eq!(status, 403, "a pass holder deletes nothing");
+    post(port, owner, "/api/delete", json!({"agent": "scratch"})).await;
+    until("the deletion", || {
+        g.snapshot()["agents"].get("scratch").is_none()
+    })
+    .await;
+    assert!(!home.host.agents.join("scratch").exists());
+    let trashed: Vec<_> = std::fs::read_dir(home.host.root.join("trash"))
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(
+        trashed.iter().any(|n| n.starts_with("scratch-")),
+        "kept in the trash: {trashed:?}"
+    );
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert!(
+        g.snapshot()["agents"].get("scratch").is_none(),
+        "heartbeats do not bring it back"
+    );
+
     // sleep and wake
     post(
         port,
