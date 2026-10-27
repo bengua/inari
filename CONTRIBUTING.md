@@ -6,7 +6,7 @@
 changes has been run, and `./verify.sh` passes.
 
     uv sync --all-extras
-    ./verify.sh          # shape checks, ruff, pytest
+    ./verify.sh          # license, Rust (fmt, clippy, tests), Python (ruff, pytest)
 
 ## How work reaches `main`
 

@@ -17,6 +17,9 @@ pub struct PeerLink {
     conn: Arc<Mutex<Option<mpsc::UnboundedSender<Message>>>>,
     outbox: Arc<Mutex<VecDeque<Message>>>,
     gone: Arc<Notify>,
+    /// A client gives up on a connection silent this long (the hub's heartbeats keep
+    /// a live one busy) and dials again; a server waits for its peers.
+    idle: Mutex<Option<std::time::Duration>>,
 }
 
 impl PeerLink {
@@ -31,6 +34,7 @@ impl PeerLink {
             conn: Arc::default(),
             outbox: Arc::default(),
             gone: Arc::new(Notify::new()),
+            idle: Mutex::new(None),
         });
         bus.add_link(link.handle.clone());
         let (conn, outbox) = (Arc::clone(&link.conn), Arc::clone(&link.outbox));
@@ -70,6 +74,7 @@ impl PeerLink {
         *self.conn.lock().expect("not poisoned") = Some(tx);
         *self.connected.lock().expect("not poisoned") = true;
         let me = Arc::clone(self);
+        let idle = *self.idle.lock().expect("not poisoned");
         tokio::spawn(async move {
             let write = async {
                 while let Some(m) = rx.recv().await {
@@ -81,7 +86,14 @@ impl PeerLink {
             };
             let read = async {
                 loop {
-                    match reader.recv().await {
+                    let next = match idle {
+                        Some(limit) => match tokio::time::timeout(limit, reader.recv()).await {
+                            Ok(r) => r,
+                            Err(_) => return, // silent too long: a dead link that never said so
+                        },
+                        None => reader.recv().await,
+                    };
+                    match next {
                         Ok(v) => {
                             if let Some(m) = Message::from_json(&v) {
                                 bus.deliver(m);
@@ -109,9 +121,14 @@ impl PeerLink {
         });
     }
 
+    /// Wait until the current connection is gone. The wait is armed before the check:
+    /// a drop between the two must not be missed, or the client would never dial again.
     pub async fn closed(&self) {
+        let gone = self.gone.notified();
+        tokio::pin!(gone);
+        gone.as_mut().enable();
         if self.connected() {
-            self.gone.notified().await;
+            gone.await;
         }
     }
 }
@@ -187,6 +204,7 @@ pub struct BusClient {
 impl BusClient {
     pub fn start(bus: Arc<Bus>, key: &[u8], addr: &str) -> Self {
         let link = PeerLink::new(&bus, "");
+        *link.idle.lock().expect("not poisoned") = Some(Duration::from_secs(30));
         let (me, key, addr) = (Arc::clone(&link), key.to_vec(), addr.to_string());
         tokio::spawn(async move {
             let mut delay = Duration::from_millis(100);

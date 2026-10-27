@@ -262,3 +262,18 @@ async fn the_harness_choice_is_journaled_and_checked() {
         "already the harness"
     );
 }
+
+#[tokio::test]
+async fn whatever_the_agent_started_ends_with_it() {
+    let l = lab(false, None);
+    l.runner.run(&l.agent, "orphan", vec![]).await;
+    let pid: i32 = std::fs::read_to_string(l.log.with_extension("child"))
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    let alive =
+        std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|s| !s.contains(") Z "));
+    assert!(!alive, "the agent's child {pid} outlived the turn");
+}

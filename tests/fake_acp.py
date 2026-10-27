@@ -78,6 +78,11 @@ for line in sys.stdin:
             blocks = [b["type"] for b in p["prompt"]]
             fh.write(json.dumps({"cwd": os.getcwd(), "prompt": text, "blocks": blocks}) + "\n")
         last = text.rpartition("New message from the user:")[2]  # priming quotes earlier words
+        if "orphan" in last:  # a child of its own, as an agent that runs a CLI
+            import subprocess
+
+            child = subprocess.Popen(["sleep", "300"])
+            LOG.with_suffix(".child").write_text(str(child.pid))
         if "crash" in last:
             sys.exit(3)
         if "slow" in last:
