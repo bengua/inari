@@ -4,7 +4,11 @@
 capsules to peers, runs the agent loop, and joins the bus. A node without `hub` is the
 hub: it also runs the coordinator and, with `gateway_listen`, the web interface.
 
-`inari-core-rs node node.json` is the Rust node. It reads the same file and the same data
+`inari-core-rs node node.json` is the Rust node. Any node may serve the interface
+(`gateway_listen`), not only the hub: its bus sees the whole mesh. With
+`"gateway_trust_loopback": true`, a page opened on the machine itself
+(`http://127.0.0.1:…`) needs no token; another site's page, a non-loopback host name and a
+non-JSON POST are refused. It reads the same file and the same data
 directory, speaks the same bus and endpoint protocols, and serves the same interface, so
 a fleet can mix both and a machine can switch in place. It drives agents through ACP
 harnesses only (`harness` with `"kind": "acp"`, or `harnesses`); the built-in model loop
@@ -61,7 +65,7 @@ are all configuration, and every default is empty.
 "gateway_ui": {"footer": "<text shown at the bottom of the sidebar>"},
 "mascot_dir": "<folder holding a FoxBot-style sprite engine: index.html, js/, sprites/>",
 "usage": [
-  {"kind": "cloudroom", "url": "<base URL of a Cloudroom-compatible server>", "providers": ["claude-code", "codex"]},
+  {"kind": "claude"},
   {"kind": "static", "items": [{"provider_id": "local", "name": "Local models", "status": "unlimited"}]}
 ]
 ```
@@ -69,7 +73,9 @@ are all configuration, and every default is empty.
 - **Mascot.** `mascot_dir` is served at `/fox/` and driven through the engine's `window.fox`
   contract (activity working/waiting/idle, harness persona, health, notify events). Without it
   the interface falls back to a canvas orb. No sprite is shipped in this repository.
-- **Quotas.** Sources are polled every minute and normalised to `{provider_id, name, status,
+- **Quotas.** `claude` reads Claude's own usage endpoint with the machine's Claude Code login
+  (five-hour and weekly windows, extra usage paid per token); `static` lists providers by hand;
+  `cloudroom` reads a Cloudroom-compatible usage service, for interoperability. Sources are polled every minute and normalised to `{provider_id, name, status,
   plan, windows: [{label, used_percent, resets_at}]}`. The sidebar pill and the model chip show a
   ring for the family of the model in use; a provider logo is proxied from its source when it has
   one, otherwise a neutral family mark is drawn.

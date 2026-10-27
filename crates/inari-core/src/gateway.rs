@@ -43,7 +43,22 @@ struct State {
     update_jobs: BTreeMap<String, Value>,
 }
 
+/// What a gateway is given: its access token, the device key that signs approvals,
+/// the interface options, the quota sources, where uploads wait, and whether pages
+/// opened on this machine need no token.
+pub struct GatewayOptions {
+    pub token: String,
+    pub key: Vec<u8>,
+    pub ui: Map<String, Value>,
+    pub mascot_dir: Option<PathBuf>,
+    pub usage: Vec<Value>,
+    pub data_dir: PathBuf,
+    pub trust_loopback: bool,
+}
+
 pub struct Gateway {
+    /// A page opened on this very machine needs no token (see `local_page`).
+    trust_loopback: bool,
     bus: Arc<Bus>,
     token: String,
     key: Vec<u8>,
@@ -150,6 +165,8 @@ struct Request {
     query: HashMap<String, String>,
     headers: HashMap<String, String>,
     body: Vec<u8>,
+    /// The connection comes from this machine.
+    loopback: bool,
 }
 
 async fn send(w: &mut TcpStream, status: u16, ctype: &str, body: &[u8]) -> std::io::Result<()> {
@@ -176,20 +193,23 @@ async fn send_json(w: &mut TcpStream, status: u16, v: &Value) -> std::io::Result
 }
 
 impl Gateway {
-    pub fn new(
-        bus: Arc<Bus>,
-        token: String,
-        key: Vec<u8>,
-        ui: Map<String, Value>,
-        mascot_dir: Option<PathBuf>,
-        usage: &[Value],
-        data_dir: &Path,
-    ) -> Arc<Self> {
+    pub fn new(bus: Arc<Bus>, o: GatewayOptions) -> Arc<Self> {
+        let GatewayOptions {
+            token,
+            key,
+            ui,
+            mascot_dir,
+            usage,
+            data_dir,
+            trust_loopback,
+        } = o;
+        let (usage, data_dir) = (&usage[..], &data_dir);
         let (clients, _) = broadcast::channel(50); // a slow client loses old frames, not the stream
         let mut full_ui = Map::new();
         full_ui.insert("footer".into(), json!(""));
         full_ui.extend(ui);
         let g = Arc::new(Self {
+            trust_loopback,
             bus: Arc::clone(&bus),
             token,
             key,
@@ -450,7 +470,32 @@ impl Gateway {
         }
     }
 
+    /// A request from a page this machine opened on itself: loopback connection, a
+    /// loopback host name (no DNS rebinding) and no other site behind it. Another site's
+    /// page cannot pass: its Origin differs, and a POST it could send without asking
+    /// first (not JSON) is refused anyway.
+    fn local_page(&self, r: &Request) -> bool {
+        if !self.trust_loopback || !r.loopback {
+            return false;
+        }
+        let host = r.headers.get("host").map(String::as_str).unwrap_or("");
+        let name = host.rsplit_once(':').map_or(host, |(h, _)| h);
+        if !matches!(name, "127.0.0.1" | "localhost" | "[::1]") {
+            return false;
+        }
+        let same = format!("http://{host}");
+        let origin_ok = r.headers.get("origin").is_none_or(|o| *o == same);
+        let site_ok = r
+            .headers
+            .get("sec-fetch-site")
+            .is_none_or(|v| v == "same-origin" || v == "none");
+        origin_ok && site_ok
+    }
+
     fn authorized(&self, r: &Request) -> bool {
+        if self.local_page(r) {
+            return true;
+        }
         let header = r
             .headers
             .get("authorization")
@@ -519,12 +564,14 @@ impl Gateway {
             body.extend_from_slice(&chunk[..n]);
         }
         body.truncate(size);
+        let loopback = stream.peer_addr().is_ok_and(|a| a.ip().is_loopback());
         Some(Ok(Request {
             method,
             path,
             query,
             headers,
             body,
+            loopback,
         }))
     }
 
@@ -607,6 +654,14 @@ impl Gateway {
             return send_json(w, 200, &json!({"hits": self.search(&q, &agent)})).await;
         }
         if r.method == "POST" {
+            // only JSON: a form or text/plain POST is what another site could send unasked
+            if !r
+                .headers
+                .get("content-type")
+                .is_some_and(|c| c.starts_with("application/json"))
+            {
+                return send_json(w, 400, &json!({"error": "JSON only"})).await;
+            }
             let data: Value =
                 match serde_json::from_slice(if r.body.is_empty() { b"{}" } else { &r.body }) {
                     Ok(v @ Value::Object(_)) => v,

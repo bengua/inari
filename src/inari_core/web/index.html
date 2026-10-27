@@ -187,15 +187,18 @@ function pctOf(u) { return u && u.windows && u.windows.length ? Math.max(...u.wi
 function ring(model) { const p = pctOf(usageFor(model)); if (p == null) return null; const r = document.createElement("span"); r.className = "ring"; r.style.setProperty("--p", p); r.style.setProperty("--rc", p > 85 ? "var(--bad)" : p > 60 ? "var(--warn)" : "var(--copper)"); r.innerHTML = "<i></i>"; r.title = Math.round(p) + "% used"; return r; }
 function nodeModels(node) { const n = snap.nodes.find((x) => x.node_id === node); return (n && n.capabilities && n.capabilities.models) || []; }
 
-function api(path, body) { return fetch(path, { method: body ? "POST" : "GET", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined }).then((r) => r.json()); }
+function api(path, body) { const headers = { "Content-Type": "application/json" }; if (token) headers.Authorization = "Bearer " + token; return fetch(path, { method: body ? "POST" : "GET", headers, body: body ? JSON.stringify(body) : undefined }).then((r) => r.json()); }
 function toast(t) { const e = $("toast"); e.textContent = t; e.style.display = "block"; clearTimeout(toast.h); toast.h = setTimeout(() => (e.style.display = "none"), 4200); }
 function log(text, tone) { feed.unshift({ t: new Date(), text, tone: tone || "" }); feed.length = Math.min(feed.length, 30); }
 function theme(v) { if (v === "auto") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", v); store.set("theme", v); }
 theme(store.get("theme", "auto"));
-function connect() {
-  if (!token) { $("login").hidden = false; return; }
-  sessionStorage.setItem("inari-token", token); history.replaceState(null, "", location.pathname); $("login").hidden = true; $("app").hidden = false; layout();
-  const es = new EventSource("/events?token=" + encodeURIComponent(token));
+// Behind a gate that adds the access itself (the phone's way in), the page needs no token:
+// it asks once without one and only shows the login when the server says no.
+async function connect() {
+  if (!token) { const ok = await fetch("/api/search?q=").then((r) => r.ok).catch(() => false); if (!ok) { $("login").hidden = false; return; } }
+  else sessionStorage.setItem("inari-token", token);
+  history.replaceState(null, "", location.pathname); $("login").hidden = true; $("app").hidden = false; layout();
+  const es = new EventSource(token ? "/events?token=" + encodeURIComponent(token) : "/events");
   es.onmessage = (e) => { snap = JSON.parse(e.data); render(); }; es.onerror = () => { $("stats").textContent = "offline"; $("app").style.opacity = ".6"; }; es.onopen = () => ($("app").style.opacity = "1");
 }
 $("tokenGo").onclick = () => { token = $("tokenInput").value.trim(); connect(); };
