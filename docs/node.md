@@ -127,3 +127,19 @@ capabilities (`updates`). `POST /api/update {node, harness}` installs the latest
 asks every node to look again. Progress is published on `node.<id>.update.state` and shown
 in the page's update badge. An ACP agent is started for each turn, so the next message
 already runs the new version; `restart` is for a server the harness talks to.
+
+## Attaching a new core
+
+The hub takes invitations when `"enroll_port"` is set; it announces the address in its
+capabilities (`enroll`). In the interface, **+** next to the cores, then *Attach a core you
+deployed*, gives a one-time code valid 30 minutes and the command to run on the new machine
+(a VPS, a new VM, another workstation), once its `inari-core-rs` binary is there:
+
+    inari-core-rs join <hub address>:<enroll port> <code> --service
+
+It proves it holds the code (the transport's handshake is keyed by it), receives the mesh
+and approval keys and where the bus is, writes `~/.config/inari-core/node.json` (its own
+token, the harnesses it finds, Claude quotas when Claude Code is logged in), and with
+`--service` installs and starts a user service. The new core joins through the private
+network the cores share (Tailscale, WireGuard, an SSH tunnel): the keys travel on it, as the
+bus does, so the hub's bus and enroll ports must be reachable there and nowhere else.

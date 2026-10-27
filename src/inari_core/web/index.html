@@ -45,6 +45,8 @@ button,input,textarea,select { font:inherit; color:inherit; }
 #search { display:none; width:100%; padding:8px 10px; border-radius:10px; border:1px solid var(--hair); background:var(--raise); } #search.on { display:block; }
 #hits { position:absolute; left:10px; right:10px; z-index:45; padding:6px; display:none; } #hits button { display:block; width:100%; text-align:left; background:none; border:0; padding:7px 8px; border-radius:8px; cursor:pointer; } #hits button:hover { background:var(--copper-soft); } #hits small { color:var(--dim); display:block; }
 #cores { overflow-y:auto; overflow-x:hidden; min-height:0; display:grid; grid-auto-rows:max-content; gap:10px; align-content:start; padding-right:2px; }
+.shead { display:flex; align-items:center; } .shead .btn { margin-left:auto; width:22px; height:22px; font-size:15px; line-height:1; text-transform:none; }
+.invite { display:grid; gap:8px; } .invite code { display:block; padding:8px; border-radius:8px; background:var(--raise); border:1px solid var(--hair); font-size:12px; word-break:break-all; user-select:all; } .invite input { width:100%; }
 .sect { font-size:11.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--faint); padding:0 4px; }
 .core { border:1px solid var(--hair); border-radius:12px; background:var(--raise); overflow:hidden; min-width:0; transition:box-shadow .3s,border-color .3s,opacity .2s; }
 .core.valid { border-color:var(--copper); box-shadow:0 0 0 2px var(--glow); } .core.invalid { opacity:.5; }
@@ -242,7 +244,7 @@ function row(id, a, mv) {
 }
 function renderCores(agents) {
   const box = $("cores"); box.textContent = "";
-  box.insertAdjacentHTML("beforeend", '<div class="sect">Threads by core</div>');
+  box.insertAdjacentHTML("beforeend", '<div class="sect shead">Threads by core<button class="btn icon small" id="addCore" title="Add a core" aria-label="Add a core">+</button></div>'); $("addCore").onclick = addCore;
   if (!snap.nodes.length) { box.insertAdjacentHTML("beforeend", '<div class="empty-core">Waiting for a core to announce itself…</div>'); return; }
   for (const n of snap.nodes) {
     const load = (snap.load[n.node_id] || {}).gpu || 0, mine = agents.filter(([, a]) => a.node === n.node_id), c = document.createElement("div");
@@ -440,6 +442,19 @@ function drawBench(soft) {
 let hitTimer = null;
 $("search").oninput = () => { clearTimeout(hitTimer); hitTimer = setTimeout(async () => { const q = $("search").value.trim(), box = $("hits"); box.textContent = ""; if (!q) { box.style.display = "none"; return; } const { hits } = await api("/api/search?q=" + encodeURIComponent(q)); box.style.display = "block"; box.style.top = $("search").getBoundingClientRect().bottom + 4 + "px"; if (!hits.length) box.innerHTML = '<small class="empty">No match</small>'; for (const h of hits) { const b = document.createElement("button"); b.innerHTML = "<span></span><small></small>"; b.firstChild.textContent = h.text.slice(0, 90); b.lastChild.textContent = h.agent + " · " + h.kind; b.onclick = () => { box.style.display = "none"; select(h.agent); }; box.append(b); } }, 300); };
 function sheet(title, options, note, extra) { $("sheetTitle").textContent = title; const opts = $("sheetOpts"); opts.textContent = ""; if (extra) opts.append(extra); if (note) { const p = document.createElement("small"); p.className = "empty"; p.textContent = note; opts.append(p); } for (const [label, fn] of options) { const b = document.createElement("button"); b.className = "btn"; b.textContent = label; b.onclick = () => { $("sheet").classList.remove("open"); fn(); }; opts.append(b); } const c = document.createElement("button"); c.className = "btn"; c.textContent = "Cancel"; c.onclick = () => $("sheet").classList.remove("open"); opts.append(c); $("sheet").classList.add("open"); (extra || opts.querySelector("button")).focus(); }
+/* Add a core: attach one you deployed (a VPS, a new VM, another workstation) through your
+   private network, or a core pass (coming next). */
+function addCore() { sheet("Add a core", [["Attach a core you deployed", attachCore], ["Core pass — share threads with another person (next)", () => toast("Core pass comes next")]],
+  "A new core joins through your private network (Tailscale, WireGuard, an SSH tunnel)."); }
+function attachCore() { const hub = snap.nodes.find((n) => (n.capabilities || {}).enroll); if (!hub) return toast("The hub takes no invitations: set enroll_port in its configuration");
+  const box = document.createElement("div"); box.className = "invite"; box.innerHTML = '<label for="coreName">Name of the new core</label><input id="coreName" placeholder="vps-1" maxlength="32" autocomplete="off"><div id="inviteOut"></div>';
+  sheet("Attach a core", [["Create the invitation", async () => {
+    const name = $("coreName").value.trim().toLowerCase(); if (!/^[a-z0-9-]{1,32}$/.test(name)) return toast("Letters, digits and dashes only");
+    const r = await api("/api/invite", { node_id: name }); if (!r.code) return toast("The invitation was refused");
+    const cmd = `inari-core-rs join ${hub.capabilities.enroll} ${r.code} --service`, out = document.createElement("div"); out.className = "invite";
+    out.innerHTML = `<b>On the new machine</b><small class="empty">Copy the inari-core-rs binary there, then run (valid ${Math.round(r.expires_in / 60)} minutes, once):</small><code></code>`; out.querySelector("code").textContent = cmd;
+    sheet(`Invitation for ${name}`, [["Copy the command", () => navigator.clipboard && navigator.clipboard.writeText(cmd).then(() => toast("Copied"))]], `It joins over your private network and appears here as ${name}.`, out);
+  }]], "", box); }
 function openMove(agent, from) { sheet(`Move ${agent} to…`, snap.nodes.filter((n) => n.node_id !== from && n.role === "heavy").map((n) => [n.node_id, () => teleport(agent, from, n.node_id)])); }
 async function teleport(agent, source, target) { const r = await api("/api/teleport", { agent, source, target }); if (r.request) { toast(`Moving ${agent} to ${target}…`); log(`Moving ${agent}: ${source} → ${target}`); } else toast("Request refused"); }
 function startDrag(e, el, id, from) { if (e.button > 0) return; drag = { id, from, x: e.clientX, y: e.clientY, active: false, el, ghost: null, hold: null }; drag.hold = setTimeout(() => { if (drag && !drag.active) { openMove(id, from); drag = null; } }, 650); window.onpointermove = onMove; window.onpointerup = onUp; }

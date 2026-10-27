@@ -773,6 +773,22 @@ impl Gateway {
                 );
                 ok
             }
+            "/api/invite" => {
+                let node = s(d, "node_id");
+                if node.is_empty()
+                    || node.len() > 32
+                    || !node.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+                {
+                    return bad;
+                }
+                let code = crate::enroll::new_code();
+                self.bus
+                    .publish("mesh.invite", json!({"code": code, "node_id": node}));
+                Some((
+                    200,
+                    json!({"code": code, "node_id": node, "expires_in": crate::enroll::INVITE_TTL.as_secs()}),
+                ))
+            }
             "/api/update" => {
                 if !need(&["node", "harness"]) {
                     return bad;
