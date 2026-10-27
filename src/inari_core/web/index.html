@@ -35,15 +35,15 @@ button,input,textarea,select { font:inherit; color:inherit; }
 .btn { background:var(--raise); border:1px solid var(--hair); border-radius:11px; padding:8px 13px; min-height:38px; cursor:pointer; }
 .btn:hover { border-color:var(--copper); } .btn.go { background:var(--copper); border-color:var(--copper); color:#fff; } :root[data-theme=dark] .btn.go { color:#17161a; }
 .btn.small { padding:3px 10px; min-height:30px; font-size:13px; } .btn.on { border-color:var(--copper); color:var(--copper-text); } .btn.icon { width:36px; min-height:36px; padding:0; display:inline-grid; place-items:center; }
-#app { height:100%; display:grid; grid-template-columns:var(--side) minmax(0,1fr) auto; grid-template-rows:auto minmax(0,1fr); grid-template-areas:"bar bar bar" "side main bench"; gap:0; transition:grid-template-columns .28s ease; }
+#app { height:100%; display:grid; grid-template-columns:var(--side) minmax(0,1fr) auto; grid-template-rows:auto minmax(0,1fr); grid-template-areas:"bar bar bar" "side main bench"; gap:0; transition:grid-template-columns .38s cubic-bezier(.22,.8,.24,1); }
 #appbar { grid-area:bar; } #side { grid-area:side; } #main { grid-area:main; } #bench { grid-area:bench; }
 #appbar { display:flex; align-items:center; gap:10px; height:52px; padding:0 12px; border-bottom:1px solid var(--hair); background:var(--panel); position:relative; z-index:46; }
 #appbar .brand { display:flex; align-items:baseline; gap:8px; min-width:0; } #appbar .brand small { color:var(--faint); font-size:12px; white-space:nowrap; } #appbar .sp { flex:1; }
-#app.noside { --side:0px; } #side { width:300px; transition:transform .28s ease, opacity .22s ease; } #app.noside #side { transform:translateX(-100%); opacity:0; pointer-events:none; }
+#app.noside { --side:0px; } #side { width:300px; transition:transform .38s cubic-bezier(.22,.8,.24,1), opacity .3s ease; } #app.noside #side { transform:translateX(-100%); opacity:0; pointer-events:none; }
 #sideToggle.on { border-color:var(--copper); color:var(--copper-text); }
 #side { display:grid; grid-template-rows:auto auto auto 1fr auto; gap:8px; min-height:0; padding:12px 10px 10px; border-right:1px solid var(--hair); background:var(--panel); backdrop-filter:blur(18px); overflow-x:hidden; }
 #sidetop { display:flex; align-items:center; gap:8px; } #sidetop .sp { flex:1; } h1 { margin:0; font-size:15px; letter-spacing:.4px; color:var(--copper-text); }
-#foxSlot { height:240px; } #fox { position:fixed; z-index:56; opacity:0; transition:opacity .18s ease; } #fox.shown { opacity:1; } #fox iframe { width:100%; height:100%; border:0; background:transparent; color-scheme:normal; } #fox canvas { height:100%; width:auto; aspect-ratio:1; display:block; margin:0 auto; }
+#foxSlot { height:240px; } #fox { position:fixed; left:0; top:0; width:240px; height:240px; z-index:56; opacity:0; transform-origin:0 0; will-change:transform; transition:opacity .2s ease; } #fox.shown { opacity:1; } #fox iframe { width:100%; height:100%; border:0; background:transparent; color-scheme:normal; } #fox canvas { height:100%; width:auto; aspect-ratio:1; display:block; margin:0 auto; }
 .nav { display:grid; gap:2px; } .nav button { display:flex; align-items:center; gap:10px; background:none; border:0; border-radius:9px; padding:8px 10px; cursor:pointer; text-align:left; color:var(--ink); } .nav button:hover { background:var(--copper-soft); }
 #search { display:none; width:100%; padding:8px 10px; border-radius:10px; border:1px solid var(--hair); background:var(--raise); } #search.on { display:block; }
 #hits { position:absolute; left:10px; right:10px; z-index:45; padding:6px; display:none; } #hits button { display:block; width:100%; text-align:left; background:none; border:0; padding:7px 8px; border-radius:8px; cursor:pointer; } #hits button:hover { background:var(--copper-soft); } #hits small { color:var(--dim); display:block; }
@@ -77,6 +77,8 @@ button,input,textarea,select { font:inherit; color:inherit; }
 .ghost { position:fixed; pointer-events:none; z-index:80; opacity:.95; width:230px; transform:translate(-50%,-50%) rotate(-1.5deg); background:var(--panel-solid); box-shadow:var(--shadow); }
 /* ---- main ---- */
 #main { display:grid; grid-template-rows:auto auto minmax(0,1fr) auto; min-width:0; min-height:0; }
+#app.measuring, #app.measuring #side, #app.measuring #bench { transition:none !important; } #app.morphing #main { overflow:hidden; } #app.morphing #main > * { width:var(--freeze); max-width:none; }
+#app.noside .hero { margin-top:150px; transition:margin-top .38s cubic-bezier(.22,.8,.24,1); } /* room for the mascot above it */
 #passBanner { grid-row:1; } #top { grid-row:2; } #thread { grid-row:3; } #dock { grid-row:4; }
 body:not(.open) #top { display:none; } /* no thread open: the top of the page is the mascot's */ #app.wbmax #main { display:none; } #app.wbmax { grid-template-columns:var(--side) 0 minmax(0,1fr); } #app.wbmax #bench { width:auto; }
 #passBanner { padding:8px 16px; font-size:13px; background:var(--raise); border-bottom:1px solid var(--hair); color:var(--dim); } #passBanner b { color:var(--ink); } #passBanner button { margin-left:8px; }
@@ -101,7 +103,7 @@ details.tool pre { margin:0; padding:8px 12px; white-space:pre-wrap; overflow-wr
 .send { width:38px; height:38px; border-radius:50%; border:0; background:var(--copper); color:#fff; cursor:pointer; display:grid; place-items:center; } .send .i { stroke-width:2.2; } :root[data-theme=dark] .send { color:#17161a; } .send:disabled { opacity:.4; } .attached { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:6px; }
 #dock { padding:10px 16px 14px; } #dock .hint { max-width:900px; margin:6px auto 0; color:var(--faint); font-size:12px; text-align:center; } #app.nosel #dock .hint { display:none; } body.bench-open #fox { opacity:0; pointer-events:none; }
 /* ---- artifacts pane (right): folds away, or takes the whole width ---- */
-#bench { display:grid; grid-template-rows:auto 1fr; min-height:0; width:var(--benchw,42vw); min-width:0; border-left:1px solid var(--hair); background:var(--panel); backdrop-filter:blur(18px); position:relative; overflow:hidden; transition:width .28s ease, opacity .22s ease; }
+#bench { display:grid; grid-template-rows:auto 1fr; min-height:0; width:var(--benchw,42vw); min-width:0; border-left:1px solid var(--hair); background:var(--panel); backdrop-filter:blur(18px); position:relative; overflow:hidden; transition:width .38s cubic-bezier(.22,.8,.24,1), opacity .3s ease; }
 #bench > * { min-width:340px; } #app.nobench #bench { width:0; opacity:0; border-left-width:0; pointer-events:none; } #benchBtn.on { border-color:var(--copper); color:var(--copper-text); } #split { position:absolute; left:-4px; top:0; bottom:0; width:8px; cursor:col-resize; z-index:5; } #split:hover { background:var(--copper-soft); }
 .tabs { display:flex; gap:2px; padding:6px 10px 0; border-bottom:1px solid var(--hair); align-items:center; } .tab { background:none; border:0; padding:9px 12px; color:var(--dim); cursor:pointer; border-bottom:2px solid transparent; } .tab.on { color:var(--ink); border-bottom-color:var(--copper); } .tabs .sp { flex:1; }
 #bbody { overflow:auto; padding:12px 14px; min-height:0; } .empty { color:var(--dim); }
@@ -231,21 +233,29 @@ function layout() {
   app.style.setProperty("--benchw", store.get("benchw", "42vw")); $("benchBtn").classList.toggle("on", !app.classList.contains("nobench")); requestAnimationFrame(drawTethers);
   $("sideToggle").classList.toggle("on", !app.classList.contains("noside")); placeFox();
 }
-$("sideToggle").onclick = () => { store.set("noside", !store.get("noside", false)); layout(); };
+$("sideToggle").onclick = () => morph(() => { store.set("noside", !store.get("noside", false)); layout(); });
 /* The mascot is one element that moves (its frame is never reloaded): in the sidebar's slot when the sidebar
    is open, at the top centre of the page when it is shut — it fades out, moves, and fades back in. */
-let foxAt = "";
-function placeFox() { const fox = $("fox"), app = $("app"); if (app.hidden) return; const mobile = matchMedia("(max-width:760px)").matches;
-  const docked = mobile ? document.body.classList.contains("open") : app.classList.contains("noside"); let r;
-  if (docked && mobile) { const size = 52, back = $("back").getBoundingClientRect(); r = { left: innerWidth / 2 - size / 2, top: Math.max(0, back.top + back.height / 2 - size / 2), width: size, height: size }; } // beside Back, clear of the title
-  else if (docked) { const m = $("main").getBoundingClientRect(), size = document.body.classList.contains("open") ? 76 : 112; r = { left: m.left + m.width / 2 - size / 2, top: 2, width: size, height: size }; }
-  else { const slot = $("foxSlot").getBoundingClientRect(); r = { left: slot.left, top: slot.top, width: slot.width, height: slot.height }; }
-  const key = docked ? "dock" : "slot", apply = () => { Object.assign(fox.style, { left: r.left + "px", top: r.top + "px", width: r.width + "px", height: r.height + "px" }); fox.classList.add("shown"); };
-  if (key !== foxAt && foxAt) { fox.classList.remove("shown"); setTimeout(() => { placeFox.again = true; requestAnimationFrame(apply); }, 300); } else apply(); foxAt = key; }
+/* The mascot is one element (its frame is never reloaded) that glides and scales between the sidebar's slot
+   and the top centre of the page, following the panes while they move. */
+const FOX = 240;
+function foxTarget() { const app = $("app"), mobile = matchMedia("(max-width:760px)").matches, open = document.body.classList.contains("open");
+  if (mobile && open) { const size = 56, back = $("back").getBoundingClientRect(); return { x: innerWidth / 2 - size / 2, y: Math.max(0, back.top + back.height / 2 - size / 2), size }; }
+  if (!mobile && app.classList.contains("noside")) { const m = $("main").getBoundingClientRect(), size = open ? 96 : 160; return { x: m.left + m.width / 2 - size / 2, y: open ? 0 : 6, size }; }
+  const slot = $("foxSlot").getBoundingClientRect(), size = Math.min(slot.height, slot.width); return { x: slot.left + slot.width / 2 - size / 2, y: slot.top, size }; }
+function placeFox() { const fox = $("fox"); if ($("app").hidden) return; const t = foxTarget();
+  fox.style.transform = `translate(${t.x}px, ${t.y}px) scale(${t.size / FOX})`; fox.classList.add("shown"); }
+/* Follow the layout frame by frame while a pane glides, then settle. */
+function followFox(ms) { const end = performance.now() + ms; const step = () => { placeFox(); if (performance.now() < end) requestAnimationFrame(step); }; requestAnimationFrame(step); }
+/* Freeze the page content's width to the wider of before and after while a pane moves. */
+function morph(flip) { const app = $("app"), main = $("main"), before = main.clientWidth;
+  app.classList.add("measuring"); flip(); const after = main.clientWidth; flip(); void main.offsetWidth; app.classList.remove("measuring"); flip(); // the final width, measured without animation
+  app.style.setProperty("--freeze", Math.max(before, after) + "px"); app.classList.add("morphing"); followFox(460);
+  clearTimeout(morph.t); morph.t = setTimeout(() => { app.classList.remove("morphing"); placeFox(); }, 420); }
 addEventListener("resize", () => placeFox()); window.addEventListener("scroll", () => placeFox(), { passive: true });
-$("benchClose").onclick = () => { store.set("nobench", true); store.set("wbmax", false); document.body.classList.remove("bench-open"); layout(); };
+$("benchClose").onclick = () => { if (innerWidth <= 1100) { store.set("nobench", true); document.body.classList.remove("bench-open"); layout(); return; } store.set("wbmax", false); if (!store.get("nobench", false)) morph(() => { store.set("nobench", !store.get("nobench", false)); layout(); }); else layout(); };
 $("benchMobile").onclick = () => { document.body.classList.add("bench-open"); store.set("nobench", false); layout(); };
-$("benchBtn").onclick = () => { if (innerWidth <= 1100) document.body.classList.add("bench-open"); else { store.set("nobench", !store.get("nobench", false)); layout(); } };
+$("benchBtn").onclick = () => { if (innerWidth <= 1100) document.body.classList.add("bench-open"); else morph(() => { store.set("nobench", !store.get("nobench", false)); layout(); }); };
 $("wbmax").onclick = () => { store.set("wbmax", !store.get("wbmax", false)); layout(); };
 $("split").onpointerdown = (e) => { e.preventDefault(); const move = (m) => { const w = Math.min(innerWidth - 420, Math.max(360, innerWidth - m.clientX)); $("app").style.setProperty("--benchw", w + "px"); store.set("benchw", w + "px"); }; const up = () => { removeEventListener("pointermove", move); removeEventListener("pointerup", up); }; addEventListener("pointermove", move); addEventListener("pointerup", up); };
 
