@@ -118,6 +118,11 @@ async fn a_person_drives_two_rust_cores_through_the_gateway() {
     })
     .await;
     assert_eq!(g.snapshot()["agents"]["t1"]["title"], "first");
+    assert_eq!(
+        g.snapshot()["ui"]["self"],
+        "hub",
+        "the page knows which core serves it"
+    );
 
     // a photo in two parts, as the phone sends it
     let photo: Vec<u8> = [b"\x89PNG\r\n\x1a\n".as_slice(), &[7u8; 3000]].concat();
