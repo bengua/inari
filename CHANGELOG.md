@@ -12,8 +12,9 @@ Newest first. An entry says what changed for someone using the thing.
 - **Gestures**: drag a thread onto another to merge them (moved first if they live on two cores);
   onto the dock that appears to clone it to another harness, share it with a pass holder, or put it
   to sleep; onto the mascot to summarise it. Drop a file on a core to start a thread with it. On a
-  phone, swipe a thread left to move it and right for its artifacts; long-press a message to fork
-  from it. Core: `/api/clone`, `/api/share`, `/api/archive`; a thread shared with a pass belongs to
+  phone, a short press lifts a thread, which is then carried like with a mouse (onto a core to move
+  it); a long press without moving opens everything else one can do with it; long-press a message to
+  fork from it. Core: `/api/clone`, `/api/share`, `/api/archive`; a thread shared with a pass belongs to
   it too.
 - **Core passes**: a person gets threads on your core — *supervision* (a child: you follow every
   thread and answer the agents' requests; they always see the banner) or *collaboration*. Passes
