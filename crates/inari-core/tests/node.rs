@@ -97,6 +97,10 @@ async fn a_person_drives_two_rust_cores_through_the_gateway() {
     .unwrap();
     assert_eq!(status, 200);
     assert!(String::from_utf8_lossy(&page).contains("<title>"));
+    // the page carries its version, the snapshot names the one served: an older open page reloads
+    let version = g.snapshot()["ui"]["page"].as_str().unwrap().to_string();
+    assert_eq!(version.len(), 12);
+    assert!(String::from_utf8_lossy(&page).contains(&format!("const PAGE = \"{version}\"")));
     let (status, _) = http(
         "GET",
         &format!("http://127.0.0.1:{port}/api/search?q=x"),
