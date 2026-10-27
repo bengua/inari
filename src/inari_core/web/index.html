@@ -359,6 +359,11 @@ async function sendFile(agent, f) { const id = "up" + Date.now().toString(36) + 
     for (let tries = 0; tries < 3 && !(reply && reply.ok !== false); tries++) reply = await api("/api/upload", { agent, path: f.name, upload_id: id, offset: at, total: f.file.size, b64 }).catch(() => null);
     if (!reply || reply.ok === false) { toast(f.name + ": " + ((reply && reply.error) || "upload failed")); return false; } }
   return true; }
+// The Android app hands what was shared to it (a photo, a PDF, a text): into the composer, ready to send.
+window.inariShare = (p) => { const names = [];
+  for (const f of (p && p.files) || []) { const bin = atob(f.b64), bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i); attachments.push({ name: f.name, file: new File([bytes], f.name, { type: f.mime }) }); names.push(f.name); }
+  if (p && p.text) { const m = $("msg"); m.value = (m.value ? m.value + "\n" : "") + p.text; }
+  try { drawComposer(); } catch (e) {} if (names.length) toast("Added to the message: " + names.join(", ")); $("msg").focus(); };
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition; if (SR) { $("mic").hidden = false; let rec = null; $("mic").onclick = () => { if (rec) { rec.stop(); return; } rec = new SR(); rec.interimResults = false; rec.lang = navigator.language; rec.onresult = (e) => { $("msg").value += (($("msg").value ? " " : "") + e.results[0][0].transcript); }; rec.onend = () => { rec = null; $("mic").classList.remove("on"); }; $("mic").classList.add("on"); rec.start(); }; }
 $("composer").onsubmit = async (e) => { e.preventDefault(); let text = $("msg").value.trim(); if (!text && !attachments.length) return; $("sendBtn").disabled = true;
   try { let id = selected;
