@@ -38,7 +38,7 @@ button,input,textarea,select { font:inherit; color:inherit; }
 #app { height:100%; display:grid; grid-template-columns:var(--side) minmax(0,1fr) auto; grid-template-areas:"side main bench"; gap:0; }
 #side { grid-area:side; } #main { grid-area:main; } #bench { grid-area:bench; }
 #app.noside { --side:0px; } #app.noside #side { display:none; }
-#side { display:grid; grid-template-rows:auto auto auto 1fr auto; gap:8px; min-height:0; padding:12px 10px 10px; border-right:1px solid var(--hair); background:var(--panel); backdrop-filter:blur(18px); overflow-x:hidden; }
+#side { display:grid; grid-template-rows:auto auto auto auto 1fr auto; gap:8px; min-height:0; padding:12px 10px 10px; border-right:1px solid var(--hair); background:var(--panel); backdrop-filter:blur(18px); overflow-x:hidden; }
 #sidetop { display:flex; align-items:center; gap:8px; } #sidetop .sp { flex:1; } h1 { margin:0; font-size:15px; letter-spacing:.4px; color:var(--copper-text); }
 #fox { position:relative; height:190px; margin:0 -4px; } #fox iframe { width:100%; height:100%; border:0; background:transparent; color-scheme:normal; } #fox canvas { height:100%; width:auto; aspect-ratio:1; display:block; margin:0 auto; }
 .nav { display:grid; gap:2px; } .nav button { display:flex; align-items:center; gap:10px; background:none; border:0; border-radius:9px; padding:8px 10px; cursor:pointer; text-align:left; color:var(--ink); } .nav button:hover { background:var(--copper-soft); }
@@ -74,7 +74,7 @@ button,input,textarea,select { font:inherit; color:inherit; }
 .ghost { position:fixed; pointer-events:none; z-index:80; opacity:.95; width:230px; transform:translate(-50%,-50%) rotate(-1.5deg); background:var(--panel-solid); box-shadow:var(--shadow); }
 /* ---- main ---- */
 #main { display:grid; grid-template-rows:auto 1fr auto; min-width:0; min-height:0; } #app.wbmax #main { display:none; } #app.wbmax { grid-template-columns:var(--side) 0 minmax(0,1fr); } #app.wbmax #bench { width:auto; }
-#passBanner { padding:8px 16px; font-size:13px; background:var(--raise); border-bottom:1px solid var(--hair); color:var(--dim); } #passBanner b { color:var(--ink); } #passBanner button { margin-left:8px; }
+#passBanner { flex-basis:100%; order:-1; margin:-10px -16px 4px; padding:8px 16px; font-size:13px; background:var(--raise); border-bottom:1px solid var(--hair); color:var(--dim); } #passBanner b { color:var(--ink); } #passBanner button { margin-left:8px; }
 .guest #addCore, .guest [data-tab="terminal"], .guest #pill, .guest #usageBtn, .guest #usageCard, .guest #actionsBtn { display:none !important; }
 .ptag { font-size:11px; padding:1px 6px; border-radius:999px; background:var(--raise); border:1px solid var(--hair); color:var(--dim); white-space:nowrap; }
 .passform { display:grid; gap:8px; } .passform label { display:flex; gap:8px; align-items:center; } .passform input[type=text], .passform input[type=date] { width:100%; }
@@ -128,6 +128,7 @@ pre.code span.l::before { counter-increment:l; content:counter(l); position:abso
     <div id="fox" aria-label="Mascot"></div>
     <nav class="nav"><button id="newThread" data-icon="edit"><span>New thread</span></button><button id="searchBtn" data-icon="search"><span>Search threads</span></button><input id="search" type="search" placeholder="Search all journals…" aria-label="Search journals"></nav>
     <div id="hits" class="glass"></div>
+    <div class="sect shead" id="coresHead">Threads by core<button class="btn icon small" id="addCore" title="Add a core" aria-label="Add a core">+</button></div>
     <div id="cores"></div>
     <div id="foot"><div id="approvals"></div><div id="feed" aria-label="Activity"></div>
       <section id="usageCard" hidden aria-label="Provider usage"><header><span data-icon="bars"></span><b>Provider usage</b><button class="btn icon small" id="usageFold" title="Collapse provider usage" aria-label="Collapse provider usage" data-icon="chevron"></button></header><div id="usageBody"></div></section>
@@ -135,8 +136,7 @@ pre.code span.l::before { counter-increment:l; content:counter(l); position:abso
       <div id="brandfoot"></div></div>
   </aside>
   <section id="main">
-    <div id="passBanner" role="status" hidden></div>
-    <div id="top"><button class="btn icon" id="showside" title="Show the sidebar" aria-label="Show the sidebar" data-icon="sidebar"></button><button class="btn small" id="back">‹ Back</button><h2 id="ptitle">Inari</h2><span id="pphase"></span>
+    <div id="top"><div id="passBanner" role="status" hidden></div><button class="btn icon" id="showside" title="Show the sidebar" aria-label="Show the sidebar" data-icon="sidebar"></button><button class="btn small" id="back">‹ Back</button><h2 id="ptitle">Inari</h2><span id="pphase"></span>
       <button class="chip" id="modelChip" hidden></button><button class="btn small" id="actionsBtn" data-icon="more" hidden><span>Actions</span></button><button class="btn small" id="benchBtn" data-icon="panel"><span>Artifacts</span></button></div>
     <div id="thread"><div id="msgs"></div></div>
     <div id="dock"><form class="composer" id="composer"><div class="attached" id="attached"></div><textarea id="msg" rows="2" placeholder="Build anything…" aria-label="Message"></textarea>
@@ -258,7 +258,7 @@ function row(id, a, mv) {
 }
 function renderCores(agents) {
   const box = $("cores"); box.textContent = "";
-  box.insertAdjacentHTML("beforeend", '<div class="sect shead">Threads by core<button class="btn icon small" id="addCore" title="Add a core" aria-label="Add a core">+</button></div>'); $("addCore").onclick = addCore;
+
   if (!snap.nodes.length) { box.insertAdjacentHTML("beforeend", '<div class="empty-core">Waiting for a core to announce itself…</div>'); return; }
   for (const n of snap.nodes) {
     const load = (snap.load[n.node_id] || {}).gpu || 0, mine = agents.filter(([, a]) => a.node === n.node_id), c = document.createElement("div");
@@ -487,6 +487,7 @@ function corePass() { const names = [...new Set(snap.nodes.flatMap((n) => Object
     sheet(`Pass for ${name}`, [["Copy the link", () => navigator.clipboard && navigator.clipboard.writeText(link).then(() => toast("Copied"))]], "Shown once: keep it until it is given.", out);
   }]], "", box); }
 function passList() { sheet("Passes", (snap.passes || []).map((p) => [`Revoke ${p.name} (${p.role}${p.until ? ", until " + new Date(p.until * 1000).toLocaleDateString() : ""})`, () => api("/api/pass/revoke", { id: p.id }).then(() => toast(`${p.name}'s pass is revoked`))]), "Revoking ends the access at once; the threads stay on this core."); }
+$("addCore").onclick = addCore; // outside the list the snapshots redraw: a click on it is never lost
 function attachCore() { const hub = snap.nodes.find((n) => (n.capabilities || {}).enroll); if (!hub) return toast("The hub takes no invitations: set enroll_port in its configuration");
   const box = document.createElement("div"); box.className = "invite"; box.innerHTML = '<label for="coreName">Name of the new core</label><input id="coreName" placeholder="vps-1" maxlength="32" autocomplete="off"><div id="inviteOut"></div>';
   sheet("Attach a core", [["Create the invitation", async () => {
