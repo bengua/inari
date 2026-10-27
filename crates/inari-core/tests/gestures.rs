@@ -209,3 +209,73 @@ async fn clone_share_and_sleep() {
     })
     .await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_clone_goes_to_the_core_that_has_the_harness() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path();
+    for (n, v) in [("mesh.key", "m"), ("device.key", "d"), ("token", "owner")] {
+        std::fs::write(d.join(n), v).unwrap();
+    }
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fake_acp.py");
+    let h =
+        |log: &str| json!({"command": ["python3", script], "env": {"FAKE_ACP_LOG": d.join(log)}});
+    let home: NodeConfig = serde_json::from_value(json!({
+        "node_id": "home", "data_dir": d.join("home"), "key_file": d.join("mesh.key"),
+        "gateway_listen": "127.0.0.1:0", "gateway_token_file": d.join("token"), "heartbeat": 0.1, "expected_peers": ["away"],
+        "harnesses": {"local": h("a.log")},
+    }))
+    .unwrap();
+    let home = Node::start(home).await.unwrap();
+    let away: NodeConfig = serde_json::from_value(json!({
+        "node_id": "away", "data_dir": d.join("away"), "key_file": d.join("mesh.key"), "hub": format!("127.0.0.1:{}", home.bus_port),
+        "heartbeat": 0.1, "harnesses": {"local": h("b.log"), "gem": h("c.log")},
+    }))
+    .unwrap();
+    let _away = Node::start(away).await.unwrap();
+    let g = home.gateway.clone().unwrap();
+    let port = home.gateway_port;
+    until("both cores", || {
+        g.snapshot()["nodes"]
+            .as_array()
+            .is_some_and(|n| n.len() == 2)
+    })
+    .await;
+    post(
+        port,
+        "token=owner",
+        "/api/agent",
+        json!({"thread_id": "essay", "node": "home"}),
+    )
+    .await;
+    until("the thread", || {
+        g.snapshot()["agents"].get("essay").is_some()
+    })
+    .await;
+    let (_, made) = post(
+        port,
+        "token=owner",
+        "/api/clone",
+        json!({"agent": "essay", "harness": "gem", "label": "Gem"}),
+    )
+    .await;
+    let copy = made["thread_id"].as_str().unwrap().to_string();
+    until("the copy on the core that has the harness", || {
+        let a = &g.snapshot()["agents"][&copy];
+        a["node"] == "away" && a["harness"] == "gem" && a["title"] == "essay · Gem"
+    })
+    .await;
+    assert_eq!(
+        g.snapshot()["agents"]["essay"]["node"],
+        "home",
+        "the original stays"
+    );
+    let (status, _) = post(
+        port,
+        "token=owner",
+        "/api/clone",
+        json!({"agent": "essay", "harness": "nowhere"}),
+    )
+    .await;
+    assert_eq!(status, 404);
+}

@@ -803,10 +803,15 @@ impl Node {
             let _ = std::fs::remove_dir_all(&staging);
             // a clone: the same journal and files, thought on by another harness
             let harness = s(&m.payload, "harness");
+            let title = s(&m.payload, "title");
             let made = match (made, n.runner.as_ref()) {
-                (Ok(id), Some(r)) if !harness.is_empty() => {
-                    let title = s(&m.payload, "title");
-                    r.set_harness(&id, &harness)
+                (Ok(id), Some(r)) => {
+                    let with_harness = if harness.is_empty() {
+                        Ok(())
+                    } else {
+                        r.set_harness(&id, &harness).map(|_| ())
+                    };
+                    with_harness
                         .and_then(|_| {
                             if title.is_empty() {
                                 Ok(())
