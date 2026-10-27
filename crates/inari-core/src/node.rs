@@ -132,6 +132,10 @@ pub struct NodeConfig {
     /// suffix of a model id is replaced by its label (`["-c0", " · RTX 5080"]`, say).
     #[serde(default)]
     pub model_labels: Vec<[String; 2]>,
+    /// Models kept out of the pages' menus, by suffix: models a harness uses on its own
+    /// (its sub-agents' helpers, say) rather than models to talk to.
+    #[serde(default)]
+    pub model_hidden: Vec<String>,
     #[serde(default = "default_beat")]
     pub heartbeat: f64,
     #[serde(default = "default_ttl")]
@@ -581,6 +585,10 @@ impl Node {
         if !cfg.model_labels.is_empty() {
             info.capabilities
                 .insert("model_labels".into(), json!(cfg.model_labels));
+        }
+        if !cfg.model_hidden.is_empty() {
+            info.capabilities
+                .insert("model_hidden".into(), json!(cfg.model_hidden));
         }
         if self.enroll_port > 0 {
             let host = advertise
