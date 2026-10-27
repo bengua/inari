@@ -424,7 +424,7 @@ function chooseSession(node, then) { const hs = Object.keys(harnessesOf(node));
     const models = harnessModels(node, h); if (!models.length) { if (then) then(); return; }
     modelPicker($("pickModel"), node, "", (m) => { pendingModel = m; drawComposer(); if (then) then(); }, h); };
   if (hs.length <= 1) return pickModel(hs[0] || "");
-  sheet(`New thread on ${node} — which agent?`, hs.map((h) => [`${harnessName(h)} · ${harnessModels(node, h).length || "?"} models`, () => pickModel(h)]), "Then choose its model; you can change both later."); }
+  sheet(`New thread on ${node} — which agent?`, hs.map((h) => [`${harnessName(h)} · ${new Set(harnessModels(node, h).map(shortModel)).size || "?"} models`, () => pickModel(h)]), "Then choose its model; you can change both later."); }
 $("coreChip").onclick = () => { const heavy = snap.nodes.filter((n) => n.role === "heavy"); sheet("Run it on…", heavy.map((n) => [n.node_id, () => { pendingCore = n.node_id; pendingHarness = ""; pendingModel = ""; drawComposer(); chooseSession(n.node_id); }])); };
 $("attach").onclick = () => $("file").click();
 $("file").onchange = (e) => { for (const f of e.target.files) { if (f.size > 25e6) { toast(f.name + " is over 25 MB"); continue; } attachments.push({ name: f.name, file: f }); } e.target.value = ""; drawComposer(); };
