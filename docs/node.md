@@ -62,7 +62,8 @@ are all configuration, and every default is empty.
 ## Interface options (hub with a gateway)
 
 ```json
-"gateway_ui": {"footer": "<text shown at the bottom of the sidebar>"},
+"gateway_ui": {"footer": "<text shown at the bottom of the sidebar>", "brand": "<name shown next to Inari in the top bar>",
+               "owner": "<the owner's name, in a pass holder's banner>"},
 "mascot_dir": "<folder holding a FoxBot-style sprite engine: index.html, js/, sprites/>",
 "usage": [
   {"kind": "claude"},
