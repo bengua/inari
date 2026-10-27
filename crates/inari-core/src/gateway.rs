@@ -542,7 +542,12 @@ impl Gateway {
                     .pointer("/capabilities/model_labels")
                     .cloned()
                     .unwrap_or(json!([]));
-                n["capabilities"] = json!({"harnesses": harnesses, "model_labels": labels});
+                let hidden = n
+                    .pointer("/capabilities/model_hidden")
+                    .cloned()
+                    .unwrap_or(json!([]));
+                n["capabilities"] =
+                    json!({"harnesses": harnesses, "model_labels": labels, "model_hidden": hidden});
             }
         }
         for k in ["moves", "update_jobs"] {

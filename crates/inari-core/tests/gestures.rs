@@ -333,7 +333,7 @@ async fn a_model_chosen_with_the_thread_is_ready_for_its_first_turn() {
     let cfg: NodeConfig = serde_json::from_value(json!({
         "node_id": "home", "data_dir": d.join("home"), "key_file": d.join("mesh.key"), "device_key_file": d.join("device.key"),
         "gateway_listen": "127.0.0.1:0", "gateway_token_file": d.join("token"), "heartbeat": 0.1,
-        "model_labels": [["-c0", " · first card"]],
+        "model_labels": [["-c0", " · first card"]], "model_hidden": ["-cpu"],
         "harnesses": {"local": {"command": ["python3", script], "env": {"FAKE_ACP_LOG": d.join("acp.log")},
                                 "prepare": ["/bin/sh", "-c", format!("echo \"$1\" >> {}", ready.display()), "sh", "{model}"]}},
     }))

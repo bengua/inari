@@ -216,8 +216,9 @@ function usageFor(model) { const f = family(model).id; return snap && (snap.usag
 function pctOf(u) { return u && u.windows && u.windows.length ? Math.max(...u.windows.map((w) => w.used_percent)) : null; }
 function ring(model) { const p = pctOf(usageFor(model)); if (p == null) return null; const r = document.createElement("span"); r.className = "ring"; r.style.setProperty("--p", p); r.style.setProperty("--rc", p > 85 ? "var(--bad)" : p > 60 ? "var(--warn)" : "var(--copper)"); r.innerHTML = "<i></i>"; r.title = Math.round(p) + "% used"; return r; }
 function harnessesOf(node) { const n = snap.nodes.find((x) => x.node_id === node); return (n && n.capabilities && n.capabilities.harnesses) || {}; }
-function harnessModels(node, h) { return (harnessesOf(node)[h] || []); }
-function nodeModels(node) { const n = snap.nodes.find((x) => x.node_id === node); return (n && n.capabilities && n.capabilities.models) || []; }
+// A core may keep some of its models out of the menus (`model_hidden` suffixes): helpers its harness uses on its own.
+function harnessModels(node, h) { const n = snap.nodes.find((x) => x.node_id === node), hide = (n && n.capabilities && n.capabilities.model_hidden) || []; return (harnessesOf(node)[h] || []).filter((m) => !hide.some((suf) => suf && m.endsWith(suf))); }
+function nodeModels(node) { const n = snap.nodes.find((x) => x.node_id === node), hide = (n && n.capabilities && n.capabilities.model_hidden) || []; return ((n && n.capabilities && n.capabilities.models) || []).filter((m) => !hide.some((suf) => suf && m.endsWith(suf))); }
 
 function api(path, body) { const headers = { "Content-Type": "application/json" }; if (pass) headers["X-Inari-Pass"] = pass; else if (token) headers.Authorization = "Bearer " + token; return fetch(path, { method: body ? "POST" : "GET", headers, body: body ? JSON.stringify(body) : undefined }).then((r) => r.json()); }
 function toast(t) { const e = $("toast"); e.textContent = t; e.style.display = "block"; clearTimeout(toast.h); toast.h = setTimeout(() => (e.style.display = "none"), 4200); }

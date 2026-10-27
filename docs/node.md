@@ -61,6 +61,8 @@ are all configuration, and every default is empty.
   the harness's environment, no shell.
 - **Model names.** `"model_labels": [["-c0", " · GPU 0"], ["-x2", " · both GPUs"]]` renames,
   on every page, the models whose id ends with a suffix — to say which card a slot uses, say.
+  `"model_hidden": ["-cpu"]` keeps models out of the menus: helpers the harness uses on its
+  own (its sub-agents), not models to talk to.
 - **Provider kinds.** `openai` (any compatible gateway), `anthropic`, and `demo` (rules
   only, no network).
 - **Sandbox.** `"sandbox": "subprocess"` (default) or `"container"` with `"engine"`.

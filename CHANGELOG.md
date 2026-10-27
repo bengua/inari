@@ -12,7 +12,8 @@ Newest first. An entry says what changed for someone using the thing.
 - **A chosen model is made ready before the turn**: a harness may run a `prepare` command
   (`{model}` replaced by the id) — to load a local model onto its GPU, say — while the thread
   shows *loading the model*; a refusal ends the turn with its reason. `model_labels` renames
-  models by suffix on every page (which GPU a slot uses).
+  models by suffix on every page (which GPU a slot uses); `model_hidden` keeps a harness's own
+  helper models out of the menus.
 - **Choosing the agent and the model is a step of creating a thread**: which agent of that core
   (Claude Code, Gemini CLI, OpenFox…), then which of its models (filterable). Asked by *New
   thread*, by a long press on a core, and before a first message sent without a choice. The model
