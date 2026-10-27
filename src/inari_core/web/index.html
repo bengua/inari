@@ -283,7 +283,7 @@ function render() {
   for (const n of snap.nodes) { const h = (loadHist[n.node_id] = loadHist[n.node_id] || []); h.push((snap.load[n.node_id] || {}).gpu || 0); if (h.length > 40) h.shift(); }
   const agents = Object.entries(snap.agents), busy = agents.filter(([, a]) => a.phase !== "idle").length;
   $("stats").textContent = `${agents.length} agents · ${busy} working`;
-  if (!drag) renderCores(agents);
+  if (!drag && !coreHold) renderCores(agents);
   renderFeed(); renderApprovals(); renderTop(); renderPill(); renderUsageCard(); mascot(); drawOrbParams(snap.mascot);
   if (selected && Date.now() - tlStamp > 1500) refreshDetail(); else if (!selected) { drawChat(); drawComposer(); if (!$("bbody").firstChild) drawBench(); }
 }
@@ -391,9 +391,9 @@ function frame(t) { if (!orbEl || !orbEl.isConnected) return; const ctx = orbCtx
 
 /* ---------- top bar, models, composer ---------- */
 function renderTop() {
-  const a = selected && snap.agents[selected], app = $("app"); app.classList.toggle("nosel", !a); $("ptitle").textContent = a ? (a.title || selected) : "Inari";
+  const a = selected && snap.agents[selected], app = $("app"); app.classList.toggle("nosel", !a); $("ptitle").textContent = a ? (a.title || selected) : composing ? `New thread · ${pendingCore || ""}` : "Inari";
   $("pphase").innerHTML = a ? `<span class="state${["listening", "inference"].includes(a.phase) ? " live" : ""}" style="--c:var(--${{ inference: "copper", listening: "purple", success: "ok", error: "bad" }[a.phase] || "dim"})">${LABEL[a.phase]} <small>on ${esc(a.node)}</small></span>` : "";
-  $("actionsBtn").hidden = !a; const chip = $("modelChip"); chip.hidden = !a; if (a) fillModelChip(chip, a.model); document.body.classList.toggle("open", !!a); placeFox(); drawComposer();
+  $("actionsBtn").hidden = !a; const chip = $("modelChip"); chip.hidden = !a; if (a) fillModelChip(chip, a.model); document.body.classList.toggle("open", !!a || composing); placeFox(); drawComposer();
 }
 function fillModelChip(chip, model) { chip.textContent = ""; chip.append(badge(model, 18)); const n = document.createElement("span"); n.className = "n"; n.textContent = shortModel(model); chip.append(n); const r = ring(model); if (r) chip.append(r); }
 function drawComposer() {
@@ -429,7 +429,7 @@ window.inariShare = (p) => { const names = [];
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition; if (SR) { $("mic").hidden = false; let rec = null; $("mic").onclick = () => { if (rec) { rec.stop(); return; } rec = new SR(); rec.interimResults = false; rec.lang = navigator.language; rec.onresult = (e) => { $("msg").value += (($("msg").value ? " " : "") + e.results[0][0].transcript); }; rec.onend = () => { rec = null; $("mic").classList.remove("on"); }; $("mic").classList.add("on"); rec.start(); }; }
 $("composer").onsubmit = async (e) => { e.preventDefault(); let text = $("msg").value.trim(); if (!text && !attachments.length) return; $("sendBtn").disabled = true;
   try { let id = selected;
-    if (!id) { const core = pendingCore; if (!core) return toast("No core available"); id = (text.split(/\s+/).slice(0, 4).join("-").replace(/[^\w-]+/g, "") || "thread").slice(0, 28) + "-" + (Date.now() % 1000); const made = await api("/api/agent", { thread_id: id, node: core, title: text.slice(0, 40) }); id = made.thread_id || id;
+    if (!id) { const core = pendingCore; if (!core) return toast("No core available"); id = (text.split(/\s+/).slice(0, 4).join("-").replace(/[^\w-]+/g, "") || "thread").slice(0, 28) + "-" + (Date.now() % 1000); const made = await api("/api/agent", { thread_id: id, node: core, title: text.slice(0, 40) }); id = made.thread_id || id; composing = false;
       for (let i = 0; i < 40 && !(snap.agents[id]); i++) await new Promise((r) => setTimeout(r, 150)); if (pendingModel) await api("/api/model", { agent: id, model: pendingModel }); await select(id); }
     const sent = []; for (const f of attachments) if (await sendFile(id, f)) sent.push(f.name); attachments = [];
     $("msg").value = ""; await api("/api/message", { agent: id, text: text.trim(), attachments: sent }); tlStamp = 0; setTimeout(() => { $("thread").scrollTop = $("thread").scrollHeight; }, 60);
@@ -459,8 +459,18 @@ function drawChat() {
     else if (e.kind === "checkpoint") { const [why, ...rest] = e.text.split(": "); const map = { teleport: "Moved between cores", provider_error: "The model failed", harness_error: "The agent stopped", harness_timeout: "The agent took too long", model_refused: "Model not available" }; note(esc(map[why] || "Checkpoint") + (rest.length && why !== "teleport" ? ` — ${esc(rest.join(": ").slice(0, 120))}` : "")); } }
   if (["listening", "inference"].includes(a.phase)) box.insertAdjacentHTML("beforeend", '<div class="msg assistant typing"><i></i><i></i><i></i></div>'); if (atEnd) th.scrollTop = th.scrollHeight;
 }
-$("back").onclick = () => { selected = null; renderTop(); drawChat(); drawBench(); if (snap) renderCores(Object.entries(snap.agents)); };
-$("newThread").onclick = () => { selected = null; renderTop(); drawChat(); drawBench(); if (snap) renderCores(Object.entries(snap.agents)); $("msg").focus(); };
+$("back").onclick = () => { selected = null; composing = false; renderTop(); drawChat(); drawBench(); if (snap) renderCores(Object.entries(snap.agents)); };
+$("newThread").onclick = () => newThreadOn(pendingCore || (snap && snap.ui && snap.ui.self) || "");
+/* A new thread on a given core: the composer opens (on a phone too, where the page only shows with a thread), aimed at it. */
+let composing = false;
+function newThreadOn(node) { selected = null; composing = true; if (node) pendingCore = node; renderTop(); drawChat(); drawBench(); if (snap) renderCores(Object.entries(snap.agents)); drawComposer(); setTimeout(() => $("msg").focus(), 50); if (node) toast(`New thread on ${node}`); }
+/* A long press on a core opens a new thread on it. */
+let coreHold = null;
+$("cores").addEventListener("pointerdown", (e) => { const head = e.target.closest(".chead"); if (!head) return; const node = head.closest(".core").dataset.node, x = e.clientX, y = e.clientY;
+  const stop = () => { clearTimeout(coreHold && coreHold.t); coreHold = null; removeEventListener("pointerup", stop); removeEventListener("pointercancel", stop); removeEventListener("pointermove", far); };
+  const far = (ev) => { if (Math.hypot(ev.clientX - x, ev.clientY - y) > 10) stop(); };
+  coreHold = { t: setTimeout(() => { stop(); swallowUntil = Date.now() + 600; newThreadOn(node); }, 550) };
+  addEventListener("pointerup", stop); addEventListener("pointercancel", stop); addEventListener("pointermove", far); });
 $("searchBtn").onclick = () => { $("search").classList.toggle("on"); $("search").focus(); };
 async function forkNow() { await api("/api/fork", { agent: selected, new_thread: selected + "-fork-" + (Date.now() % 10000), upto: forkAt }); toast(`Forking ${selected}${forkAt ? " at the chosen event" : ""}…`); }
 function doMerge() { const me = snap.agents[selected], others = Object.entries(snap.agents).filter(([id, a]) => id !== selected && a.node === me.node); sheet(`Merge which thread into ${selected}?`, others.map(([id]) => [id, () => api("/api/merge", { target: selected, source: id })]), others.length ? "Both threads must run on the same core." : "No other thread on this core."); }

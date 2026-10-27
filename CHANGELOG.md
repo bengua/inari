@@ -9,6 +9,8 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Added
 
+- **A long press on a core opens a new thread on it**; *New thread* now shows the composer on a
+  phone too (the page only showed with a thread open).
 - **Delete a thread** from the long-press menu (owner only): it leaves Inari and is kept in the
   core's `trash/` folder, never brought back by a restart (`/api/delete`).
 - **Gestures**: drag a thread onto another to merge them (moved first if they live on two cores);
