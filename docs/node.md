@@ -102,3 +102,22 @@ twice is ignored. When the last part arrives the file goes into the agent's work
 and `POST /api/message` with `attachments: [path, …]` sends it to the model with the
 text (Rust node): images as image content to agents that accept it, other files as
 links into the workspace.
+
+## Harness updates (Rust node)
+
+A harness may say where it comes from:
+
+```json
+"claude": {"command": ["<path to claude-agent-acp>"],
+           "update": {"npm": "@zed-industries/claude-agent-acp", "prefix": "<npm global prefix>"}},
+"openfox": {"command": ["<path to openfox-acp>"],
+            "update": {"npm": "openfox", "restart": ["systemctl", "--user", "restart", "openfox.service"]}}
+```
+
+The node reads the installed version from `<prefix>/lib/node_modules/<package>/package.json`,
+asks `npm view` for the latest at start and every six hours, and announces both in its
+capabilities (`updates`). `POST /api/update {node, harness}` installs the latest version
+(`npm install -g --prefix …`) and then runs `restart`, if any; `POST /api/update/check`
+asks every node to look again. Progress is published on `node.<id>.update.state` and shown
+in the page's update badge. An ACP agent is started for each turn, so the next message
+already runs the new version; `restart` is for a server the harness talks to.

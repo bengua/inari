@@ -60,6 +60,9 @@ button,input,textarea,select { font:inherit; color:inherit; }
 .mb { width:20px; height:20px; border-radius:6px; display:inline-grid; place-items:center; font:700 10px/1 var(--sans); color:#fff; flex:none; overflow:hidden; } .mb img { width:100%; height:100%; object-fit:contain; background:#fff; border-radius:6px; padding:2px; }
 .ring { --p:0; width:20px; height:20px; border-radius:50%; flex:none; background:conic-gradient(var(--rc,var(--copper)) calc(var(--p)*1%), var(--hair) 0); display:inline-grid; place-items:center; } .ring i { width:14px; height:14px; border-radius:50%; background:var(--panel-solid); display:block; }
 #foot { display:grid; gap:8px; } #bottom { display:flex; align-items:center; gap:6px; } #pill { margin-left:auto; display:flex; gap:6px; align-items:center; padding:4px 8px; border-radius:999px; background:var(--raise); border:1px solid var(--hair); cursor:pointer; }
+#usageCard { padding:8px 10px 4px; border-radius:12px; background:var(--raise); border:1px solid var(--hair); max-height:42vh; overflow:auto; } #usageCard header { display:flex; align-items:center; gap:8px; font-size:13px; } #usageCard header b { font-weight:600; } #usageCard header .btn { margin-left:auto; } #usageCard .urow:first-of-type { border-top:0; }
+#usageBtn[aria-expanded="true"] { background:var(--raise); border-color:var(--hair); } #pill .dl { width:14px; height:14px; color:var(--dim); } #pill.busy .dl { animation:spin 1s linear infinite; } @keyframes spin { to { transform:rotate(360deg); } }
+.uprow { display:grid; grid-template-columns:auto 1fr auto; gap:4px 8px; align-items:center; padding:8px 0; border-top:1px solid var(--hair); } .uprow:first-of-type { border-top:0; } .uprow small { color:var(--dim); } .uprow .err { grid-column:1 / -1; color:var(--bad); font-size:11.5px; white-space:pre-wrap; } .uprow .note { grid-column:1 / -1; color:var(--faint); font-size:11.5px; }
 #brandfoot { color:var(--faint); font-size:12px; padding:0 4px; } .pop { position:fixed; z-index:75; min-width:260px; max-width:360px; padding:12px; display:none; background:var(--panel-solid); } .pop.open { display:block; }
 .pop h3 { margin:0 0 8px; font-size:13px; color:var(--dim); font-weight:600; } .urow { display:grid; gap:4px; padding:8px 0; border-top:1px solid var(--hair); } .urow:first-of-type { border-top:0; } .uhead { display:flex; align-items:center; gap:8px; } .uhead small { margin-left:auto; color:var(--dim); }
 .meter { height:6px; background:var(--hair); border-radius:6px; overflow:hidden; } .meter i { display:block; height:100%; background:var(--copper); } .meter.hot i { background:var(--bad); } .meter.warm i { background:var(--warn); } .urow .rs { color:var(--faint); font-size:11.5px; }
@@ -121,7 +124,8 @@ pre.code span.l::before { counter-increment:l; content:counter(l); position:abso
     <div id="hits" class="glass"></div>
     <div id="cores"></div>
     <div id="foot"><div id="approvals"></div><div id="feed" aria-label="Activity"></div>
-      <div id="bottom"><button class="btn icon" id="gear" title="Settings" aria-label="Settings" data-icon="gear"></button><button class="btn icon" id="usageBtn" title="Usage and quotas" aria-label="Usage" data-icon="bars"></button><button id="pill" title="Provider quotas" aria-label="Provider quotas"></button></div>
+      <section id="usageCard" hidden aria-label="Provider usage"><header><span data-icon="bars"></span><b>Provider usage</b><button class="btn icon small" id="usageFold" title="Collapse provider usage" aria-label="Collapse provider usage" data-icon="chevron"></button></header><div id="usageBody"></div></section>
+      <div id="bottom"><button class="btn icon" id="gear" title="Settings" aria-label="Settings" data-icon="gear"></button><button class="btn icon" id="usageBtn" title="Provider usage" aria-label="Provider usage" aria-expanded="false" data-icon="bars"></button><button id="pill" title="Harness updates" aria-label="Harness updates"></button></div>
       <div id="brandfoot"></div></div>
   </aside>
   <section id="main">
@@ -155,6 +159,7 @@ const PATHS = {
   code: '<path d="m16 18 6-6-6-6M8 6l-6 6 6 6"/>', doc: '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z"/><path d="M14 3v6h6M8 13h8M8 17h5"/>',
   tool: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-.6-.6-2.4Z"/>', terminal: '<path d="m4 17 6-6-6-6M12 19h8"/>',
   move: '<path d="M5 12h14M13 6l6 6-6 6"/>', fork: '<circle cx="6" cy="5" r="2"/><circle cx="18" cy="5" r="2"/><circle cx="12" cy="19" r="2"/><path d="M6 7v2a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3V7M12 12v5"/>',
+  download: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>', spinner: '<path d="M12 3a9 9 0 1 0 9 9"/>',
   merge: '<circle cx="6" cy="19" r="2"/><circle cx="6" cy="5" r="2"/><circle cx="18" cy="12" r="2"/><path d="M6 7v10M6 7a7 7 0 0 0 10 5"/>',
 };
 const icon = (n) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${PATHS[n] || ""}</svg>`;
@@ -222,7 +227,7 @@ function render() {
   const agents = Object.entries(snap.agents), busy = agents.filter(([, a]) => a.phase !== "idle").length;
   $("stats").textContent = `${agents.length} agents · ${busy} working`;
   if (!drag || !drag.active) renderCores(agents);
-  renderFeed(); renderApprovals(); renderTop(); renderPill(); mascot(); drawOrbParams(snap.mascot);
+  renderFeed(); renderApprovals(); renderTop(); renderPill(); renderUsageCard(); mascot(); drawOrbParams(snap.mascot);
   if (selected && Date.now() - tlStamp > 1500) refreshDetail(); else if (!selected) { drawChat(); drawComposer(); if (!$("bbody").firstChild) drawBench(); }
 }
 const inFlight = (mv) => mv && !["committed", "rolled_back"].includes(mv.state);
@@ -259,20 +264,42 @@ function renderApprovals() {
   for (const r of snap.approvals) { const d = document.createElement("div"); d.className = "ask glass"; d.setAttribute("role", "alert"); d.innerHTML = '<strong>Approve this?</strong><code></code><div class="row2"><button class="btn">Deny</button><button class="btn go">Approve</button></div>';
     d.querySelector("code").textContent = r.command + " · " + r.agent_id; const [no, yes] = d.querySelectorAll("button"); no.onclick = () => api("/api/approval", { request_id: r.request_id, approved: false }); yes.onclick = () => api("/api/approval", { request_id: r.request_id, approved: true }); box.append(d); }
 }
+/* Harness updates, as the old sidebar badge: a download mark and the logos of what is out of date, on every core. */
+const HARNESS = { claude: ["claude", "Claude Code"], gemini: ["gemini", "Gemini CLI"], openfox: ["local", "OpenFox"] };
+function harnessName(h) { return (HARNESS[h] || [h, h])[1]; }
+function updateEntries() { const out = [], jobs = snap.update_jobs || {};
+  for (const n of snap.nodes || []) for (const [h, u] of Object.entries((n.capabilities || {}).updates || {})) { const job = jobs[n.node_id + "/" + h], v = { ...u, ...(job || {}) }; out.push({ node: n.node_id, harness: h, ...v }); }
+  return out; }
 function renderPill() {
-  const p = $("pill"); p.textContent = ""; const items = (snap.usage || []).slice(0, 5);
-  for (const u of items) { const b = badge(u.provider_id, 18), pc = pctOf(u); if (pc != null) b.title = `${u.name} · ${Math.round(pc)}%`; p.append(b); if (pc != null) { const r = document.createElement("span"); r.className = "ring"; r.style.setProperty("--p", pc); r.style.setProperty("--rc", pc > 85 ? "var(--bad)" : pc > 60 ? "var(--warn)" : "var(--copper)"); r.innerHTML = "<i></i>"; p.append(r); } }
-  p.style.display = items.length ? "flex" : "none";
+  const p = $("pill"), all = updateEntries(), stale = all.filter((e) => e.available || e.state === "running" || e.state === "failed"); p.textContent = "";
+  p.classList.toggle("busy", all.some((e) => e.state === "running")); p.insertAdjacentHTML("beforeend", `<svg class="i dl" viewBox="0 0 24 24" aria-hidden="true">${PATHS[all.some((e) => e.state === "running") ? "spinner" : "download"]}</svg>`);
+  for (const h of [...new Set(stale.map((e) => e.harness))]) { const b = badge((HARNESS[h] || [h])[0], 16); b.title = harnessName(h); p.append(b); }
+  const names = [...new Set(stale.map((e) => harnessName(e.harness)))]; p.title = names.length ? names.join(", ") + (names.length > 1 ? " updates available" : " update available") : "Harness updates";
+  p.style.display = stale.length ? "flex" : "none"; if ($("pop").classList.contains("open") && $("pop").dataset.for === "pill") updatesPanel($("pop"), true);
 }
+function updatesPanel(pop, refresh) { if (refresh) pop.innerHTML = ""; pop.insertAdjacentHTML("beforeend", "<h3>Harness updates</h3>"); const all = updateEntries(), shown = all.filter((e) => e.available || e.state === "running" || e.state === "failed" || e.state === "done");
+  if (!shown.length) pop.insertAdjacentHTML("beforeend", '<div class="empty">Every harness is up to date.</div>');
+  for (const e of shown) { const row = document.createElement("div"); row.className = "uprow"; row.append(badge((HARNESS[e.harness] || [e.harness])[0], 20));
+    row.insertAdjacentHTML("beforeend", `<div><b>${esc(harnessName(e.harness))}</b> <small>${esc(e.node)}</small><br><small>${esc(e.current || "?")}${e.latest && e.latest !== e.current ? " → " + esc(e.latest) : ""}</small></div>`);
+    const b = document.createElement("button"); b.className = "btn small go"; b.textContent = e.state === "running" ? "Updating…" : e.state === "done" && !e.available ? "Updated" : e.state === "failed" ? "Retry" : "Update"; b.disabled = e.state === "running" || (e.state === "done" && !e.available);
+    b.onclick = () => { b.disabled = true; b.textContent = "Updating…"; api("/api/update", { node: e.node, harness: e.harness }); }; row.append(b);
+    if (e.state === "failed" && e.error) row.insertAdjacentHTML("beforeend", `<div class="err">${esc(e.error)}</div>`);
+    if (e.state === "done" && !e.available) row.insertAdjacentHTML("beforeend", '<div class="note">In use from the next message.</div>'); pop.append(row); }
+  const row = document.createElement("div"); row.className = "row2"; row.style.marginTop = "8px"; const chk = document.createElement("button"); chk.className = "btn small"; chk.textContent = "Check now"; chk.onclick = () => { chk.disabled = true; chk.textContent = "Checking…"; api("/api/update/check", {}); }; row.append(chk);
+  const idle = shown.filter((e) => e.available && e.state !== "running"); if (idle.length > 1) { const allb = document.createElement("button"); allb.className = "btn small go"; allb.textContent = "Update all"; allb.onclick = () => { allb.disabled = true; for (const e of idle) api("/api/update", { node: e.node, harness: e.harness }); }; row.append(allb); }
+  pop.append(row); }
+/* Provider usage opens in the sidebar, as the old footer card did, not over the page. */
+function renderUsageCard() { const open = store.get("usageOpen", false); $("usageCard").hidden = !open; $("usageBtn").setAttribute("aria-expanded", String(open)); if (open) { const body = $("usageBody"); body.textContent = ""; usageRows(body); } }
 function openPop(anchor, build) { const pop = $("pop"); if (pop.classList.contains("open") && pop.dataset.for === anchor.id) { pop.classList.remove("open"); return; } pop.innerHTML = ""; build(pop); pop.dataset.for = anchor.id; const r = anchor.getBoundingClientRect(); pop.classList.add("open");
   pop.style.left = Math.max(8, Math.min(r.left, innerWidth - pop.offsetWidth - 8)) + "px"; pop.style.top = Math.max(8, r.top - pop.offsetHeight - 8 > 8 ? r.top - pop.offsetHeight - 8 : r.bottom + 8) + "px"; }
-addEventListener("pointerdown", (e) => { const pop = $("pop"); if (pop.classList.contains("open") && !pop.contains(e.target) && !e.target.closest("#gear,#usageBtn,#pill,#modelChip,#pickModel,#coreChip,#actionsBtn")) pop.classList.remove("open"); });
-function usagePanel(pop) { pop.insertAdjacentHTML("beforeend", "<h3>Usage and quotas</h3>"); const items = snap.usage || [];
+addEventListener("pointerdown", (e) => { const pop = $("pop"); if (pop.classList.contains("open") && !pop.contains(e.target) && !e.target.closest("#gear,#pill,#modelChip,#pickModel,#coreChip,#actionsBtn")) pop.classList.remove("open"); });
+function usageRows(pop) { const items = snap.usage || [];
   if (!items.length) pop.insertAdjacentHTML("beforeend", '<div class="empty">No quota source is configured. Local models have no quota.</div>');
   for (const u of items) { const row = document.createElement("div"); row.className = "urow"; const head = document.createElement("div"); head.className = "uhead"; head.append(badge(u.provider_id, 22)); head.insertAdjacentHTML("beforeend", `<b>${esc(u.name)}</b><small>${esc(u.plan || (u.status === "unlimited" ? "no quota" : u.status))}</small>`); row.append(head);
     for (const w of u.windows) { const hot = w.used_percent > 85 ? " hot" : w.used_percent > 60 ? " warm" : ""; row.insertAdjacentHTML("beforeend", `<div class="uhead"><span>${esc(w.label)}</span><small>${Math.round(w.used_percent)}%</small></div><div class="meter${hot}"><i style="width:${Math.min(100, w.used_percent)}%"></i></div>${w.resets_at ? `<div class="rs">resets ${new Date(w.resets_at).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" })}</div>` : ""}`); }
     pop.append(row); } }
-$("usageBtn").onclick = () => openPop($("usageBtn"), usagePanel); $("pill").onclick = () => openPop($("pill"), usagePanel);
+$("usageBtn").onclick = () => { store.set("usageOpen", !store.get("usageOpen", false)); renderUsageCard(); }; $("usageFold").onclick = () => { store.set("usageOpen", false); renderUsageCard(); };
+$("pill").onclick = () => openPop($("pill"), updatesPanel);
 $("gear").onclick = () => openPop($("gear"), (pop) => { pop.insertAdjacentHTML("beforeend", "<h3>Appearance</h3>"); const seg = document.createElement("div"); seg.className = "seg"; for (const t of ["auto", "light", "dark"]) { const b = document.createElement("button"); b.className = "btn small" + (store.get("theme", "auto") === t ? " on" : ""); b.textContent = t; b.onclick = () => { theme(t); pop.classList.remove("open"); }; seg.append(b); } pop.append(seg);
   pop.insertAdjacentHTML("beforeend", "<h3 style='margin-top:12px'>Session</h3>"); const out = document.createElement("button"); out.className = "btn small"; out.textContent = "Forget the access token"; out.onclick = () => { sessionStorage.removeItem("inari-token"); location.reload(); }; pop.append(out); });
 

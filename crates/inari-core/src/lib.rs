@@ -16,5 +16,6 @@ pub mod mesh;
 pub mod node;
 pub mod rpc;
 pub mod teleport;
+pub mod updates;
 pub mod usage;
 pub mod wire;
