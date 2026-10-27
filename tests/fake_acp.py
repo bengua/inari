@@ -149,6 +149,8 @@ for line in sys.stdin:
                 },
             )
         else:
+            # "long": a reply far longer than any summary, ending on a known word
+            tail = ("word " * 300).strip() if "long" in last else text.splitlines()[-1][:60]
             update(
                 sid,
                 {
@@ -160,8 +162,7 @@ for line in sys.stdin:
                 sid,
                 {
                     "sessionUpdate": "agent_message_chunk",
-                    # "long": a reply far longer than any summary, ending on a known word
-                    "content": {"type": "text", "text": ("word " * 300).strip() if "long" in last else text.splitlines()[-1][:60]},
+                    "content": {"type": "text", "text": tail},
                 },
             )
         send({"jsonrpc": "2.0", "id": ident, "result": {"stopReason": "end_turn"}})
