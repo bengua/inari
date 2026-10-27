@@ -15,6 +15,7 @@ pub mod gateway;
 pub mod host;
 pub mod mesh;
 pub mod node;
+pub mod passes;
 pub mod rpc;
 pub mod teleport;
 pub mod updates;

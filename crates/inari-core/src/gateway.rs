@@ -41,6 +41,34 @@ struct State {
     logo_cache: HashMap<String, (&'static str, Vec<u8>)>,
     /// Harness updates in progress or just finished, by "node/harness".
     update_jobs: BTreeMap<String, Value>,
+    /// The core passes the hub keeps (each known by the hash of its token).
+    passes: Vec<Value>,
+}
+
+/// Who is asking: the core's owner, or the holder of a pass (only its own threads).
+#[derive(Clone)]
+pub enum Access {
+    Owner,
+    Guest(Value),
+}
+
+impl Access {
+    fn pass_id(&self) -> Option<&str> {
+        match self {
+            Access::Owner => None,
+            Access::Guest(p) => p.get("id").and_then(Value::as_str),
+        }
+    }
+
+    /// The pass's threads are named after it: `<pass id>-<name>`.
+    pub fn owns(&self, agent: &str) -> bool {
+        match self.pass_id() {
+            None => true,
+            Some(id) => agent
+                .strip_prefix(id)
+                .is_some_and(|rest| rest.starts_with('-')),
+        }
+    }
 }
 
 /// What a gateway is given: its access token, the device key that signs approvals,
@@ -67,7 +95,7 @@ pub struct Gateway {
     sources: Vec<Source>,
     uploads: Option<UploadStore>,
     state: Mutex<State>,
-    clients: broadcast::Sender<String>,
+    clients: broadcast::Sender<()>,
     pub usage_interval: Duration,
 }
 
@@ -283,6 +311,14 @@ impl Gateway {
                 .retain(|n| n.get("node_id").and_then(Value::as_str) != Some(node.as_str()));
         });
         self.on("teleport.result", |_, st, m| st.results.push(m.payload));
+        self.on("mesh.passes", |_, st, m| {
+            st.passes = m
+                .payload
+                .get("passes")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+        });
         self.on("node.*.update.state", |_, st, m| {
             let key = format!("{}/{}", s(&m.payload, "node"), s(&m.payload, "harness"));
             st.update_jobs.insert(key, m.payload);
@@ -369,8 +405,72 @@ impl Gateway {
 
     fn push(&self) {
         if self.clients.receiver_count() > 0 {
-            let _ = self.clients.send(self.snapshot().to_string());
+            let _ = self.clients.send(());
         }
+    }
+
+    /// What one client may see: everything for the owner (with the passes, never their
+    /// token hashes); for a pass, its own threads, the cores and its allowed harnesses only.
+    pub fn snapshot_for(&self, access: &Access) -> Value {
+        let mut snap = self.snapshot();
+        let passes: Vec<Value> = self
+            .state
+            .lock()
+            .expect("not poisoned")
+            .passes
+            .iter()
+            .map(|p| {
+                let mut p = p.clone();
+                if let Some(o) = p.as_object_mut() {
+                    o.remove("token_sha");
+                }
+                p
+            })
+            .collect();
+        let Access::Guest(pass) = access else {
+            snap["passes"] = json!(passes);
+            return snap;
+        };
+        let allowed: Vec<String> = pass
+            .get("harnesses")
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(|h| h.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if let Some(agents) = snap["agents"].as_object_mut() {
+            agents.retain(|id, _| access.owns(id));
+        }
+        if let Some(list) = snap["approvals"].as_array_mut() {
+            list.retain(|r| access.owns(r.get("agent_id").and_then(Value::as_str).unwrap_or("")));
+        }
+        if let Some(list) = snap["notices"].as_array_mut() {
+            list.retain(|n| access.owns(n.get("agent").and_then(Value::as_str).unwrap_or("")));
+        }
+        if let Some(nodes) = snap["nodes"].as_array_mut() {
+            for n in nodes.iter_mut() {
+                let harnesses: Map<String, Value> = n
+                    .pointer("/capabilities/harnesses")
+                    .and_then(Value::as_object)
+                    .map(|h| {
+                        h.iter()
+                            .filter(|(k, _)| allowed.contains(k))
+                            .map(|(k, v)| (k.clone(), v.clone()))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                n["capabilities"] = json!({"harnesses": harnesses});
+            }
+        }
+        for k in ["moves", "update_jobs"] {
+            snap[k] = json!({});
+        }
+        snap["results"] = json!([]);
+        snap["usage"] = json!([]);
+        snap["ui"]["pass"] = json!({"id": pass["id"], "name": pass["name"], "role": pass["role"], "harnesses": allowed});
+        snap
     }
 
     pub fn search(&self, query: &str, agent: &str) -> Vec<Value> {
@@ -493,6 +593,32 @@ impl Gateway {
         origin_ok && site_ok
     }
 
+    /// Who the request comes from. A pass presented is a guest or nothing: it never falls
+    /// back to the owner's access, whatever else the request carries.
+    pub fn access_of(&self, pass_token: Option<&str>, owner: bool) -> Option<Access> {
+        if let Some(token) = pass_token {
+            let hash = crate::passes::token_hash(token);
+            let st = self.state.lock().expect("not poisoned");
+            return st
+                .passes
+                .iter()
+                .find(|p| p["token_sha"] == hash.as_str() && crate::passes::valid(p))
+                .cloned()
+                .map(Access::Guest);
+        }
+        owner.then_some(Access::Owner)
+    }
+
+    fn access(&self, r: &Request) -> Option<Access> {
+        let pass = r
+            .headers
+            .get("x-inari-pass")
+            .or_else(|| r.query.get("pass"))
+            .map(String::as_str)
+            .filter(|t| !t.is_empty());
+        self.access_of(pass, pass.is_none() && self.authorized(r))
+    }
+
     fn authorized(&self, r: &Request) -> bool {
         if self.local_page(r) {
             return true;
@@ -601,15 +727,25 @@ impl Gateway {
                     .await;
             }
         }
-        if !self.authorized(&r) {
+        let Some(access) = self.access(&r) else {
             return send_json(w, 401, &json!({"error": "unauthorized"})).await;
-        }
+        };
         let parts: Vec<&str> = r.path.split('/').collect(); // "", "api", "agent", id, what
         if get && r.path == "/events" {
-            return self.events(w).await;
+            return self.events(w, access).await;
+        }
+        if get && r.path == "/api/whoami" {
+            let me = match &access {
+                Access::Owner => json!({"role": "owner"}),
+                Access::Guest(p) => json!({"role": p["role"], "pass": p["id"], "name": p["name"]}),
+            };
+            return send_json(w, 200, &me).await;
         }
         if get && parts.len() == 5 && parts[1] == "api" && parts[2] == "agent" {
             let agent = parts[3].to_string();
+            if !access.owns(&agent) {
+                return send_json(w, 403, &json!({"error": "not your thread"})).await;
+            }
             return match parts[4] {
                 "timeline" => {
                     let events = self
@@ -652,7 +788,12 @@ impl Gateway {
         if get && r.path == "/api/search" {
             let q = r.query.get("q").cloned().unwrap_or_default();
             let agent = r.query.get("agent").cloned().unwrap_or_default();
-            return send_json(w, 200, &json!({"hits": self.search(&q, &agent)})).await;
+            let hits: Vec<Value> = self
+                .search(&q, &agent)
+                .into_iter()
+                .filter(|h| access.owns(h.get("agent").and_then(Value::as_str).unwrap_or("")))
+                .collect();
+            return send_json(w, 200, &json!({"hits": hits})).await;
         }
         if r.method == "POST" {
             // only JSON: a form or text/plain POST is what another site could send unasked
@@ -668,11 +809,98 @@ impl Gateway {
                     Ok(v @ Value::Object(_)) => v,
                     _ => return send_json(w, 400, &json!({"error": "bad request"})).await,
                 };
+            let data = match self.guest_rules(&access, &r.path, data) {
+                Ok(d) => d,
+                Err((status, why)) => return send_json(w, status, &json!({"error": why})).await,
+            };
             if let Some((status, reply)) = self.post(&r.path, &data).await {
                 return send_json(w, status, &reply).await;
             }
         }
         send_json(w, 404, &json!({"error": "not found"})).await
+    }
+
+    /// What a pass holder may do, and how its requests are bound to its pass. The owner
+    /// passes through unchanged.
+    fn guest_rules(
+        &self,
+        access: &Access,
+        path: &str,
+        mut d: Value,
+    ) -> Result<Value, (u16, &'static str)> {
+        let Access::Guest(pass) = access else {
+            return Ok(d);
+        };
+        let id = pass["id"].as_str().unwrap_or("");
+        let allowed: Vec<&str> = pass
+            .get("harnesses")
+            .and_then(Value::as_array)
+            .map(|a| a.iter().filter_map(Value::as_str).collect())
+            .unwrap_or_default();
+        let harness_ok = |h: &str| allowed.contains(&h);
+        match path {
+            "/api/agent" => {
+                let name: String = s(&d, "thread_id")
+                    .chars()
+                    .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+                    .take(40)
+                    .collect();
+                let name = if name.is_empty() {
+                    crate::wire::random_hex(4)
+                } else {
+                    name
+                };
+                d["thread_id"] = json!(format!(
+                    "{id}-{}",
+                    name.trim_start_matches(&format!("{id}-"))
+                ));
+                let harness = s(&d, "harness");
+                let harness = if harness.is_empty() {
+                    allowed.first().copied().unwrap_or("").to_string()
+                } else {
+                    harness
+                };
+                if !harness_ok(&harness) {
+                    return Err((403, "this harness is not allowed by the pass"));
+                }
+                d["harness"] = json!(harness);
+                d["pass"] = json!(id);
+                Ok(d)
+            }
+            "/api/message" | "/api/upload" | "/api/model" => {
+                if access.owns(&s(&d, "agent")) {
+                    Ok(d)
+                } else {
+                    Err((403, "not your thread"))
+                }
+            }
+            "/api/harness" => {
+                if access.owns(&s(&d, "agent")) && harness_ok(&s(&d, "harness")) {
+                    Ok(d)
+                } else {
+                    Err((403, "not allowed by the pass"))
+                }
+            }
+            "/api/approval" => {
+                // under supervision the owner answers the agents' requests, not the guest
+                let req = self
+                    .state
+                    .lock()
+                    .expect("not poisoned")
+                    .approvals
+                    .get(&s(&d, "request_id"))
+                    .cloned();
+                let mine = req.is_some_and(|r| {
+                    access.owns(r.get("agent_id").and_then(Value::as_str).unwrap_or(""))
+                });
+                if mine && pass["role"] == "collaboration" {
+                    Ok(d)
+                } else {
+                    Err((403, "the core's owner answers this"))
+                }
+            }
+            _ => Err((403, "not with a pass")),
+        }
     }
 
     /// The actions; None for an unknown path, 400 when a field is missing.
@@ -733,14 +961,14 @@ impl Gateway {
             }
             "/api/agent" => {
                 let mut p = Map::new();
-                for k in ["thread_id", "node", "harness"] {
+                for k in ["thread_id", "node", "harness", "pass"] {
                     if let Some(v) = d.get(k) {
                         p.insert(k.into(), v.clone());
                     }
                 }
                 p.insert("title".into(), json!(s(d, "title")));
                 self.bus.publish("agent.create", Value::Object(p));
-                ok
+                Some((200, json!({"ok": true, "thread_id": s(d, "thread_id")})))
             }
             "/api/message" => {
                 if !need(&["agent", "text"]) {
@@ -771,6 +999,25 @@ impl Gateway {
                     "agent.merge",
                     json!({"target": s(d, "target"), "source": s(d, "source")}),
                 );
+                ok
+            }
+            "/api/pass" => {
+                let name: String = s(d, "name").trim().chars().take(40).collect();
+                let role = s(d, "role");
+                if name.is_empty() || !crate::passes::ROLES.contains(&role.as_str()) {
+                    return bad;
+                }
+                let (id, token) = (crate::wire::random_hex(3), crate::enroll::new_code());
+                self.bus.publish("pass.create", json!({"id": id, "name": name, "role": role,
+                    "token_sha": crate::passes::token_hash(&token), "harnesses": d.get("harnesses").cloned().unwrap_or(json!([])),
+                    "until": d.get("until").and_then(Value::as_f64).unwrap_or(0.0)}));
+                Some((200, json!({"id": id, "token": token})))
+            }
+            "/api/pass/revoke" => {
+                if !need(&["id"]) {
+                    return bad;
+                }
+                self.bus.publish("pass.revoke", json!({"id": s(d, "id")}));
                 ok
             }
             "/api/invite" => {
@@ -921,16 +1168,17 @@ impl Gateway {
         }
     }
 
-    async fn events(&self, w: &mut TcpStream) -> std::io::Result<()> {
+    async fn events(&self, w: &mut TcpStream, access: Access) -> std::io::Result<()> {
         let mut rx = self.clients.subscribe();
         w.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\nConnection: keep-alive\r\n\r\n").await?;
-        w.write_all(format!("data: {}\n\n", self.snapshot()).as_bytes())
+        w.write_all(format!("data: {}\n\n", self.snapshot_for(&access)).as_bytes())
             .await?;
         w.flush().await?;
         loop {
             let frame = match tokio::time::timeout(Duration::from_secs(15), rx.recv()).await {
-                Ok(Ok(text)) => format!("data: {text}\n\n"),
-                Ok(Err(broadcast::error::RecvError::Lagged(_))) => continue,
+                Ok(Ok(())) | Ok(Err(broadcast::error::RecvError::Lagged(_))) => {
+                    format!("data: {}\n\n", self.snapshot_for(&access))
+                }
                 Ok(Err(broadcast::error::RecvError::Closed)) => return Ok(()),
                 Err(_) => ": keep-alive\n\n".to_string(),
             };

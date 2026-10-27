@@ -866,6 +866,11 @@ impl Runner {
         Ok(e)
     }
 
+    /// Set one label on an agent's capsule (its pass, say).
+    pub fn label(&self, agent: &str, key: &str, value: &str) -> Result<(), String> {
+        self.relabel(agent, &[(key, value)])
+    }
+
     fn relabel(&self, agent: &str, labels: &[(&str, &str)]) -> Result<(), String> {
         let path = self.host.agents.join(agent);
         let capsule = io::load(&path).map_err(|e| e.to_string())?;
