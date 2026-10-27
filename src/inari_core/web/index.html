@@ -187,7 +187,7 @@ const PATHS = {
 };
 const icon = (n) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${PATHS[n] || ""}</svg>`;
 document.querySelectorAll("[data-icon]").forEach((e) => e.insertAdjacentHTML("afterbegin", icon(e.dataset.icon)));
-const GLYPH = {idle:"·", listening:"◐", inference:"⟳", success:"✓", error:"!"}, LABEL = {idle:"idle", listening:"listening", inference:"working", success:"done", error:"error"};
+const GLYPH = {idle:"·", listening:"◐", loading:"⇣", inference:"⟳", success:"✓", error:"!"}, LABEL = {idle:"idle", listening:"listening", loading:"loading the model", inference:"working", success:"done", error:"error"};
 const STEPS = ["planned","frozen","offered","transferred","verified","ready","committing","committed"];
 const $ = (id) => document.getElementById(id), esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const store = { get: (k, d) => { try { return JSON.parse(localStorage.getItem("inari-" + k)) ?? d; } catch (e) { return d; } }, set: (k, v) => { try { localStorage.setItem("inari-" + k, JSON.stringify(v)); } catch (e) {} } };
@@ -202,7 +202,9 @@ const loadHist = {}, shut = store.get("shut", {}), feed = [], seen = new Set(); 
 /* ---------- families, badges, quotas ---------- */
 const FAMILIES = [["claude","claude|anthropic|sonnet|opus|haiku","#d97757","C"],["openai","gpt|codex|^o\\d|openai","#10a37f","O"],["gemini","gemini","#4285f4","G"],["qwen","qwen|q3\\.|q2\\.|heretic|rvn|opus-27b","#6b4fbb","Q"],["gemma","gemma|g4-","#1a73e8","g"],["llama","llama","#0a66c2","L"],["mistral","mistral|codestral|devstral|magistral","#ff7000","M"],["glm","glm|zhipu|umans","#2c5bff","Z"],["kimi","kimi|moonshot","#16a085","K"],["deepseek","deepseek","#4d6bfe","D"],["hammer","hammer|coderfim","#b8612a","H"]];
 function family(model) { const m = String(model || "").toLowerCase(); for (const [id, re, c, g] of FAMILIES) if (new RegExp(re).test(m)) return { id, c, g }; return { id: "local", c: "#8a8494", g: "·" }; }
-const shortModel = (m) => String(m || "").replace(/^turnstile\//, "").replace(/^[^/]+\//, "") || "default model";
+// Each core may name its models (`model_labels`: [suffix, label] pairs), e.g. which GPU a slot loads on.
+function modelLabels() { return snap ? snap.nodes.flatMap((n) => (n.capabilities && n.capabilities.model_labels) || []) : []; }
+const shortModel = (m) => { let s = String(m || "").replace(/^turnstile\//, "").replace(/^[^/]+\//, ""); for (const [suf, label] of modelLabels()) if (suf && s.endsWith(suf)) { s = s.slice(0, -suf.length) + label; break; } return s || "default model"; };
 function badge(model, size) {
   const f = family(model), el = document.createElement("span"); el.className = "mb"; if (size) { el.style.width = el.style.height = size + "px"; }
   const hasLogo = snap && (snap.usage || []).some((u) => u.provider_id === f.id && u.logo);
@@ -379,7 +381,7 @@ function mountFox() {
 }
 function mascot() {
   mountFox(); if (!foxReady) return; const phases = Object.values(snap.agents).map((a) => a.phase), sel = selected && snap.agents[selected], errors = phases.filter((p) => p === "error").length;
-  const activity = snap.approvals.length ? "waiting" : phases.some((p) => p === "inference" || p === "listening") ? "working" : "idle"; const f = family((sel && sel.model) || "").id;
+  const activity = snap.approvals.length ? "waiting" : phases.some((p) => p === "inference" || p === "loading" || p === "listening") ? "working" : "idle"; const f = family((sel && sel.model) || "").id;
   const harness = f === "claude" ? "claude" : f === "kimi" ? "kimi" : "local"; const st = { activity, harness, health: Math.max(20, 100 - errors * 20) }, key = JSON.stringify(st); if (key !== foxLast) { fox("state", st); foxLast = key; }
 }
 const COPPER = "#e48a46"; let orbCtx = null, orbEl = null, P = { colour: COPPER, pulse_hz: .25, turbulence: 0, glow: .2 }, cur = { ...P };
@@ -394,7 +396,7 @@ function frame(t) { if (!orbEl || !orbEl.isConnected) return; const ctx = orbCtx
 /* ---------- top bar, models, composer ---------- */
 function renderTop() {
   const a = selected && snap.agents[selected], app = $("app"); app.classList.toggle("nosel", !a); $("ptitle").textContent = a ? (a.title || selected) : composing ? `New thread · ${pendingCore || ""}` : "Inari";
-  $("pphase").innerHTML = a ? `<span class="state${["listening", "inference"].includes(a.phase) ? " live" : ""}" style="--c:var(--${{ inference: "copper", listening: "purple", success: "ok", error: "bad" }[a.phase] || "dim"})">${LABEL[a.phase]} <small>on ${esc(a.node)}</small></span>` : "";
+  $("pphase").innerHTML = a ? `<span class="state${["listening", "loading", "inference"].includes(a.phase) ? " live" : ""}" style="--c:var(--${{ inference: "copper", loading: "copper", listening: "purple", success: "ok", error: "bad" }[a.phase] || "dim"})">${LABEL[a.phase]} <small>on ${esc(a.node)}</small></span>` : "";
   $("actionsBtn").hidden = !a; const chip = $("modelChip"); chip.hidden = !a; if (a) fillModelChip(chip, a.model); document.body.classList.toggle("open", !!a || composing); placeFox(); drawComposer();
 }
 function fillModelChip(chip, model) { chip.textContent = ""; chip.append(badge(model, 18)); const n = document.createElement("span"); n.className = "n"; n.textContent = shortModel(model); chip.append(n); const r = ring(model); if (r) chip.append(r); }
@@ -440,8 +442,9 @@ const SR = window.SpeechRecognition || window.webkitSpeechRecognition; if (SR) {
 $("composer").onsubmit = async (e) => { e.preventDefault(); let text = $("msg").value.trim(); if (!text && !attachments.length) return; $("sendBtn").disabled = true;
   try { let id = selected;
     if (!id && !pendingHarness && Object.keys(harnessesOf(pendingCore)).length > 1) { $("sendBtn").disabled = false; return chooseSession(pendingCore, () => $("composer").requestSubmit()); }
-    if (!id) { const core = pendingCore; if (!core) return toast("No core available"); id = (text.split(/\s+/).slice(0, 4).join("-").replace(/[^\w-]+/g, "") || "thread").slice(0, 28) + "-" + (Date.now() % 1000); const made = await api("/api/agent", { thread_id: id, node: core, title: text.slice(0, 40), ...(pendingHarness ? { harness: pendingHarness } : {}) }); id = made.thread_id || id; composing = false;
-      for (let i = 0; i < 40 && !(snap.agents[id]); i++) await new Promise((r) => setTimeout(r, 150)); if (pendingModel) await api("/api/model", { agent: id, model: pendingModel }); pendingHarness = ""; pendingModel = ""; await select(id); }
+    if (!id) { const core = pendingCore; if (!core) return toast("No core available"); id = (text.split(/\s+/).slice(0, 4).join("-").replace(/[^\w-]+/g, "") || "thread").slice(0, 28) + "-" + (Date.now() % 1000); const made = await api("/api/agent", { thread_id: id, node: core, title: text.slice(0, 40), ...(pendingHarness ? { harness: pendingHarness } : {}), ...(pendingModel ? { model: pendingModel } : {}) }); id = made.thread_id || id; composing = false;
+      // the model travels with the thread's creation: set before its first turn reads it
+      for (let i = 0; i < 40 && !(snap.agents[id]); i++) await new Promise((r) => setTimeout(r, 150)); pendingHarness = ""; pendingModel = ""; await select(id); }
     const sent = []; for (const f of attachments) if (await sendFile(id, f)) sent.push(f.name); attachments = [];
     $("msg").value = ""; await api("/api/message", { agent: id, text: text.trim(), attachments: sent }); tlStamp = 0; setTimeout(() => { $("thread").scrollTop = $("thread").scrollHeight; }, 60);
   } finally { $("sendBtn").disabled = false; } };
@@ -468,7 +471,7 @@ function drawChat() {
     else if (e.kind === "provider_switch") note(`Model <b>${esc(shortModel(e.text))}</b>`);
     else if (e.kind === "decision") note(esc(e.text));
     else if (e.kind === "checkpoint") { const [why, ...rest] = e.text.split(": "); const map = { teleport: "Moved between cores", provider_error: "The model failed", harness_error: "The agent stopped", harness_timeout: "The agent took too long", model_refused: "Model not available" }; note(esc(map[why] || "Checkpoint") + (rest.length && why !== "teleport" ? ` — ${esc(rest.join(": ").slice(0, 120))}` : "")); } }
-  if (["listening", "inference"].includes(a.phase)) box.insertAdjacentHTML("beforeend", '<div class="msg assistant typing"><i></i><i></i><i></i></div>'); if (atEnd) th.scrollTop = th.scrollHeight;
+  if (["listening", "loading", "inference"].includes(a.phase)) box.insertAdjacentHTML("beforeend", '<div class="msg assistant typing"><i></i><i></i><i></i></div>'); if (atEnd) th.scrollTop = th.scrollHeight;
 }
 $("back").onclick = () => { selected = null; composing = false; renderTop(); drawChat(); drawBench(); if (snap) renderCores(Object.entries(snap.agents)); };
 $("newThread").onclick = () => newThreadOn(pendingCore || (snap && snap.ui && snap.ui.self) || "");

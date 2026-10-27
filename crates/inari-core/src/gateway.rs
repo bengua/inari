@@ -538,7 +538,11 @@ impl Gateway {
                             .collect()
                     })
                     .unwrap_or_default();
-                n["capabilities"] = json!({"harnesses": harnesses});
+                let labels = n
+                    .pointer("/capabilities/model_labels")
+                    .cloned()
+                    .unwrap_or(json!([]));
+                n["capabilities"] = json!({"harnesses": harnesses, "model_labels": labels});
             }
         }
         for k in ["moves", "update_jobs"] {
@@ -1065,7 +1069,7 @@ impl Gateway {
             }
             "/api/agent" => {
                 let mut p = Map::new();
-                for k in ["thread_id", "node", "harness", "pass"] {
+                for k in ["thread_id", "node", "harness", "model", "pass"] {
                     if let Some(v) = d.get(k) {
                         p.insert(k.into(), v.clone());
                     }
@@ -1079,6 +1083,10 @@ impl Gateway {
                     return bad;
                 }
                 let mut p = json!({"text": s(d, "text")});
+                // a model given here is set before the turn reads it, in the same task
+                if !s(d, "model").is_empty() {
+                    p["model"] = json!(s(d, "model"));
+                }
                 if let Some(a) = d.get("attachments").filter(|a| a.is_array()) {
                     p["attachments"] = a.clone();
                 }

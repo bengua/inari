@@ -53,6 +53,14 @@ are all configuration, and every default is empty.
   its permission requests to the phone, cancels it when a teleport freezes the agent, and,
   on a machine whose agent has no memory of the thread, opens a session primed with the
   journal so far.
+- **Getting a model ready.** A harness may name a command run before each turn of a thread
+  whose model was chosen, with `{model}` replaced by the model id:
+  `"prepare": ["load-model", "{model}"], "prepare_timeout": 600`. It is how a local model is
+  loaded onto a GPU before the agent asks it anything; the thread shows *loading the model*
+  meanwhile, and a non-zero exit ends the turn with the command's message. The command gets
+  the harness's environment, no shell.
+- **Model names.** `"model_labels": [["-c0", " · GPU 0"], ["-x2", " · both GPUs"]]` renames,
+  on every page, the models whose id ends with a suffix — to say which card a slot uses, say.
 - **Provider kinds.** `openai` (any compatible gateway), `anthropic`, and `demo` (rules
   only, no network).
 - **Sandbox.** `"sandbox": "subprocess"` (default) or `"container"` with `"engine"`.

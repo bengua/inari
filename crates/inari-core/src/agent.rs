@@ -169,6 +169,10 @@ pub struct AcpHarness {
     pub timeout: Duration,
     pub prime_chars: usize,
     pub extra_env: BTreeMap<String, String>,
+    /// Run before a turn whose thread chose a model, with `{model}` replaced by its id:
+    /// what makes the model ready (load it on a GPU, say). A non-zero exit ends the turn.
+    pub prepare: Vec<String>,
+    pub prepare_timeout: Duration,
     models_set: Mutex<HashMap<String, String>>,
 }
 
@@ -226,6 +230,8 @@ impl AcpHarness {
             timeout: Duration::from_secs(900),
             prime_chars: 24_000,
             extra_env: BTreeMap::new(),
+            prepare: Vec::new(),
+            prepare_timeout: Duration::from_secs(600),
             models_set: Mutex::default(),
         }
     }
@@ -357,7 +363,76 @@ impl AcpHarness {
         out
     }
 
+    /// Make the chosen model ready before the agent asks it anything.
+    async fn make_ready(&self, t: &Turn) -> Result<(), String> {
+        if self.prepare.is_empty() || t.model.is_empty() {
+            return Ok(());
+        }
+        t.phase("loading");
+        let args: Vec<String> = self
+            .prepare
+            .iter()
+            .map(|a| a.replace("{model}", &t.model))
+            .collect();
+        let mut cmd = Command::new(&args[0]);
+        cmd.args(&args[1..])
+            .current_dir(&t.workdir)
+            .env_clear()
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .process_group(0)
+            .kill_on_drop(true);
+        for k in ENV_KEEP {
+            if let Ok(v) = std::env::var(k) {
+                cmd.env(k, v);
+            }
+        }
+        cmd.envs(&self.extra_env);
+        let child = cmd
+            .spawn()
+            .map_err(|e| format!("cannot start the model preparation: {e}"))?;
+        let pid = child.id();
+        match tokio::time::timeout(self.prepare_timeout, child.wait_with_output()).await {
+            Ok(Ok(out)) if out.status.success() => Ok(()),
+            Ok(Ok(out)) => {
+                let mut why = String::from_utf8_lossy(&out.stderr).trim().to_string();
+                if why.is_empty() {
+                    why = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                }
+                Err(format!(
+                    "the model {} could not be made ready: {}",
+                    t.model,
+                    why.chars().take(400).collect::<String>()
+                ))
+            }
+            Ok(Err(e)) => Err(e.to_string()),
+            Err(_) => {
+                if let Some(pid) = pid {
+                    // SAFETY: signalling the process group spawn() created.
+                    unsafe { libc::kill(-(pid as i32), libc::SIGKILL) };
+                }
+                Err(format!(
+                    "the model {} was not ready within {}s",
+                    t.model,
+                    self.prepare_timeout.as_secs()
+                ))
+            }
+        }
+    }
+
     pub async fn turn(&self, t: &Turn) -> RunSummary {
+        if let Err(e) = self.make_ready(t).await {
+            t.append(
+                EventKind::Checkpoint,
+                json!({"reason": "model_unavailable", "detail": e}),
+            );
+            return RunSummary {
+                stopped: "error".into(),
+                error: e,
+                ..Default::default()
+            };
+        }
         let mut child = match self.spawn(&t.workdir) {
             Ok(c) => c,
             Err(e) => {
@@ -868,13 +943,11 @@ impl Runner {
 
     /// Rename a thread (its title in the manifest).
     pub fn set_title(&self, agent: &str, title: &str) -> Result<(), String> {
-        let path = self.host.agents.join(agent);
-        let capsule = io::load(&path).map_err(|e| e.to_string())?;
-        let mut manifest = capsule.manifest.clone();
-        manifest.extra.insert("title".into(), json!(title));
-        io::seal(&path, manifest, &capsule.timeline)
-            .map(|_| ())
-            .map_err(|e| e.to_string())
+        io::edit_manifest(&self.host.agents.join(agent), |m| {
+            m.extra.insert("title".into(), json!(title));
+        })
+        .map(|_| ())
+        .map_err(|e| e.to_string())
     }
 
     /// Set one label on an agent's capsule (its pass, say).
@@ -883,14 +956,13 @@ impl Runner {
     }
 
     fn relabel(&self, agent: &str, labels: &[(&str, &str)]) -> Result<(), String> {
-        let path = self.host.agents.join(agent);
-        let capsule = io::load(&path).map_err(|e| e.to_string())?;
-        let mut manifest = capsule.manifest.clone();
-        for (k, v) in labels {
-            manifest.set_label(k, v);
-        }
-        io::seal(&path, manifest, &capsule.timeline).map_err(|e| e.to_string())?;
-        Ok(())
+        io::edit_manifest(&self.host.agents.join(agent), |m| {
+            for (k, v) in labels {
+                m.set_label(k, v);
+            }
+        })
+        .map(|_| ())
+        .map_err(|e| e.to_string())
     }
 
     /// Choose who thinks for a thread; changing harness clears its model. Journaled
