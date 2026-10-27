@@ -65,6 +65,10 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Fixed
 
+- The agent's replies reached the page cut at 400 characters (live and in the history): a
+  summary's length was applied to messages too. Messages now arrive whole; other events are
+  shortened to 4,000 characters.
+
 - Two changes to one capsule at once (a model chosen while a message arrives) overwrote each
   other: the model label or the user's message was lost. Every read-change-seal of a capsule
   now holds a per-capsule lock.

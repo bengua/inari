@@ -342,6 +342,7 @@ async fn a_model_chosen_with_the_thread_is_ready_for_its_first_turn() {
     let g = home.gateway.clone().unwrap();
     let port = home.gateway_port;
     let mut done = home.bus.subscribe("agent.quick.done");
+    let mut live = home.bus.subscribe("agent.quick.event");
     // what the page does: create with the chosen model, then send at once
     post(
         port,
@@ -358,13 +359,42 @@ async fn a_model_chosen_with_the_thread_is_ready_for_its_first_turn() {
         port,
         "token=owner",
         "/api/message",
-        json!({"agent": "quick", "text": "go"}),
+        json!({"agent": "quick", "text": "go long"}),
     )
     .await;
     tokio::time::timeout(Duration::from_secs(15), done.recv())
         .await
         .unwrap();
     assert_eq!(std::fs::read_to_string(&ready).unwrap(), "fam/beta-c0\n");
+    // the page gets the agent's reply whole, live and from the history
+    let mut reply = String::new();
+    while let Ok(m) = live.try_recv() {
+        if m.payload["kind"] == "assistant_message" {
+            reply = m.payload["text"].as_str().unwrap_or("").to_string();
+        }
+    }
+    assert!(
+        reply.len() > 1500 && reply.ends_with("word"),
+        "cut live: {} chars",
+        reply.len()
+    );
+    let mut hist = home.bus.subscribe("agent.quick.history");
+    home.bus
+        .publish("agent.history.request", json!({"agent": "quick"}));
+    let h = tokio::time::timeout(Duration::from_secs(5), hist.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let kept = h.payload["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["kind"] == "assistant_message")
+        .unwrap()["text"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(kept, reply, "cut in the history");
     let c = inari_core::capsule::io::load(&home.host.agents.join("quick")).unwrap();
     let kinds: Vec<String> = c
         .timeline

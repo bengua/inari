@@ -75,6 +75,16 @@ fn content_text(v: &Value) -> String {
 }
 
 /// One line per event, as people and priming read it.
+/// What a page shows of an event: a message whole (up to a generous bound), anything else
+/// shortened. Cutting messages to a summary's length left the agent's sentences unfinished.
+pub fn page_text(e: &TimelineEvent) -> String {
+    let limit = match e.kind {
+        EventKind::UserMessage | EventKind::AssistantMessage => 200_000,
+        _ => 4_000,
+    };
+    summary(e).chars().take(limit).collect()
+}
+
 pub fn summary(e: &TimelineEvent) -> String {
     let d = &e.data;
     match e.kind {
@@ -837,7 +847,7 @@ impl Runner {
 
     fn emit(&self, agent: &str, e: &TimelineEvent) {
         if let Some(p) = &self.publish {
-            let text: String = summary(e).chars().take(400).collect();
+            let text = page_text(e);
             p(
                 &format!("agent.{agent}.event"),
                 json!({"agent": agent, "id": e.id, "kind": e.kind.as_str(), "text": text}),
