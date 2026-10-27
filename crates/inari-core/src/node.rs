@@ -556,8 +556,8 @@ impl Node {
             let forced = self
                 .refresh
                 .swap(false, std::sync::atomic::Ordering::Relaxed);
-            if forced || models_at.is_none_or(|t| t.elapsed() > Duration::from_secs(300)) {
-                // the catalogue changes rarely: look every five minutes
+            if forced || models_at.is_none_or(|t| t.elapsed() > Duration::from_secs(6 * 3600)) {
+                // the catalogue changes rarely: look at start, after an update, and every six hours
                 let harnesses = self.harness_models().await;
                 let default = self
                     .runner

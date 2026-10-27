@@ -19,7 +19,7 @@ Rust nodes and move machine by machine.
 - **Exact numbers.** `serde_json` is built with `float_roundtrip`: without it some
   timestamps parse one ULP off and an event's hash changes after another node rewrote the
   journal (found by the interop tests, about one capsule in three).
-- **Pinned toolchain.** `rust-toolchain.toml`. CI installs it while the runner image does
+- **Pinned toolchain.** `rust-toolchain.toml`. CI installs it when the CI image does
   not carry one.
 
 ## Order

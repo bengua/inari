@@ -153,6 +153,16 @@ impl Turn {
     }
 }
 
+/// Stop an agent process and everything it started (its process group): an ACP agent
+/// often runs the real CLI as a child, which would outlive a plain kill.
+async fn end(child: &mut Child) {
+    if let Some(pid) = child.id() {
+        // SAFETY: signalling the process group spawn() created for this child.
+        unsafe { libc::kill(-(pid as i32), libc::SIGKILL) };
+    }
+    let _ = child.kill().await;
+}
+
 pub struct AcpHarness {
     pub command: Vec<String>,
     sessions_file: PathBuf,
@@ -244,6 +254,7 @@ impl AcpHarness {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
+            .process_group(0) // its own group: ending it ends whatever it started too
             .kill_on_drop(true);
         for k in ENV_KEEP {
             if let Ok(v) = std::env::var(k) {
@@ -342,7 +353,7 @@ impl AcpHarness {
             .ok()
             .and_then(Result::ok)
             .unwrap_or_default();
-        let _ = child.kill().await;
+        end(&mut child).await;
         out
     }
 
@@ -358,7 +369,7 @@ impl AcpHarness {
             }
         };
         let result = tokio::time::timeout(self.timeout, self.conversation(&mut child, t)).await;
-        let _ = child.kill().await;
+        end(&mut child).await;
         match result {
             Ok(s) => s,
             Err(_) => {
