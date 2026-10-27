@@ -43,7 +43,7 @@ button,input,textarea,select { font:inherit; color:inherit; }
 #sideToggle.on { border-color:var(--copper); color:var(--copper-text); }
 #side { display:grid; grid-template-rows:auto auto auto 1fr auto; gap:8px; min-height:0; padding:12px 10px 10px; border-right:1px solid var(--hair); background:var(--panel); backdrop-filter:blur(18px); overflow-x:hidden; }
 #sidetop { display:flex; align-items:center; gap:8px; } #sidetop .sp { flex:1; } h1 { margin:0; font-size:15px; letter-spacing:.4px; color:var(--copper-text); }
-#foxSlot { height:240px; } #fox { position:fixed; left:0; top:0; width:240px; height:240px; z-index:56; opacity:0; transform-origin:0 0; will-change:transform; transition:opacity .2s ease; } #fox.shown { opacity:1; } #fox iframe { width:100%; height:100%; border:0; background:transparent; color-scheme:normal; } #fox canvas { height:100%; width:auto; aspect-ratio:1; display:block; margin:0 auto; }
+#foxSlot { height:min(240px, 28vh); } #fox { position:fixed; left:0; top:0; width:240px; height:240px; z-index:56; opacity:0; transform-origin:0 0; will-change:transform; transition:opacity .2s ease; } #fox.shown { opacity:1; } #fox iframe { width:100%; height:100%; border:0; background:transparent; color-scheme:normal; } #fox canvas { height:100%; width:auto; aspect-ratio:1; display:block; margin:0 auto; }
 .nav { display:grid; gap:2px; } .nav button { display:flex; align-items:center; gap:10px; background:none; border:0; border-radius:9px; padding:8px 10px; cursor:pointer; text-align:left; color:var(--ink); } .nav button:hover { background:var(--copper-soft); }
 #search { display:none; width:100%; padding:8px 10px; border-radius:10px; border:1px solid var(--hair); background:var(--raise); } #search.on { display:block; }
 #hits { position:absolute; left:10px; right:10px; z-index:45; padding:6px; display:none; } #hits button { display:block; width:100%; text-align:left; background:none; border:0; padding:7px 8px; border-radius:8px; cursor:pointer; } #hits button:hover { background:var(--copper-soft); } #hits small { color:var(--dim); display:block; }
@@ -74,7 +74,7 @@ button,input,textarea,select { font:inherit; color:inherit; }
 .seg { display:flex; gap:4px; } .seg button { flex:1; } .mrow { display:flex; align-items:center; gap:9px; width:100%; padding:7px 8px; border:0; background:none; border-radius:8px; cursor:pointer; text-align:left; } .mrow:hover,.mrow.on { background:var(--copper-soft); }
 #mlist { max-height:48vh; overflow:auto; margin-top:8px; } #mfilter { width:100%; padding:8px 10px; border-radius:9px; border:1px solid var(--hair); background:var(--raise); } .fam { font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--faint); padding:8px 8px 2px; }
 #tethers { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:30; } #tethers path { fill:none; stroke:var(--copper); stroke-width:2; stroke-dasharray:6 7; animation:flow 1s linear infinite; } @keyframes flow { to { stroke-dashoffset:-26; } }
-.ghost { position:fixed; pointer-events:none; z-index:80; opacity:.95; width:230px; transform:translate(-50%,-50%) rotate(-1.5deg); background:var(--panel-solid); box-shadow:var(--shadow); }
+.ghost { position:fixed; pointer-events:none; z-index:81; opacity:.92; width:230px; transform:translate(-50%,calc(-100% - 22px)) rotate(-1.5deg); background:var(--panel-solid); box-shadow:var(--shadow); }
 /* ---- main ---- */
 #main { display:grid; grid-template-rows:auto auto minmax(0,1fr) auto; min-width:0; min-height:0; }
 #app.measuring, #app.measuring #side, #app.measuring #bench { transition:none !important; } #app.morphing #main { overflow:hidden; } #app.morphing #main > * { width:var(--freeze); max-width:none; }
@@ -82,7 +82,7 @@ button,input,textarea,select { font:inherit; color:inherit; }
 #dropdock { position:fixed; left:50%; bottom:22px; transform:translateX(-50%); z-index:80; display:flex; flex-wrap:wrap; justify-content:center; gap:8px; max-width:min(92vw,820px); padding:10px; border-radius:16px; background:var(--panel-solid); border:1px solid var(--hair); box-shadow:0 10px 40px rgba(0,0,0,.35); }
 #dropdock .dz { display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border-radius:12px; border:1px dashed var(--hair); font-size:13px; color:var(--dim); white-space:nowrap; } #dropdock .dz.hot { border-style:solid; border-color:var(--copper); color:var(--ink); background:var(--copper-soft); }
 #dropdock small { flex-basis:100%; text-align:center; color:var(--faint); font-size:11.5px; } .row.hot { outline:2px solid var(--copper); outline-offset:-2px; } #fox.hot { filter:drop-shadow(0 0 18px var(--copper)); } .core.filehot { outline:2px dashed var(--copper); }
-.row { touch-action:pan-y; } #sleepers { margin-left:auto; margin-right:6px; font-size:12px; text-transform:none; }
+.row { touch-action:pan-y; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; } #sleepers { margin-left:auto; margin-right:6px; font-size:12px; text-transform:none; }
 #passBanner { grid-row:1; } #top { grid-row:2; } #thread { grid-row:3; } #dock { grid-row:4; }
 body:not(.open) #top { display:none; } /* no thread open: the top of the page is the mascot's */ #app.wbmax #main { display:none; } #app.wbmax { grid-template-columns:var(--side) 0 minmax(0,1fr); } #app.wbmax #bench { width:auto; }
 #passBanner { padding:8px 16px; font-size:13px; background:var(--raise); border-bottom:1px solid var(--hair); color:var(--dim); } #passBanner b { color:var(--ink); } #passBanner button { margin-left:8px; }
@@ -279,7 +279,7 @@ function render() {
   for (const n of snap.nodes) { const h = (loadHist[n.node_id] = loadHist[n.node_id] || []); h.push((snap.load[n.node_id] || {}).gpu || 0); if (h.length > 40) h.shift(); }
   const agents = Object.entries(snap.agents), busy = agents.filter(([, a]) => a.phase !== "idle").length;
   $("stats").textContent = `${agents.length} agents · ${busy} working`;
-  if (!drag || !drag.active) renderCores(agents);
+  if (!drag) renderCores(agents);
   renderFeed(); renderApprovals(); renderTop(); renderPill(); renderUsageCard(); mascot(); drawOrbParams(snap.mascot);
   if (selected && Date.now() - tlStamp > 1500) refreshDetail(); else if (!selected) { drawChat(); drawComposer(); if (!$("bbody").firstChild) drawBench(); }
 }
@@ -541,32 +541,48 @@ async function teleport(agent, source, target) { const r = await api("/api/telep
    On a phone: swipe a thread left to move it, right for its artifacts; long-press a message to start again
    from it; drop a file on a core to begin a thread with it. */
 function startDrag(e, el, id, from) { if (e.button > 0) return;
-  drag = { id, from, x: e.clientX, y: e.clientY, active: false, el, ghost: null, hold: null, touch: e.pointerType === "touch", guest: !!(snap.ui && snap.ui.pass) };
-  drag.hold = setTimeout(() => { if (drag && !drag.active) { const d = drag; drag = null; window.onpointermove = window.onpointerup = null; if (d.guest) select(d.id); else openMove(d.id, d.from); } }, 650);
-  window.onpointermove = onMove; window.onpointerup = onUp; }
-function onMove(e) { if (!drag) return; const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
-  if (drag.touch) { // a phone swipes; vertical moves are the list scrolling
-    if (!drag.active && Math.abs(dx) > 14 && Math.abs(dx) > Math.abs(dy) * 1.5) { clearTimeout(drag.hold); drag.active = "swipe"; }
-    if (drag.active === "swipe") { drag.el.style.transform = `translateX(${dx}px)`; drag.el.style.opacity = String(1 - Math.min(Math.abs(dx), 160) / 320); }
-    else if (Math.abs(dy) > 12) { clearTimeout(drag.hold); drag = null; window.onpointermove = window.onpointerup = null; }
-    return; }
-  if (!drag.active && Math.hypot(dx, dy) > 8) { clearTimeout(drag.hold); if (drag.guest) { drag = null; return; }
-    drag.active = true; drag.ghost = drag.el.cloneNode(true); drag.ghost.classList.add("ghost", "glass"); document.body.append(drag.ghost); drag.el.style.opacity = ".35";
-    document.querySelectorAll(".core").forEach((n) => n.classList.add(n.dataset.node === drag.from ? "invalid" : "valid")); showDock(drag.id); }
-  if (drag.active) { drag.ghost.style.left = e.clientX + "px"; drag.ghost.style.top = e.clientY + "px"; hot(dropTarget(e.clientX, e.clientY, drag)); } }
-function onUp(e) { window.onpointermove = window.onpointerup = null; if (!drag) return; clearTimeout(drag.hold); const d = drag; drag = null;
-  document.querySelectorAll(".core").forEach((n) => n.classList.remove("valid", "invalid"));
-  if (d.active === "swipe") { const dx = e.clientX - d.x; d.el.style.transform = ""; d.el.style.opacity = "";
-    if (dx < -80 && !d.guest) openMove(d.id, d.from); else if (dx > 80) select(d.id).then(() => { store.set("nobench", false); document.body.classList.add("bench-open"); layout(); }); return; }
-  if (!d.active) { select(d.id); return; }
-  d.ghost.remove(); d.el.style.opacity = ""; const t = dropTarget(e.clientX, e.clientY, d); hot(null); $("dropdock").hidden = true;
-  if (!t) { if (snap) renderCores(Object.entries(snap.agents)); return; }
+  drag = { id, from, x: e.clientX, y: e.clientY, active: false, el, ghost: null, hold: null, touch: e.pointerType === "touch", guest: !!(snap.ui && snap.ui.pass), held: false };
+  // touch: a short press lifts the thread (then it is dragged like with a mouse); mouse: the press is the drag
+  drag.hold = setTimeout(() => { if (!drag || drag.active) return; drag.held = true; if (drag.touch && !drag.guest) { lift(); if (navigator.vibrate) navigator.vibrate(12); } }, drag.touch ? 380 : 650);
+  window.onpointermove = onMove; window.onpointerup = onUp; window.onpointercancel = cancelDrag; }
+function lift() { drag.active = true; drag.ghost = drag.el.cloneNode(true); drag.ghost.classList.add("ghost", "glass"); drag.ghost.style.left = drag.x + "px"; drag.ghost.style.top = drag.y + "px"; document.body.append(drag.ghost);
+  drag.el.style.opacity = ".35"; document.querySelectorAll(".core").forEach((n) => n.classList.add(n.dataset.node === drag.from ? "invalid" : "valid")); showDock(drag.id); }
+function cancelDrag() { window.onpointermove = window.onpointerup = window.onpointercancel = null; if (!drag) return; clearTimeout(drag.hold);
+  if (drag.ghost) drag.ghost.remove(); drag.el.style.opacity = ""; $("dropdock").hidden = true; hot(null); document.querySelectorAll(".core").forEach((n) => n.classList.remove("valid", "invalid")); drag = null; }
+// while a lifted thread is carried, the finger must not scroll the page
+document.addEventListener("touchmove", (e) => { if (drag && drag.active) e.preventDefault(); }, { passive: false });
+// a long press on a thread is ours: not the system's text selection or context menu on top of it
+document.addEventListener("contextmenu", (e) => { if (e.target.closest && e.target.closest(".row")) e.preventDefault(); });
+function onMove(e) { if (!drag) return; const far = Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 8;
+  if (!drag.active) { if (!far) return; if (drag.touch || drag.guest) { cancelDrag(); return; } clearTimeout(drag.hold); lift(); } // a finger moving before the lift is a scroll
+  drag.lx = e.clientX; drag.ly = e.clientY; drag.ghost.style.left = e.clientX + "px"; drag.ghost.style.top = e.clientY + "px"; hot(dropTarget(e.clientX, e.clientY, drag)); }
+// after a long press or a carry, the browser's own tap at the finger's spot must not touch what just opened
+let swallowUntil = 0; addEventListener("click", (e) => { if (Date.now() < swallowUntil) { e.stopPropagation(); e.preventDefault(); } }, true);
+function onUp(e) { window.onpointermove = window.onpointerup = window.onpointercancel = null; if (!drag) return; clearTimeout(drag.hold); const d = drag; drag = null;
+  if (d.held || d.active) swallowUntil = Date.now() + 500;
+  // where the finger last was: a touch's end does not always carry a position
+  const ux = d.lx ?? e.clientX, uy = d.ly ?? e.clientY, moved = Math.hypot(ux - d.x, uy - d.y) > 8;
+  if (d.ghost) d.ghost.remove(); d.el.style.opacity = ""; hot(null);
+  if (!d.active || (d.held && !moved)) { $("dropdock").hidden = true; document.querySelectorAll(".core").forEach((n) => n.classList.remove("valid", "invalid")); if (d.held && !d.guest) actionSheet(d.id); else select(d.id); if (snap) renderCores(Object.entries(snap.agents)); return; }
+  const t = dropTarget(ux, uy, d); $("dropdock").hidden = true; document.querySelectorAll(".core").forEach((n) => n.classList.remove("valid", "invalid"));
+  if (snap) renderCores(Object.entries(snap.agents)); if (!t) return;
   if (t.kind === "core") { if (t.node !== d.from) teleport(d.id, d.from, t.node); }
   else if (t.kind === "thread") mergeInto(t.id, d.id);
   else if (t.kind === "clone") cloneTo(d.id, t.harness);
   else if (t.kind === "share") shareWith(d.id, t.pass);
   else if (t.kind === "sleep") sleepThread(d.id, true);
   else if (t.kind === "fox") foxMenu(d.id); }
+/* A long press without moving: everything else one can do with the thread (moving it is a drag onto a core). */
+function actionSheet(id) { const a = snap.agents[id]; if (!a) return; const node = snap.nodes.find((n) => n.node_id === a.node) || {};
+  const opts = [["Open it, with its artifacts", () => select(id).then(() => { store.set("nobench", false); document.body.classList.add("bench-open"); layout(); })]];
+  for (const h of Object.keys((node.capabilities || {}).harnesses || {}).filter((h) => h !== a.harness)) opts.push([`Clone to ${harnessName(h)}`, () => cloneTo(id, h)]);
+  for (const p of snap.passes || []) opts.push(a.pass === p.id ? [`Stop sharing with ${p.name}`, () => shareWith(id, "")] : [`Share with ${p.name}`, () => shareWith(id, p.id)]);
+  const others = Object.entries(snap.agents).filter(([o, x]) => o !== id && !x.archived);
+  if (others.length) opts.push(["Merge into another thread…", () => sheet(`Merge ${a.title || id} into…`, others.map(([o, x]) => [x.title || o, () => mergeInto(o, id)]))]);
+  opts.push(["Summarise it", async () => { await api("/api/message", { agent: id, text: "Summarise this thread so far in a few short lines." }); select(id); }]);
+  opts.push(["Start a copy from here (fork)", () => { selected = id; forkAt = null; forkNow(); }]);
+  opts.push(["Put it to sleep", () => sleepThread(id, true)]);
+  sheet(a.title || id, opts, "To move it, drag it onto another core."); }
 function dropTarget(x, y, d) { for (const el of document.elementsFromPoint(x, y)) { if (el === d.ghost || (d.ghost && d.ghost.contains(el))) continue;
     if (el.id === "fox" || el.closest("#fox")) return { kind: "fox", el: $("fox") };
     const dz = el.closest && el.closest(".dz"); if (dz) return { kind: dz.dataset.kind, harness: dz.dataset.harness, pass: dz.dataset.pass, el: dz };
