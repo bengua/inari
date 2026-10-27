@@ -84,7 +84,7 @@ button,input,textarea,select { font:inherit; color:inherit; }
 #dropdock small { text-align:center; color:var(--faint); font-size:11px; } #dropdock.row-strip { flex-direction:row; flex-wrap:wrap; justify-content:center; max-width:min(96vw,420px); }
 #dragline { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:79; } #dragline path { fill:none; stroke:var(--copper); stroke-width:2; stroke-dasharray:6 7; animation:march .6s linear infinite; } #dragline circle { fill:var(--copper); } #dragline .ring { fill:none; stroke:var(--copper); stroke-width:2; opacity:.6; } @keyframes march { to { stroke-dashoffset:-13; } } .row.hot { outline:2px solid var(--copper); outline-offset:-2px; } #fox.hot { filter:drop-shadow(0 0 18px var(--copper)); } .core.filehot { outline:2px dashed var(--copper); }
 .row { touch-action:pan-y; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; } #sleepers { margin-left:auto; margin-right:6px; font-size:12px; text-transform:none; }
-#passBanner { grid-row:1; } #top { grid-row:2; } #thread { grid-row:3; } #dock { grid-row:4; }
+#passBanner { grid-row:1; } #top { grid-row:2; } #thread { grid-row:3; } #dock { grid-row:4; } #stage { display:none; }
 body:not(.open) #top { display:none; } /* no thread open: the top of the page is the mascot's */ #app.wbmax #main { display:none; } #app.wbmax { grid-template-columns:var(--side) 0 minmax(0,1fr); } #app.wbmax #bench { width:auto; }
 #passBanner { padding:8px 16px; font-size:13px; background:var(--raise); border-bottom:1px solid var(--hair); color:var(--dim); } #passBanner b { color:var(--ink); } #passBanner button { margin-left:8px; }
 .guest #addCore, .guest [data-tab="terminal"], .guest #pill, .guest #usageBtn, .guest #usageCard, .guest #actionsBtn { display:none !important; }
@@ -128,7 +128,9 @@ pre.code span.l::before { counter-increment:l; content:counter(l); position:abso
 #login { max-width:420px; margin:20vh auto; padding:22px; } #login input { width:100%; padding:12px; margin:10px 0; border-radius:10px; border:1px solid var(--hair); background:var(--raise); }
 @media (max-width:1100px) { #app, #app.wbmax { grid-template-columns:var(--side) minmax(0,1fr); grid-template-areas:"bar bar" "side main"; } #app.wbmax #main { display:grid; } #bench { position:fixed; inset:0; z-index:55; width:auto; background:var(--panel-solid); display:none; } body.bench-open #bench, body.bench-open #app.nobench #bench { display:grid; width:auto; opacity:1; pointer-events:auto; } #split { display:none; } }
 @media (max-width:760px) { body { overflow:auto; } #app, #app.wbmax, #app.noside { grid-template-columns:1fr; grid-template-areas:"bar" "side"; height:auto; min-height:100%; } #side { width:auto; min-height:calc(100vh - 52px); border-right:0; } #foxSlot { height:200px; } #app.noside #side { transform:none; opacity:1; pointer-events:auto; } #sideToggle { display:none; }
-  #main { position:fixed; inset:0; z-index:50; background:var(--canvas); display:none; } body.open #main { display:grid; } #back { display:inline-grid; } #benchMobile { display:inline-grid; margin-left:auto; } #top h2 { flex-basis:100%; order:1; } #pphase, #modelChip, #actionsBtn { order:2; } #dock .hint { display:none; } .msg,details.tool { max-width:94%; } #pill { margin-left:auto; } }
+  #main { position:fixed; inset:0; z-index:50; background:var(--canvas); display:none; } body.open #main { display:grid; } #back { display:inline-grid; } #benchMobile { display:inline-grid; margin-left:auto; } #top h2 { flex-basis:100%; order:1; } #pphase, #modelChip, #actionsBtn { order:2; } #dock .hint { display:none; } .msg,details.tool { max-width:94%; } #pill { margin-left:auto; }
+  #main { grid-template-rows:auto auto auto minmax(0,1fr) auto; } #stage { display:block; grid-row:3; height:min(200px, 26vh); transition:height .26s cubic-bezier(.2,.8,.2,1); } #thread { grid-row:4; padding-bottom:calc(18px + var(--kbpad, 0px)); } #dock { grid-row:5; background:var(--canvas); transform:translateY(calc(-1 * var(--kb, 0px))); will-change:transform; }
+  body.kb #stage { height:0; } }
 @media (prefers-reduced-motion:reduce) { .core,.row,#app,#side,#fox,#bench { transition:none; } .pdot,#tethers path,.typing i { animation:none !important; } #thread { scroll-behavior:auto; } }
 </style>
 </head>
@@ -154,7 +156,7 @@ pre.code span.l::before { counter-increment:l; content:counter(l); position:abso
     <div id="passBanner" role="status" hidden></div>
     <div id="top"><button class="btn small" id="back">‹ Back</button><button class="btn icon" id="benchMobile" title="Artifacts, terminal, journal" aria-label="Artifacts" data-icon="panel"></button><h2 id="ptitle">Inari</h2><span id="pphase"></span>
       <button class="chip" id="modelChip" hidden></button><button class="btn small" id="actionsBtn" data-icon="more" hidden><span>Actions</span></button></div>
-    <div id="thread"><div id="msgs"></div></div>
+    <div id="stage" aria-hidden="true"></div><div id="thread"><div id="msgs"></div></div>
     <div id="dock"><form class="composer" id="composer"><div class="attached" id="attached"></div><textarea id="msg" rows="2" placeholder="Build anything…" aria-label="Message"></textarea>
       <div class="ctools"><button type="button" class="btn icon" id="attach" title="Attach a file" aria-label="Attach a file" data-icon="plus"></button><input type="file" id="file" multiple hidden>
         <button type="button" class="chip" id="coreChip" title="Where it runs"></button><button type="button" class="chip" id="pickModel" title="Choose the model"></button><span class="sp"></span>
@@ -254,7 +256,9 @@ $("sideToggle").onclick = () => morph(() => { store.set("noside", !store.get("no
    and the top centre of the page, following the panes while they move. */
 const FOX = 240;
 function foxTarget() { const app = $("app"), mobile = matchMedia("(max-width:760px)").matches, open = document.body.classList.contains("open");
-  if (mobile && open) { const size = 56, back = $("back").getBoundingClientRect(); return { x: innerWidth / 2 - size / 2, y: Math.max(0, back.top + back.height / 2 - size / 2), size }; }
+  if (mobile && open) { const st = $("stage").getBoundingClientRect(), back = $("back").getBoundingClientRect();
+    if (st.height >= 72) { const size = st.height; return { x: innerWidth / 2 - size / 2, y: st.top, size }; } // its stage, big enough to see its face
+    const size = 56; return { x: innerWidth / 2 - size / 2, y: Math.max(0, back.top + back.height / 2 - size / 2), size }; }
   if (!mobile && app.classList.contains("noside")) { const m = $("main").getBoundingClientRect(), size = open ? 96 : 160; return { x: m.left + m.width / 2 - size / 2, y: open ? 0 : 6, size }; }
   const slot = $("foxSlot").getBoundingClientRect(), size = Math.min(slot.height, slot.width); return { x: slot.left + slot.width / 2 - size / 2, y: slot.top, size }; }
 function placeFox() { const fox = $("fox"); if ($("app").hidden) return; const t = foxTarget();
@@ -267,6 +271,11 @@ function morph(flip) { const app = $("app"), main = $("main"), before = main.cli
   app.style.setProperty("--freeze", Math.max(before, after) + "px"); app.classList.add("morphing"); followFox(460);
   clearTimeout(morph.t); morph.t = setTimeout(() => { app.classList.remove("morphing"); placeFox(); }, 420); }
 addEventListener("resize", () => placeFox()); window.addEventListener("scroll", () => placeFox(), { passive: true });
+/* The Android app keeps the page at full height and tells it the keyboard's height as it moves: the
+   composer rides it with a transform (no layout per frame); the thread makes room once it settles. */
+window.inariKeyboard = (h) => { h = Math.max(0, Math.round(h)); const root = document.documentElement, th = $("thread"), atEnd = th.scrollHeight - th.scrollTop - th.clientHeight < 60;
+  root.style.setProperty("--kb", h + "px"); const up = h > 40; if (up !== document.body.classList.contains("kb")) { document.body.classList.toggle("kb", up); followFox(320); }
+  clearTimeout(window.inariKeyboard.t); window.inariKeyboard.t = setTimeout(() => { root.style.setProperty("--kbpad", h + "px"); if (atEnd) th.scrollTop = th.scrollHeight; placeFox(); }, 90); };
 $("benchClose").onclick = () => { if (innerWidth <= 1100) { store.set("nobench", true); document.body.classList.remove("bench-open"); layout(); return; } store.set("wbmax", false); if (!store.get("nobench", false)) morph(() => { store.set("nobench", !store.get("nobench", false)); layout(); }); else layout(); };
 $("benchMobile").onclick = () => { document.body.classList.add("bench-open"); store.set("nobench", false); layout(); };
 $("benchBtn").onclick = () => { if (innerWidth <= 1100) document.body.classList.add("bench-open"); else morph(() => { store.set("nobench", !store.get("nobench", false)); layout(); }); };

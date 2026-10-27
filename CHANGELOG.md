@@ -9,6 +9,11 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Added
 
+- **On a phone, the mascot has a stage at the top of an open thread** (about 200 px instead of
+  56) and folds into the top bar while the keyboard is up. The page follows a keyboard the
+  Android app reports (`window.inariKeyboard(height)`): the composer rides it with a transform,
+  the thread makes room once it settles — no layout on every frame.
+
 - **A chosen model is made ready before the turn**: a harness may run a `prepare` command
   (`{model}` replaced by the id) — to load a local model onto its GPU, say — while the thread
   shows *loading the model*; a refusal ends the turn with its reason. `model_labels` renames
