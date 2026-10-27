@@ -21,6 +21,14 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast;
 
 const INDEX: &str = include_str!("../../../src/inari_core/web/index.html");
+
+/// The page's version: a hash of what this binary serves. A page that sees another
+/// version in the snapshot (the core was updated) reloads itself — a phone's app keeps
+/// its page open for days.
+fn page_version() -> &'static str {
+    static V: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    V.get_or_init(|| crate::canon::sha256_hex(INDEX.as_bytes())[..12].to_string())
+}
 const MAX_BODY: usize = 64 * 1024;
 /// One part of an upload, base64 included (the page sends 512 KiB of file per part).
 const MAX_PART_BODY: usize = 1024 * 1024;
@@ -443,6 +451,7 @@ impl Gateway {
         let mut ui = self.ui.clone();
         ui.insert("mascot".into(), json!(self.mascot_dir.is_some()));
         ui.insert("self".into(), json!(self.bus.name)); // the core serving this page: the default for new threads
+        ui.insert("page".into(), json!(page_version())); // an open page older than this one reloads itself
         json!({
             "nodes": st.nodes,
             "agents": st.telemetry.agents,
@@ -779,7 +788,8 @@ impl Gateway {
     async fn route(&self, r: Request, w: &mut TcpStream) -> std::io::Result<()> {
         let get = r.method == "GET";
         if get && r.path == "/" {
-            return send(w, 200, "text/html; charset=utf-8", INDEX.as_bytes()).await;
+            let page = INDEX.replacen("__INARI_PAGE__", page_version(), 1);
+            return send(w, 200, "text/html; charset=utf-8", page.as_bytes()).await;
         }
         if get && r.path.starts_with("/fox/") {
             if let Some(dir) = &self.mascot_dir {

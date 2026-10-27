@@ -195,6 +195,7 @@ let token = new URLSearchParams(location.hash.slice(1)).get("token") || sessionS
 // A core pass: kept on this device (the phone's app keeps it across launches); it never falls back to the owner's access.
 let pass = new URLSearchParams(location.hash.slice(1)).get("pass") || store.get("pass", "");
 const authQuery = () => (pass ? "pass=" + encodeURIComponent(pass) : token ? "token=" + encodeURIComponent(token) : "");
+const PAGE = "__INARI_PAGE__"; // replaced by the core with the version of this page
 let snap = null, selected = null, tab = "artifacts", events = [], files = null, viewing = null, forkAt = null, drag = null, termHist = [], termPos = 0, pendingModel = "", pendingCore = "", attachments = [];
 const loadHist = {}, shut = store.get("shut", {}), feed = [], seen = new Set(); let firstSnap = true, tlStamp = 0, tlBusy = false, lastFiles = "";
 
@@ -277,6 +278,7 @@ function absorb() {
   firstSnap = false;
 }
 function render() {
+  if (snap.ui && snap.ui.page && PAGE !== "__INARI_" + "PAGE__" && snap.ui.page !== PAGE) { location.reload(); return; } // a newer page is served
   absorb(); $("brandfoot").textContent = (snap.ui && snap.ui.footer) || ""; $("brandName").textContent = (snap.ui && snap.ui.brand) || ""; renderPassBanner(); if (!$("fox").classList.contains("shown")) placeFox();
   for (const n of snap.nodes) { const h = (loadHist[n.node_id] = loadHist[n.node_id] || []); h.push((snap.load[n.node_id] || {}).gpu || 0); if (h.length > 40) h.shift(); }
   const agents = Object.entries(snap.agents), busy = agents.filter(([, a]) => a.phase !== "idle").length;
