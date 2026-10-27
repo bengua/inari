@@ -9,6 +9,11 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Added
 
+- **Harness updates**: a harness may name the npm package it comes from (`update` in its
+  configuration); each Rust node reports installed and latest versions, and the sidebar badge
+  (download mark and the logos of what is out of date) installs the update on any core, runs the
+  harness's restart command (OpenFox's server), and the next message uses the new version.
+- **Provider usage** opens as a card inside the sidebar, as in Inari v1, instead of a popover.
 - **Rust port, step 4**: the node and the gateway in Rust (`inari-core-rs node <config>`), same
   configuration file and data directory as the Python node. A Python node joins a Rust hub and
   agents teleport between them. Files from the phone arrive in parts (up to 25 MB) and reach

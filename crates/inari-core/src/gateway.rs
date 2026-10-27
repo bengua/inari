@@ -39,6 +39,8 @@ struct State {
     usage: Vec<Value>,
     logos: Map<String, Value>,
     logo_cache: HashMap<String, (&'static str, Vec<u8>)>,
+    /// Harness updates in progress or just finished, by "node/harness".
+    update_jobs: BTreeMap<String, Value>,
 }
 
 pub struct Gateway {
@@ -261,6 +263,10 @@ impl Gateway {
                 .retain(|n| n.get("node_id").and_then(Value::as_str) != Some(node.as_str()));
         });
         self.on("teleport.result", |_, st, m| st.results.push(m.payload));
+        self.on("node.*.update.state", |_, st, m| {
+            let key = format!("{}/{}", s(&m.payload, "node"), s(&m.payload, "harness"));
+            st.update_jobs.insert(key, m.payload);
+        });
         self.on("approval.request", |_, st, m| {
             let id = s(&m.payload, "request_id");
             if !id.is_empty() {
@@ -336,6 +342,7 @@ impl Gateway {
             "usage": st.usage,
             "ui": ui,
             "approvals": st.approvals.values().cloned().collect::<Vec<_>>(),
+            "update_jobs": st.update_jobs,
         })
     }
 
@@ -708,6 +715,24 @@ impl Gateway {
                     "agent.merge",
                     json!({"target": s(d, "target"), "source": s(d, "source")}),
                 );
+                ok
+            }
+            "/api/update" => {
+                if !need(&["node", "harness"]) {
+                    return bad;
+                }
+                self.bus.publish(
+                    &format!("node.{}.update", s(d, "node")),
+                    json!({"harness": s(d, "harness")}),
+                );
+                ok
+            }
+            "/api/update/check" => {
+                let node = Some(s(d, "node"))
+                    .filter(|n| !n.is_empty())
+                    .unwrap_or_else(|| "all".into());
+                self.bus
+                    .publish(&format!("node.{node}.update.check"), json!({}));
                 ok
             }
             "/api/approval" => {

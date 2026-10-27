@@ -15,6 +15,7 @@ use crate::host::CapsuleHost;
 use crate::mesh::{Coordinator, NodeInfo, Progress, Registry, Teleporter};
 use crate::rpc::{EndpointServer, RemoteEndpoint};
 use crate::teleport::{teleport_observed, CallResult, Endpoint};
+use crate::updates::UpdateSpec;
 use base64::Engine;
 use serde::de::{MapAccess, Visitor};
 use serde::{Deserialize, Deserializer};
@@ -35,6 +36,9 @@ pub struct HarnessSpec {
     pub timeout: f64,
     #[serde(default)]
     pub env: BTreeMap<String, String>,
+    /// Where the harness comes from, to offer and install its updates.
+    #[serde(default)]
+    pub update: Option<UpdateSpec>,
 }
 
 fn default_timeout() -> f64 {
@@ -255,6 +259,10 @@ pub struct Node {
     pub gateway: Option<Arc<Gateway>>,
     pub gateway_port: u16,
     _client: Mutex<Option<BusClient>>,
+    /// Per harness: installed and latest version, and the state of an update in progress.
+    updates: Mutex<Map<String, Value>>,
+    /// Set after an update: the next heartbeat re-reads the model catalogue at once.
+    refresh: std::sync::atomic::AtomicBool,
 }
 
 impl Node {
@@ -420,10 +428,19 @@ impl Node {
             gateway,
             gateway_port,
             _client: Mutex::new(client),
+            updates: Mutex::default(),
+            refresh: std::sync::atomic::AtomicBool::new(false),
         });
         node.subscribe();
         let beat = Arc::clone(&node);
         tokio::spawn(async move { beat.beat().await });
+        let watch = Arc::clone(&node);
+        tokio::spawn(async move {
+            loop {
+                watch.check_updates().await;
+                tokio::time::sleep(Duration::from_secs(6 * 3600)).await;
+            }
+        });
         Ok(node)
     }
 
@@ -529,7 +546,10 @@ impl Node {
         let mut first = true;
         let period = Duration::from_secs_f64(cfg.heartbeat.max(0.05));
         loop {
-            if models_at.is_none_or(|t| t.elapsed() > Duration::from_secs(300)) {
+            let forced = self
+                .refresh
+                .swap(false, std::sync::atomic::Ordering::Relaxed);
+            if forced || models_at.is_none_or(|t| t.elapsed() > Duration::from_secs(300)) {
                 // the catalogue changes rarely: look every five minutes
                 let harnesses = self.harness_models().await;
                 let default = self
@@ -544,6 +564,11 @@ impl Node {
                 info.capabilities
                     .insert("harnesses".into(), Value::Object(harnesses));
                 models_at = Some(std::time::Instant::now());
+            }
+            let updates = self.updates.lock().expect("not poisoned").clone();
+            if !updates.is_empty() {
+                info.capabilities
+                    .insert("updates".into(), Value::Object(updates));
             }
             self.bus.publish(
                 if first {
@@ -581,6 +606,83 @@ impl Node {
             }
             tokio::time::sleep(period).await;
         }
+    }
+
+    fn update_spec(&self, harness: &str) -> Option<UpdateSpec> {
+        self.cfg
+            .harness_specs()
+            .into_iter()
+            .find(|(n, _)| n == harness)
+            .and_then(|(_, s)| s.update)
+    }
+
+    fn update_running(&self, harness: &str) -> bool {
+        self.updates
+            .lock()
+            .expect("not poisoned")
+            .get(harness)
+            .is_some_and(|u| u["state"] == "running")
+    }
+
+    /// Ask the registry what is new for every harness that names its package.
+    pub async fn check_updates(&self) {
+        for (name, spec) in self.cfg.harness_specs() {
+            let Some(update) = spec.update else { continue };
+            if self.update_running(&name) {
+                continue;
+            }
+            let status = update.status().await;
+            self.updates
+                .lock()
+                .expect("not poisoned")
+                .insert(name, status);
+        }
+    }
+
+    fn update_state(&self, harness: &str, fields: Value) {
+        let state = {
+            let mut all = self.updates.lock().expect("not poisoned");
+            let entry = all.entry(harness.to_string()).or_insert_with(|| json!({}));
+            if let (Some(e), Some(f)) = (entry.as_object_mut(), fields.as_object()) {
+                e.extend(f.clone());
+            }
+            entry.clone()
+        };
+        let mut state = state;
+        state["node"] = json!(self.cfg.node_id);
+        state["harness"] = json!(harness);
+        self.bus
+            .publish(&format!("node.{}.update.state", self.cfg.node_id), state);
+    }
+
+    /// Install the latest version of a harness, restart what needs it, announce the result.
+    pub async fn update_harness(&self, harness: &str) {
+        let Some(spec) = self.update_spec(harness) else {
+            self.update_state(
+                harness,
+                json!({"state": "failed", "error": "this harness names no package to update"}),
+            );
+            return;
+        };
+        if self.update_running(harness) {
+            return;
+        }
+        self.update_state(harness, json!({"state": "running", "error": ""}));
+        let result = match spec.latest().await {
+            Ok(latest) => spec.install(&latest).await,
+            Err(e) => Err(e),
+        };
+        let mut status = spec.status().await;
+        match result {
+            Ok(()) => status["state"] = json!("done"),
+            Err(e) => {
+                status["state"] = json!("failed");
+                status["error"] = json!(e);
+            }
+        }
+        self.update_state(harness, status);
+        self.refresh
+            .store(true, std::sync::atomic::Ordering::Relaxed); // new version, maybe new models
     }
 
     fn on<F, Fut>(self: &Arc<Self>, pattern: &str, f: F)
@@ -765,6 +867,19 @@ impl Node {
                 let _ = r.set_model(&agent, &s(&m.payload, "model"));
             }
         });
+        let me = self.cfg.node_id.clone();
+        self.on(&format!("node.{me}.update"), |n, m| async move {
+            let harness = s(&m.payload, "harness");
+            tokio::spawn(async move { n.update_harness(&harness).await }); // npm can take minutes
+        });
+        for subject in [
+            format!("node.{me}.update.check"),
+            "node.all.update.check".to_string(),
+        ] {
+            self.on(&subject, |n, _m| async move {
+                tokio::spawn(async move { n.check_updates().await });
+            });
+        }
         self.on("agent.*.harness", |n, m| async move {
             let agent = m.subject.split('.').nth(1).unwrap_or("").to_string();
             if let Some(r) = n.runner.as_ref().filter(|_| n.running(&agent)) {
