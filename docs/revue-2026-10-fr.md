@@ -230,7 +230,8 @@ Puis, comme ci-dessus : remplacer `inari-core-rs` (garder le précédent en `.pr
 Correctifs poussés depuis la première installation :
 - (commit suivant) : les onglets du volet des artefacts sont de nouveau cliquables (la poignée de redimensionnement les recouvrait).
 - `23a6460` : bandeaux du haut affinés (36 px), sans rien masquer.
-- `f7ac2ab` : choix de l'avatar (flèches autour de la mascotte, choix gardé par personne) ; mascotte posée sur le champ de saisie quand un fil est ouvert.
+- `f7ac2ab` : choix de l'avatar (flèches autour de la mascotte, choix gardé par personne).
+- (commit suivant) : la mascotte retrouve sa place. Volet replié, fil ouvert : en haut au centre de la discussion, à la taille du volet (au lieu de 96 px collée en haut), et le fil commence sous elle. Volet ouvert : dans le volet, comme avant. La version « posée sur le champ de saisie » de `f7ac2ab` est retirée : elle masquait les nouveaux messages.
 - **Dépôt `inari-apk`, même branche, `46f98a9`** : FoxBot respecte le choix d'avatar et ne mélange plus jamais les images de FoxBot principal dans une persona. **Il faut redéployer le dossier `fox/`** (`android/app/src/main/assets/fox/`, avec `sprites_persona/` à côté de `sprites/`) là où pointe `mascot_dir`, sinon les flèches changent bien le choix mais l'ancien FoxBot laisse encore le modèle décider. La liste des séquences manquantes et le prompt pour générer : `docs/personas-sequences.md` dans `inari-apk`.
 - (commit `3b4707b`) : pendant un glisser, les actions de la mascotte apparaissent en tuiles à côté des autres — « Le résumer », « L'endormir », et « Supprimer… » en rouge, qui demande confirmation.
 - `2bf94c0` : à la souris (webapp, navigateur), on peut de nouveau lâcher un fil sur FoxBot ; son iframe ne laissait pas passer la souris.

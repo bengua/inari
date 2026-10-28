@@ -18,9 +18,10 @@ Newest first. An entry says what changed for someone using the thing.
   workbench tabs aligned with them; the thread's *Actions* is its icon; in a narrow column the
   state leaves out its core and the model name is shortened (whole on hover). A bar that still
   lacks room wraps, it never hides a control.
-- **The mascot sits on the prompt.** With a thread open on a wide screen, the mascot stands on
-  the top edge of the prompt, on its right, as large as in the sidebar; the sidebar keeps a compact
-  row to change avatar.
+- **The mascot at the top of the conversation.** With a thread open and the sidebar folded, the
+  mascot floats at the top centre of the conversation, just under the thread's bar, as large as in
+  the sidebar (it was 96 px against the top edge); the thread starts below it, and new messages
+  arrive at the bottom, clear of it. With the sidebar shown, it stays in the sidebar, full size.
 
 - **`inari-core-rs demo`: the demo in Rust.** Three nodes in one process, the interface on
   `:8787`, live turns and an approval question; `--mascot DIR` shows FoxBot. The agent it runs is

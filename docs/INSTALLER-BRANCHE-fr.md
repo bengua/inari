@@ -207,7 +207,8 @@ Ouvrir la webapp, puis :
 1. La page se recharge seule. La première fois, elle peut redemander le jeton.
 2. Volet de gauche : deux petites flèches ‹ › autour de FoxBot. Les cliquer change l'avatar, et le nom s'affiche
    un instant.
-3. Ouvrir un fil : FoxBot vient se poser sur le haut du champ de saisie, à droite.
+3. Ouvrir un fil, puis replier le volet de gauche : FoxBot flotte en haut au centre de la discussion, à la taille
+   qu'il a dans le volet ; les nouveaux messages arrivent en bas, sans être masqués.
 4. Les onglets Artefacts / Terminal / Visionneuse / Journal du volet de droite se cliquent.
 5. Glisser un fil : les tuiles « Le résumer », « L'endormir » et « Supprimer… » (rouge) apparaissent. « Supprimer »
    demande une confirmation.

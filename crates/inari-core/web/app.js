@@ -125,12 +125,11 @@ function foxHome() { const app = $("app"), mobile = matchMedia("(max-width:760px
   if (mobile && open) { const st = $("stage").getBoundingClientRect(), back = $("back").getBoundingClientRect();
     if (st.height >= 72) { const size = st.height; return { x: innerWidth / 2 - size / 2, y: st.top, size }; } // its stage, big enough to see its face
     const size = 56; return { x: innerWidth / 2 - size / 2, y: Math.max(0, back.top + back.height / 2 - size / 2), size }; }
-  // a thread open on a wide screen: the mascot sits on the top edge of the prompt, on its right (the side of
-  // the person's own messages, the least re-read), as large as in the sidebar; its feet rest on the border
-  if (!mobile && open) { const c = $("composer").getBoundingClientRect();
-    if (c.width > 0) { const size = Math.min(FOX, innerHeight * 0.28, c.top - 60) /* the sidebar's size: #foxSlot */, x = Math.min(c.right - size * 0.82, innerWidth - size - 4);
-      return { x, y: c.top - size * 0.86, size }; } }
-  if (!mobile && app.classList.contains("noside")) { const m = $("main").getBoundingClientRect(), size = open ? 96 : 160; return { x: m.left + m.width / 2 - size / 2, y: open ? 0 : 6, size }; }
+  // a thread open without the sidebar: the mascot floats at the top centre of the conversation, as large as in the
+  // sidebar, just under the thread's bar; the conversation keeps room at its top for it (body.open #app.noside #msgs)
+  if (!mobile && app.classList.contains("noside")) { const m = $("main").getBoundingClientRect(), th = $("thread").getBoundingClientRect();
+    if (open && th.width > 0) { const size = Math.min(FOX, innerHeight * 0.28); return { x: th.left + th.width / 2 - size / 2, y: th.top + 4, size }; }
+    const size = 160; return { x: m.left + m.width / 2 - size / 2, y: 6, size }; }
   const slot = $("foxSlot").getBoundingClientRect(), size = Math.min(slot.height, slot.width); return { x: slot.left + slot.width / 2 - size / 2, y: slot.top, size }; }
 function placeFox() { const fox = $("fox"); if ($("app").hidden) return; const t = foxTarget();
   fox.style.transform = `translate(${t.x}px, ${t.y}px) scale(${t.size / FOX})`; fox.classList.add("shown"); }
