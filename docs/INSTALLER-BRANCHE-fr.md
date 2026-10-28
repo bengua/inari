@@ -127,6 +127,21 @@ ls "$FOXDIR/sprites_persona" | wc -l
 Attendu : `ls` montre au moins `index.html`, `js`, `sprites` et `sprites_persona` ; le nombre de personas est **18**.
 Si `rsync` n'existe pas : arrête-toi et demande à Ben de l'installer.
 
+Les images de la branche ont les yeux réparés (avant, le détourage rendait les pupilles transparentes et le texte se
+voyait à travers). Vérifie qu'il ne reste aucune image à réparer dans ce dossier (par exemple des séquences générées
+sur cette machine et pas encore sur GitHub). Le script n'installe rien : il utilise le Python, Pillow et numpy qui
+servent déjà à générer les sprites.
+
+```bash
+cd ~/Work/swarmfox/android/app/src/main/assets/fox
+python3 seal_sprites.py "$FOXDIR/sprites" "$FOXDIR/sprites_persona" | tail -3
+python3 seal_sprites.py --dry-run "$FOXDIR/sprites" "$FOXDIR/sprites_persona" | grep "would be sealed"
+```
+Attendu : la première commande affiche `N of M frames sealed` (N vaut 0 si tout venait de GitHub), et peut citer
+`sprites/parle/f_37.webp` comme « not an image » (ce fichier est vide dans le dépôt, c'est connu). La seconde affiche
+`0 of M frames would be sealed`. Les nouvelles séquences générées avec `process_action.py` de cette branche sont
+réparées automatiquement.
+
 Si `MASCOT` (étape 1) vaut déjà exactement `$FOXDIR`, passe à l'étape 6. Sinon, il faut que la configuration pointe
 sur `$FOXDIR`. Garde d'abord une copie :
 
