@@ -1732,7 +1732,7 @@ impl OpenFoxHarness {
             Event::Todos(list) => {
                 force = true;
                 self.edit_panel(&t.agent, |p| {
-                    p.todos = list.todos.iter().map(|x| Item::todo(x)).collect()
+                    p.todos = list.todos.iter().map(Item::todo).collect()
                 });
             }
             Event::Metadata(m) => {
@@ -2382,12 +2382,23 @@ mod tests {
         }
         .problem()
         .is_some());
-        assert!(Settings {
-            mode: "chaos".into(),
-            ..ok.clone()
+        // any agent of OpenFox's, yours included; never an empty or odd name
+        assert_eq!(
+            Settings {
+                mode: "reviewer".into(),
+                ..ok.clone()
+            }
+            .problem(),
+            None
+        );
+        for bad in ["", "../x", "a b"] {
+            assert!(Settings {
+                mode: bad.into(),
+                ..ok.clone()
+            }
+            .problem()
+            .is_some());
         }
-        .problem()
-        .is_some());
         assert!(Settings {
             turn_timeout: 5,
             ..ok
