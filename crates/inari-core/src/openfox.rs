@@ -98,7 +98,13 @@ impl Settings {
         if !self.url.starts_with("http://") {
             return Some("OpenFox's address must start with http://".into());
         }
-        if !MODES.iter().any(|(id, _, _)| *id == self.mode) {
+        if self.mode.is_empty()
+            || self.mode.len() > 64
+            || !self
+                .mode
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "_-.".contains(c))
+        {
             return Some(format!("unknown OpenFox agent {:?}", self.mode));
         }
         if !(30..=86_400).contains(&self.turn_timeout) {
@@ -159,6 +165,26 @@ pub mod proto {
         pub provider_model: Option<String>,
         #[serde(default)]
         pub is_running: bool,
+        #[serde(default)]
+        pub phase: Option<String>,
+        #[serde(default)]
+        pub danger_level: Option<String>,
+        #[serde(default)]
+        pub provider_reasoning_effort: Option<String>,
+        #[serde(default)]
+        pub pause_state: Option<String>,
+        /// Structured session data by key: criteria, todos, review findings…
+        #[serde(default)]
+        pub metadata_entries: std::collections::BTreeMap<String, Vec<Entry>>,
+    }
+
+    /// One entry of the session's structured data (a criterion, a todo…).
+    #[derive(Deserialize, Debug, Clone)]
+    pub struct Entry {
+        pub id: String,
+        pub description: String,
+        #[serde(default)]
+        pub status: String,
     }
 
     impl Session {
@@ -182,10 +208,13 @@ pub mod proto {
 
     /// `GET /api/sessions/:id`.
     #[derive(Deserialize, Debug)]
+    #[serde(rename_all = "camelCase")]
     pub struct SessionView {
         pub session: Session,
         #[serde(default)]
         pub messages: Vec<Message>,
+        #[serde(default)]
+        pub context_state: Option<ContextState>,
     }
 
     /// `POST /api/sessions` and `POST /api/projects`.
@@ -206,8 +235,17 @@ pub mod proto {
             id: String,
             #[serde(default, rename = "contextWindow")]
             context_window: Option<u64>,
+            #[serde(default, rename = "reasoningEfforts")]
+            reasoning_efforts: Option<Vec<String>>,
+            #[serde(default)]
+            modes: Option<Vec<EffortMode>>,
         },
         Bare(String),
+    }
+
+    #[derive(Deserialize, Debug, Clone)]
+    pub struct EffortMode {
+        pub level: String,
     }
 
     impl ModelRef {
@@ -215,6 +253,70 @@ pub mod proto {
             match self {
                 ModelRef::Named { id, .. } | ModelRef::Bare(id) => id,
             }
+        }
+
+        /// The reasoning efforts this model offers (none: it has no such setting).
+        pub fn efforts(&self) -> Vec<String> {
+            match self {
+                ModelRef::Named {
+                    reasoning_efforts,
+                    modes,
+                    ..
+                } => {
+                    let mut out: Vec<String> = reasoning_efforts.clone().unwrap_or_default();
+                    for m in modes.iter().flatten() {
+                        if !out.contains(&m.level) {
+                            out.push(m.level.clone());
+                        }
+                    }
+                    out
+                }
+                ModelRef::Bare(_) => Vec::new(),
+            }
+        }
+    }
+
+    /// An OpenFox agent (`GET /api/agents`): the top-level ones are what a session runs as.
+    #[derive(Deserialize, Debug, Clone)]
+    pub struct Agent {
+        pub id: String,
+        #[serde(default)]
+        pub name: String,
+        #[serde(default)]
+        pub description: String,
+        #[serde(default)]
+        pub subagent: bool,
+    }
+
+    #[derive(Deserialize, Debug, Default)]
+    #[serde(rename_all = "camelCase")]
+    pub struct Agents {
+        #[serde(default)]
+        pub defaults: Vec<Agent>,
+        #[serde(default)]
+        pub user_items: Vec<Agent>,
+        #[serde(default)]
+        pub project_items: Vec<Agent>,
+    }
+
+    impl Agents {
+        /// The agents a session can run as: the top-level ones, a user's or project's own
+        /// replacing a built-in one of the same id.
+        pub fn top_level(self) -> Vec<Agent> {
+            let mut out: Vec<Agent> = Vec::new();
+            for a in self
+                .defaults
+                .into_iter()
+                .chain(self.user_items)
+                .chain(self.project_items)
+                .filter(|a| !a.subagent)
+            {
+                match out.iter_mut().find(|o| o.id == a.id) {
+                    Some(o) => *o = a,
+                    None => out.push(a),
+                }
+            }
+            out
         }
     }
 
@@ -253,9 +355,125 @@ pub mod proto {
     // the WebSocket's events, as `{type, payload, sessionId?, id?}`
 
     #[derive(Deserialize, Debug)]
+    #[serde(rename_all = "camelCase")]
     pub struct Delta {
-        #[serde(default)]
         pub content: String,
+        /// Set when the text is a sub-agent's, not the answer's.
+        #[serde(default)]
+        pub sub_agent_type: Option<String>,
+    }
+
+    #[derive(Deserialize, Debug)]
+    #[serde(rename_all = "camelCase")]
+    pub struct Thinking {
+        pub message_id: String,
+        pub content: String,
+    }
+
+    #[derive(Deserialize, Debug, Clone)]
+    pub struct Todo {
+        pub content: String,
+        pub status: String,
+    }
+
+    #[derive(Deserialize, Debug)]
+    pub struct Todos {
+        pub todos: Vec<Todo>,
+    }
+
+    #[derive(Deserialize, Debug)]
+    pub struct MetadataUpdated {
+        pub key: String,
+        pub entries: Vec<Entry>,
+    }
+
+    #[derive(Deserialize, Debug)]
+    pub struct CriterionStatus {
+        #[serde(rename = "type")]
+        pub kind: String,
+        #[serde(default)]
+        pub reason: Option<String>,
+    }
+
+    #[derive(Deserialize, Debug)]
+    pub struct Criterion {
+        pub id: String,
+        pub description: String,
+        pub status: CriterionStatus,
+    }
+
+    #[derive(Deserialize, Debug)]
+    pub struct CriteriaUpdated {
+        pub criteria: Vec<Criterion>,
+    }
+
+    #[derive(Deserialize, Debug)]
+    pub struct ModeChanged {
+        pub mode: String,
+        #[serde(default)]
+        pub auto: bool,
+        #[serde(default)]
+        pub reason: Option<String>,
+    }
+
+    #[derive(Deserialize, Debug)]
+    pub struct PhaseChanged {
+        pub phase: String,
+    }
+
+    #[derive(Deserialize, Debug)]
+    #[serde(rename_all = "camelCase")]
+    pub struct Queued {
+        pub queue_id: String,
+        pub content: String,
+    }
+
+    #[derive(Deserialize, Debug)]
+    pub struct QueueState {
+        pub messages: Vec<Queued>,
+    }
+
+    #[derive(Deserialize, Debug)]
+    #[serde(rename_all = "camelCase")]
+    pub struct Pause {
+        pub pause_state: String,
+    }
+
+    #[derive(Deserialize, Debug)]
+    #[serde(rename_all = "camelCase")]
+    pub struct Retry {
+        #[serde(default)]
+        pub attempt: u64,
+        #[serde(default)]
+        pub retry_in_ms: u64,
+        #[serde(default)]
+        pub error: Option<Value>,
+    }
+
+    #[derive(Deserialize, Debug)]
+    #[serde(rename_all = "camelCase")]
+    pub struct TurnStats {
+        pub model: String,
+        #[serde(default)]
+        pub reasoning_effort: Option<String>,
+        #[serde(default)]
+        pub total_time: f64,
+        #[serde(default)]
+        pub prefill_tokens: u64,
+        #[serde(default)]
+        pub generation_tokens: u64,
+        #[serde(default)]
+        pub generation_speed: f64,
+    }
+
+    #[derive(Deserialize, Debug)]
+    pub struct Stats {
+        pub stats: TurnStats,
+    }
+
+    #[derive(Deserialize, Debug)]
+    pub struct Progress {
+        pub message: String,
     }
 
     #[derive(Deserialize, Debug)]
@@ -291,12 +509,13 @@ pub mod proto {
         pub session_id: Option<String>,
     }
 
-    #[derive(Deserialize, Debug)]
+    #[derive(Deserialize, serde::Serialize, Debug, Clone)]
     pub struct Choice {
-        #[serde(default)]
-        pub value: Value,
+        pub value: String,
         #[serde(default)]
         pub label: Option<String>,
+        #[serde(default)]
+        pub description: Option<String>,
     }
 
     #[derive(Deserialize, Debug)]
@@ -308,7 +527,7 @@ pub mod proto {
         #[serde(default, rename = "type")]
         pub kind: Option<String>,
         #[serde(default)]
-        pub options: Vec<Choice>,
+        pub options: Option<Vec<Choice>>,
     }
 
     #[derive(Deserialize, Debug)]
@@ -344,18 +563,32 @@ pub mod proto {
     }
 
     #[derive(Deserialize, Debug)]
+    #[serde(rename_all = "camelCase")]
     pub struct Done {
         #[serde(default)]
         pub reason: String,
+        /// Set when a sub-agent finished, not the turn.
+        #[serde(default)]
+        pub agent_type: Option<String>,
+    }
+
+    /// `context.state`: how full the context window is (`{context: {...}}`).
+    #[derive(Deserialize, Debug)]
+    pub struct ContextPayload {
+        pub context: ContextState,
     }
 
     #[derive(Deserialize, Debug)]
     #[serde(rename_all = "camelCase")]
     pub struct ContextState {
-        #[serde(default)]
         pub current_tokens: u64,
-        #[serde(default)]
         pub max_tokens: u64,
+        #[serde(default)]
+        pub compaction_count: u64,
+        #[serde(default)]
+        pub danger_zone: bool,
+        #[serde(default)]
+        pub can_compact: bool,
     }
 
     /// One WebSocket message from OpenFox.
@@ -367,12 +600,22 @@ pub mod proto {
         Confirm(Confirmation),
         Ask(AskUser),
         Error(Failure),
-        Retrying(Failure),
+        Retrying(Retry),
         RetryFailed(Failure),
         Running(Running),
         Said(Said),
         Done(Done),
-        Context(ContextState),
+        Context(ContextPayload),
+        Thinking(Thinking),
+        Todos(Todos),
+        Metadata(MetadataUpdated),
+        Criteria(CriteriaUpdated),
+        Mode(ModeChanged),
+        Phase(PhaseChanged),
+        Queue(QueueState),
+        Paused(Pause),
+        Stats(Stats),
+        Progress(Progress),
         Ack,
         /// A kind this core does not follow (yet): git status, queue state, workflows…
         Other(String),
@@ -420,6 +663,16 @@ pub mod proto {
             "chat.message" => typed(&kind, payload, Event::Said),
             "chat.done" => typed(&kind, payload, Event::Done),
             "context.state" => typed(&kind, payload, Event::Context),
+            "chat.thinking" => typed(&kind, payload, Event::Thinking),
+            "chat.todo" => typed(&kind, payload, Event::Todos),
+            "metadata.updated" => typed(&kind, payload, Event::Metadata),
+            "criteria.updated" => typed(&kind, payload, Event::Criteria),
+            "mode.changed" => typed(&kind, payload, Event::Mode),
+            "phase.changed" => typed(&kind, payload, Event::Phase),
+            "queue.state" => typed(&kind, payload, Event::Queue),
+            "session.pause" => typed(&kind, payload, Event::Paused),
+            "chat.stats" => typed(&kind, payload, Event::Stats),
+            "chat.progress" => typed(&kind, payload, Event::Progress),
             "ack" => Event::Ack,
             _ => Event::Other(kind.clone()),
         };
@@ -657,6 +910,10 @@ pub struct OpenFoxHarness {
     settings: Mutex<Settings>,
     links: Mutex<HashMap<String, Link>>,
     live: Mutex<HashMap<String, Live>>,
+    /// What each thread shows of OpenFox beside its conversation (`Panel`).
+    panels: Mutex<HashMap<String, Panel>>,
+    /// OpenFox's top-level agents, read at most once a minute.
+    agents_seen: Mutex<Option<(Instant, Vec<proto::Agent>)>>,
 }
 
 impl OpenFoxHarness {
@@ -675,6 +932,8 @@ impl OpenFoxHarness {
             settings: Mutex::new(settings),
             links: Mutex::default(),
             live: Mutex::default(),
+            panels: Mutex::default(),
+            agents_seen: Mutex::default(),
         }
     }
 
@@ -820,7 +1079,7 @@ impl OpenFoxHarness {
     pub async fn status(&self) -> Value {
         let s = self.settings();
         let mut out = json!({"url": s.url, "mode": s.mode, "turn_timeout": s.turn_timeout,
-                             "modes": MODES.iter().map(|(id, name, d)| json!({"id": id, "name": name, "description": d})).collect::<Vec<_>>(),
+                             "modes": self.agent_list().await,
                              "signed_in": !self.token().is_empty()});
         let auth: Result<proto::Auth, String> = self.call("GET", "/api/auth", None).await;
         match auth {
@@ -886,10 +1145,7 @@ impl OpenFoxHarness {
         };
         Probe {
             models,
-            modes: MODES
-                .iter()
-                .map(|(id, name, d)| json!({"id": id, "name": name, "description": d}))
-                .collect(),
+            modes: self.agent_list().await,
             commands: Vec::new(),
         }
     }
@@ -1089,10 +1345,28 @@ impl OpenFoxHarness {
     async fn conversation(&self, t: &Turn) -> Result<RunSummary, String> {
         let (session, fresh) = self.session_for(t).await?;
         let sid = session.id.clone();
-        let wanted_mode = if MODES.iter().any(|(id, _, _)| *id == t.mode) {
-            t.mode.clone()
-        } else {
+        if t.resume {
+            // OpenFox runs its last turn again (after a model's failure): follow it, say nothing new
+            let link = self.link_for(&sid).await?;
+            self.start_panel(t, &session).await;
+            self.live.lock().expect("not poisoned").insert(
+                t.agent.clone(),
+                Live {
+                    session: sid.clone(),
+                    posted: Vec::new(),
+                },
+            );
+            link.send(
+                &json!({"id": crate::wire::random_hex(4), "type": "chat.retry", "payload": {}}),
+            )
+            .await?;
+            t.phase("inference");
+            return self.follow(t, sid, link).await;
+        }
+        let wanted_mode = if t.mode.is_empty() {
             self.settings().mode
+        } else {
+            t.mode.clone()
         };
         if session.mode.as_deref() != Some(wanted_mode.as_str()) {
             self.act(
@@ -1128,7 +1402,8 @@ impl OpenFoxHarness {
                 text.push_str(&format!("\n- {} ({}, {} bytes)", a.path, a.mime, a.size));
             }
         }
-        let mut link = self.link_for(&sid).await?;
+        let link = self.link_for(&sid).await?;
+        self.start_panel(t, &session).await;
         self.live.lock().expect("not poisoned").insert(
             t.agent.clone(),
             Live {
@@ -1143,8 +1418,13 @@ impl OpenFoxHarness {
         )
         .await?;
         t.phase("inference");
+        self.follow(t, sid, link).await
+    }
+
+    /// Follow the session until its turn is over: its events into the journal and the panel.
+    async fn follow(&self, t: &Turn, sid: String, mut link: Link) -> Result<RunSummary, String> {
         let mut follow = Follow::new(sid.clone());
-        let mut tick = tokio::time::interval(Duration::from_secs(1));
+        let mut tick = tokio::time::interval(PANEL_EVERY);
         let sent = Instant::now();
         loop {
             tokio::select! {
@@ -1168,6 +1448,9 @@ impl OpenFoxHarness {
                     }
                 },
                 _ = tick.tick() => {
+                    if follow.panel_dirty {
+                        self.show(t, &mut follow, true); // what waited for its turn to be shown
+                    }
                     if follow.stopping.is_none() && (t.cancelled() || !t.running()) {
                         let _ = self.act("POST", &format!("/api/sessions/{sid}/stop"), json!({})).await;
                         follow.stopping = Some(Instant::now());
@@ -1200,6 +1483,15 @@ impl OpenFoxHarness {
             }
         }
         flush_answer(t, &mut follow.text, &mut follow.summary);
+        self.edit_panel(&t.agent, |p| {
+            p.running = false;
+            p.thinking.clear();
+            p.progress.clear();
+            for a in p.subagents.iter_mut() {
+                a.done = true;
+            }
+        });
+        self.show(t, &mut follow, true);
         self.keep(&sid, link);
         Ok(follow.summary)
     }
@@ -1228,11 +1520,58 @@ impl OpenFoxHarness {
         let update = |f: &mut Follow, u: Value| {
             acp_update(t, &u, &mut f.text, &mut f.open, &mut f.summary);
         };
+        let say = |f: &mut Follow, text: String| {
+            acp_update(
+                t,
+                &json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": text}}),
+                &mut f.text,
+                &mut f.open,
+                &mut f.summary,
+            );
+        };
+        let mut force = false; // a change worth showing at once (not a piece of text)
         match event {
-            Event::Delta(d) if !d.content.is_empty() => update(
-                f,
-                json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": d.content}}),
-            ),
+            Event::Delta(d) if d.content.is_empty() => {}
+            Event::Delta(d) => match d.sub_agent_type {
+                // a sub-agent's words go beside the conversation, not into the answer
+                Some(kind) => self.edit_panel(&t.agent, |p| {
+                    match p
+                        .subagents
+                        .iter_mut()
+                        .rev()
+                        .find(|a| a.kind == kind && !a.done)
+                    {
+                        Some(a) => a.text.push_str(&d.content),
+                        None => {
+                            force = true;
+                            p.subagents.push(SubAgent {
+                                kind,
+                                text: d.content,
+                                done: false,
+                            })
+                        }
+                    }
+                    for a in p.subagents.iter_mut() {
+                        a.text = tail(&a.text, 4_000);
+                    }
+                }),
+                None => {
+                    self.edit_panel(&t.agent, |p| {
+                        force = p.retry.is_some() || !p.progress.is_empty();
+                        p.retry = None;
+                        p.progress.clear();
+                    });
+                    say(f, d.content);
+                }
+            },
+            Event::Thinking(th) => self.edit_panel(&t.agent, |p| {
+                if f.thinking_id != th.message_id {
+                    f.thinking_id = th.message_id.clone();
+                    p.thinking.clear();
+                }
+                p.thinking.push_str(&th.content);
+                p.thinking = tail(&p.thinking, 20_000);
+            }),
             Event::ToolCall(c) => update(
                 f,
                 json!({"sessionUpdate": "tool_call", "toolCallId": c.call_id, "title": tool_title(&c.tool, &c.args),
@@ -1281,79 +1620,80 @@ impl OpenFoxHarness {
                 if !f.asked_calls.insert(q.call_id.clone()) {
                     return false;
                 }
-                let path = format!("/api/sessions/{}/answer", f.session);
-                let body = if q.kind.as_deref() == Some("confirm") {
+                if q.kind.as_deref() == Some("confirm") {
                     let yes = t.runner.approve(&t.agent, &q.question).await;
-                    json!({"callId": q.call_id, "answer": if yes { "yes" } else { "no" }})
-                } else {
-                    // a question with choices or free text: shown in the thread, the next message answers it
-                    let mut shown = format!("\n\n{}\n", q.question);
-                    for o in &q.options {
-                        let v = o
-                            .value
-                            .as_str()
-                            .map(String::from)
-                            .unwrap_or_else(|| o.value.to_string());
-                        shown.push_str(&format!("- {}\n", o.label.clone().unwrap_or(v)));
+                    if let Err(e) = self
+                        .act(
+                            "POST",
+                            &format!("/api/sessions/{}/answer", f.session),
+                            json!({"callId": q.call_id, "answer": if yes { "yes" } else { "no" }}),
+                        )
+                        .await
+                    {
+                        eprintln!("openfox: answer: {e}");
                     }
-                    update(
-                        f,
-                        json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": shown}}),
-                    );
-                    json!({"callId": q.call_id, "skip": true})
-                };
-                if let Err(e) = self.act("POST", &path, body).await {
-                    eprintln!("openfox: answer: {e}");
+                } else {
+                    // a choice or a free answer: the page asks it; OpenFox waits for the answer
+                    force = true;
+                    self.edit_panel(&t.agent, |p| {
+                        p.question = Some(Question {
+                            call_id: q.call_id.clone(),
+                            question: q.question.clone(),
+                            kind: q.kind.clone().unwrap_or_else(|| "text".into()),
+                            options: q.options.clone().unwrap_or_default(),
+                        })
+                    });
                 }
             }
             Event::Error(e) => {
-                let said = format!(
-                    "\n\n[OpenFox] {}",
-                    Some(e.text())
-                        .filter(|s| !s.is_empty())
-                        .unwrap_or_else(|| "OpenFox reported an error".into())
-                );
-                update(
-                    f,
-                    json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": said}}),
-                );
+                let why = Some(e.text())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| "OpenFox reported an error".into());
+                say(f, format!("\n\n[OpenFox] {why}"));
             }
-            Event::Retrying(e) => {
-                if !f.retrying {
-                    f.retrying = true;
-                    let said = format!(
-                        "[OpenFox] the model did not answer ({}); retrying…\n",
-                        e.text().trim().chars().take(200).collect::<String>()
-                    );
-                    update(
-                        f,
-                        json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": said}}),
-                    );
-                }
+            Event::Retrying(r) => {
+                force = true;
+                let why = r
+                    .error
+                    .as_ref()
+                    .map(|e| {
+                        e.as_str()
+                            .map(String::from)
+                            .unwrap_or_else(|| e.to_string())
+                    })
+                    .unwrap_or_default();
+                self.edit_panel(&t.agent, |p| {
+                    p.retry = Some(RetryState {
+                        attempt: r.attempt,
+                        in_ms: r.retry_in_ms,
+                        error: tail(&why, 300),
+                        failed: false,
+                    })
+                });
             }
             Event::RetryFailed(e) => {
-                let attempts = e
-                    .attempts
-                    .as_ref()
-                    .map(Value::to_string)
-                    .unwrap_or_else(|| "?".into());
-                let said = format!(
-                    "\n[OpenFox] gave up after {attempts} attempts: {}. Pick another model.\n",
-                    e.text().trim().chars().take(300).collect::<String>()
-                );
-                update(
-                    f,
-                    json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": said}}),
-                );
-                return true;
+                // OpenFox gave up on the model: the page offers to retry (Runner::resume follows it)
+                force = true;
+                let attempts = e.attempts.as_ref().and_then(Value::as_u64).unwrap_or(0);
+                self.edit_panel(&t.agent, |p| {
+                    p.retry = Some(RetryState {
+                        attempt: attempts,
+                        in_ms: 0,
+                        error: tail(&e.text(), 300),
+                        failed: true,
+                    })
+                });
             }
             Event::Running(r) => {
+                force = true;
+                self.edit_panel(&t.agent, |p| p.running = r.is_running);
                 if r.is_running {
                     f.started = true;
                     f.idle = false;
                     t.phase("inference");
                 } else if f.started {
                     f.idle = true; // the turn ends once nothing posted meanwhile is left for OpenFox
+                    self.show(t, f, true);
                     return f.stopping.is_some() || !self.waiting(&t.agent);
                 }
             }
@@ -1369,20 +1709,509 @@ impl OpenFoxHarness {
                     }
                 }
             }
+            Event::Done(d) if d.agent_type.as_deref() == Some("sub-agent") => {
+                force = true;
+                self.edit_panel(&t.agent, |p| {
+                    if let Some(a) = p.subagents.iter_mut().rev().find(|a| !a.done) {
+                        a.done = true;
+                    }
+                });
+            }
             Event::Done(d)
                 if f.stopping.is_some() && (d.reason == "stopped" || d.reason == "complete") =>
             {
                 return true
             }
-            Event::Context(c) => t
-                .runner
-                .set_usage(&t.agent, c.current_tokens, c.max_tokens, None),
+            Event::Context(c) => {
+                force = true;
+                let c = c.context;
+                t.runner
+                    .set_usage(&t.agent, c.current_tokens, c.max_tokens, None);
+                self.edit_panel(&t.agent, |p| p.context = Some(ContextView::from(&c)));
+            }
+            Event::Todos(list) => {
+                force = true;
+                self.edit_panel(&t.agent, |p| {
+                    p.todos = list.todos.iter().map(|x| Item::todo(x)).collect()
+                });
+            }
+            Event::Metadata(m) => {
+                force = true;
+                self.edit_panel(&t.agent, |p| p.set_entries(&m.key, &m.entries));
+            }
+            Event::Criteria(c) => {
+                force = true;
+                self.edit_panel(&t.agent, |p| {
+                    p.criteria = c
+                        .criteria
+                        .iter()
+                        .map(|x| Item {
+                            id: x.id.clone(),
+                            text: x.description.clone(),
+                            status: x.status.kind.clone(),
+                            reason: x.status.reason.clone(),
+                        })
+                        .collect()
+                });
+            }
+            Event::Mode(m) => {
+                force = true;
+                self.edit_panel(&t.agent, |p| p.agent = m.mode);
+            }
+            Event::Phase(ph) => {
+                force = true;
+                self.edit_panel(&t.agent, |p| p.phase = ph.phase);
+            }
+            Event::Queue(q) => {
+                force = true;
+                self.edit_panel(&t.agent, |p| {
+                    p.queue = q
+                        .messages
+                        .iter()
+                        .map(|m| json!({"id": m.queue_id, "content": m.content}))
+                        .collect()
+                });
+            }
+            Event::Paused(ps) => {
+                force = true;
+                self.edit_panel(&t.agent, |p| p.paused = ps.pause_state);
+            }
+            Event::Stats(st) => {
+                force = true;
+                let x = st.stats;
+                self.edit_panel(&t.agent, |p| {
+                    p.stats = Some(json!({"model": x.model, "effort": x.reasoning_effort, "seconds": x.total_time,
+                                          "tokens_in": x.prefill_tokens, "tokens_out": x.generation_tokens,
+                                          "speed": x.generation_speed}))
+                });
+            }
+            Event::Progress(pr) => {
+                force = true;
+                self.edit_panel(&t.agent, |p| p.progress = pr.message);
+            }
             Event::Malformed(kind, why) => {
                 eprintln!("openfox: {kind} did not read ({why}): OpenFox may have changed it")
             }
             _ => {}
         }
+        self.show(t, f, force);
         false
+    }
+
+    /// Change what a thread shows of OpenFox.
+    fn edit_panel(&self, agent: &str, change: impl FnOnce(&mut Panel)) {
+        let mut panels = self.panels.lock().expect("not poisoned");
+        change(panels.entry(agent.to_string()).or_default());
+    }
+
+    /// Send the thread's panel to the pages: at most every PANEL_EVERY, at once when `now`.
+    fn show(&self, t: &Turn, f: &mut Follow, now: bool) {
+        if !now && f.panel_at.elapsed() < PANEL_EVERY {
+            f.panel_dirty = true;
+            return;
+        }
+        f.panel_at = Instant::now();
+        f.panel_dirty = false;
+        self.publish_panel(&t.runner, &t.agent);
+    }
+
+    fn publish_panel(&self, runner: &crate::agent::Runner, agent: &str) {
+        let panel = self
+            .panels
+            .lock()
+            .expect("not poisoned")
+            .get(agent)
+            .cloned()
+            .unwrap_or_default();
+        runner.tell(
+            &format!("panel.{agent}"),
+            json!({"agent": agent, "panel": panel}),
+        );
+    }
+
+    /// The panel as OpenFox has the session now: its agent, effort, phase, structured data.
+    async fn start_panel(&self, t: &Turn, session: &proto::Session) {
+        let agents = self.agent_list().await;
+        let efforts = self.efforts_for(session.model()).await;
+        self.edit_panel(&t.agent, |p| {
+            p.agent = session.mode.clone().unwrap_or_default();
+            p.agents = agents;
+            p.effort = session.provider_reasoning_effort.clone();
+            p.efforts = efforts;
+            p.danger = session
+                .danger_level
+                .clone()
+                .unwrap_or_else(|| "normal".into());
+            p.phase = session.phase.clone().unwrap_or_default();
+            p.paused = session.pause_state.clone().unwrap_or_else(|| "none".into());
+            p.running = true;
+            p.question = None;
+            p.error.clear();
+            p.subagents.retain(|a| !a.done);
+            for (key, entries) in &session.metadata_entries {
+                p.set_entries(key, entries);
+            }
+        });
+        self.publish_panel(&t.runner, &t.agent);
+    }
+
+    /// OpenFox's top-level agents, as modes `{id, name, description}` (read once a minute).
+    async fn agent_list(&self) -> Vec<Value> {
+        let fresh = self
+            .agents_seen
+            .lock()
+            .expect("not poisoned")
+            .as_ref()
+            .filter(|(at, _)| at.elapsed() < Duration::from_secs(60))
+            .map(|(_, a)| a.clone());
+        let agents = match fresh {
+            Some(a) => a,
+            None => match self.call::<proto::Agents>("GET", "/api/agents", None).await {
+                Ok(a) => {
+                    let list = a.top_level();
+                    *self.agents_seen.lock().expect("not poisoned") =
+                        Some((Instant::now(), list.clone()));
+                    list
+                }
+                Err(e) => {
+                    eprintln!("openfox: {e}");
+                    Vec::new()
+                }
+            },
+        };
+        if agents.is_empty() {
+            return MODES
+                .iter()
+                .map(|(id, name, d)| json!({"id": id, "name": name, "description": d}))
+                .collect();
+        }
+        agents
+            .iter()
+            .map(|a| json!({"id": a.id, "name": if a.name.is_empty() { &a.id } else { &a.name }, "description": a.description}))
+            .collect()
+    }
+
+    /// The reasoning efforts the session's model offers ("<provider>/<model>"; none: OpenFox's default).
+    async fn efforts_for(&self, model: Option<String>) -> Vec<String> {
+        let Ok(p) = self.providers().await else {
+            return Vec::new();
+        };
+        let (provider, model) = match model.as_deref().and_then(|m| m.split_once('/')) {
+            Some((pr, m)) => (pr.to_string(), Some(m.to_string())),
+            None => (p.active_provider_id.clone().unwrap_or_default(), None),
+        };
+        p.providers
+            .iter()
+            .find(|pr| pr.id == provider)
+            .and_then(|pr| match &model {
+                Some(m) => pr.models.iter().find(|x| x.id() == m),
+                None => pr.models.first(),
+            })
+            .map(proto::ModelRef::efforts)
+            .unwrap_or_default()
+    }
+
+    /// Something the person did on a thread's OpenFox panel. A retry is followed as a turn of its
+    /// own (`Runner::resume`); everything else is OpenFox's at once, and the panel shows it.
+    pub async fn thread_action(
+        &self,
+        runner: &std::sync::Arc<crate::agent::Runner>,
+        agent: &str,
+        action: &str,
+        p: &Value,
+    ) -> Result<(), String> {
+        let sid = self
+            .sessions()
+            .get(agent)
+            .and_then(Value::as_str)
+            .map(String::from)
+            .ok_or("this thread has no OpenFox session yet: send it a message first")?;
+        let path = |rest: &str| format!("/api/sessions/{sid}{rest}");
+        let text = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+        let result = match action {
+            "agent" => {
+                let mode = text("mode");
+                self.act("PUT", &path("/mode"), json!({"mode": mode}))
+                    .await
+                    .map(|()| {
+                        self.edit_panel(agent, |x| x.agent = mode);
+                    })
+            }
+            "effort" => {
+                let view = self
+                    .session_view(&sid)
+                    .await?
+                    .ok_or("OpenFox no longer has this session")?;
+                let s = view.session;
+                let effort = Some(text("effort")).filter(|e| !e.is_empty());
+                let provider = s
+                    .provider_id
+                    .clone()
+                    .or(self.providers().await?.active_provider_id)
+                    .unwrap_or_default();
+                let mut body = json!({"providerId": provider, "reasoningEffort": effort});
+                if let Some(m) = &s.provider_model {
+                    body["model"] = json!(m);
+                }
+                self.act("POST", &path("/provider"), body).await.map(|()| {
+                    self.edit_panel(agent, |x| x.effort = effort);
+                })
+            }
+            "danger" => {
+                let level = if text("level") == "dangerous" {
+                    "dangerous"
+                } else {
+                    "normal"
+                };
+                self.act("PUT", &path("/danger-level"), json!({"dangerLevel": level}))
+                    .await
+                    .map(|()| {
+                        self.edit_panel(agent, |x| x.danger = level.into());
+                    })
+            }
+            "criteria" => {
+                let list: Vec<Value> = p
+                    .get("criteria")
+                    .and_then(Value::as_array)
+                    .ok_or("no criteria")?
+                    .iter()
+                    .filter_map(|c| {
+                        let d = c.get("text").and_then(Value::as_str)?.trim().to_string();
+                        (!d.is_empty()).then(|| {
+                            let mut o = json!({"description": d});
+                            if let Some(id) = c
+                                .get("id")
+                                .and_then(Value::as_str)
+                                .filter(|i| !i.is_empty())
+                            {
+                                o["id"] = json!(id);
+                            }
+                            if let Some(st) = c
+                                .get("status")
+                                .and_then(Value::as_str)
+                                .filter(|i| !i.is_empty())
+                            {
+                                o["status"] = json!(st);
+                            }
+                            o
+                        })
+                    })
+                    .collect();
+                self.act("PUT", &path("/criteria"), json!({"criteria": list}))
+                    .await
+            }
+            "answer" => {
+                let call = text("call_id");
+                let body = match p.get("answer").and_then(Value::as_str) {
+                    Some(a) => json!({"callId": call, "answer": a}),
+                    None => json!({"callId": call, "skip": true}),
+                };
+                self.act("POST", &path("/answer"), body).await.map(|()| {
+                    self.edit_panel(agent, |x| x.question = None);
+                })
+            }
+            "pause" => self.act("POST", &path("/pause"), json!({})).await,
+            "resume" => self.act("POST", &path("/resume"), json!({})).await,
+            "dequeue" => {
+                let (status, raw) = self
+                    .raw(
+                        "DELETE",
+                        &path(&format!("/queue/{}", text("id"))),
+                        None,
+                        true,
+                    )
+                    .await?;
+                if status >= 400 {
+                    Err(format!("HTTP {status} {}", reason(&raw)))
+                } else {
+                    Ok(())
+                }
+            }
+            "compact" | "retry_now" => {
+                // said on a WebSocket of its own: the turn's, if one runs, is that turn's
+                let kind = if action == "compact" {
+                    "context.compact"
+                } else {
+                    "chat.llm_retry_now"
+                };
+                let link = self.link_for(&sid).await?;
+                let sent = link
+                    .send(&json!({"id": crate::wire::random_hex(4), "type": kind, "payload": {}}))
+                    .await;
+                tokio::time::sleep(Duration::from_millis(200)).await; // let it go out before the socket closes
+                sent
+            }
+            "retry" => {
+                self.edit_panel(agent, |x| x.retry = None);
+                let (r, a) = (std::sync::Arc::clone(runner), agent.to_string());
+                tokio::spawn(async move {
+                    r.resume(&a).await;
+                });
+                Ok(())
+            }
+            "refresh" => {
+                let view = self
+                    .session_view(&sid)
+                    .await?
+                    .ok_or("OpenFox no longer has this session")?;
+                let agents = self.agent_list().await;
+                let efforts = self.efforts_for(view.session.model()).await;
+                let s = view.session;
+                self.edit_panel(agent, |x| {
+                    x.agent = s.mode.clone().unwrap_or_default();
+                    x.agents = agents;
+                    x.effort = s.provider_reasoning_effort.clone();
+                    x.efforts = efforts;
+                    x.danger = s.danger_level.clone().unwrap_or_else(|| "normal".into());
+                    x.phase = s.phase.clone().unwrap_or_default();
+                    x.paused = s.pause_state.clone().unwrap_or_else(|| "none".into());
+                    x.running = s.is_running;
+                    if let Some(c) = &view.context_state {
+                        x.context = Some(ContextView::from(c));
+                    }
+                    for (key, entries) in &s.metadata_entries {
+                        x.set_entries(key, entries);
+                    }
+                });
+                Ok(())
+            }
+            other => Err(format!("unknown OpenFox action {other:?}")),
+        };
+        self.edit_panel(agent, |x| {
+            x.error = result.as_ref().err().cloned().unwrap_or_default()
+        });
+        self.publish_panel(runner, agent);
+        result
+    }
+}
+
+/// How often the panel goes to the pages while text streams in it (thinking, a sub-agent).
+const PANEL_EVERY: Duration = Duration::from_millis(250);
+
+/// What a thread shows of OpenFox beside its conversation, sent live to the pages that may see
+/// the thread (`panel.<agent>`): the agent it runs as and what it may switch to, the reasoning
+/// effort, how bold it may be, its phase, its todos and criteria, its thinking, its sub-agents,
+/// its context, the messages waiting in its queue, a question it asks, a retry under way.
+#[derive(Serialize, Default, Clone, Debug)]
+pub struct Panel {
+    pub agent: String,
+    pub agents: Vec<Value>,
+    pub effort: Option<String>,
+    pub efforts: Vec<String>,
+    pub danger: String,
+    pub phase: String,
+    pub paused: String,
+    pub running: bool,
+    pub todos: Vec<Item>,
+    pub criteria: Vec<Item>,
+    /// Other structured data OpenFox keeps (review findings…), by key.
+    pub metadata: BTreeMap<String, Vec<Item>>,
+    pub thinking: String,
+    pub subagents: Vec<SubAgent>,
+    pub context: Option<ContextView>,
+    pub queue: Vec<Value>,
+    pub question: Option<Question>,
+    pub retry: Option<RetryState>,
+    pub stats: Option<Value>,
+    pub progress: String,
+    /// The last action's failure, for the page to say.
+    pub error: String,
+}
+
+impl Panel {
+    fn set_entries(&mut self, key: &str, entries: &[proto::Entry]) {
+        let items: Vec<Item> = entries
+            .iter()
+            .map(|e| Item {
+                id: e.id.clone(),
+                text: e.description.clone(),
+                status: e.status.clone(),
+                reason: None,
+            })
+            .collect();
+        match key {
+            "criteria" => self.criteria = items,
+            "todos" => self.todos = items,
+            _ => {
+                self.metadata.insert(key.to_string(), items);
+            }
+        }
+    }
+}
+
+#[derive(Serialize, Default, Clone, Debug)]
+pub struct Item {
+    pub id: String,
+    pub text: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+impl Item {
+    fn todo(t: &proto::Todo) -> Self {
+        Self {
+            id: String::new(),
+            text: t.content.clone(),
+            status: t.status.clone(),
+            reason: None,
+        }
+    }
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct SubAgent {
+    pub kind: String,
+    pub text: String,
+    pub done: bool,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct Question {
+    pub call_id: String,
+    pub question: String,
+    /// "choice" (pick one of `options`) or "text" (a free answer).
+    pub kind: String,
+    pub options: Vec<proto::Choice>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct RetryState {
+    pub attempt: u64,
+    pub in_ms: u64,
+    pub error: String,
+    /// OpenFox gave up: only a retry (or another model) goes on.
+    pub failed: bool,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct ContextView {
+    pub used: u64,
+    pub max: u64,
+    pub compactions: u64,
+    pub danger: bool,
+    pub can_compact: bool,
+}
+
+impl From<&proto::ContextState> for ContextView {
+    fn from(c: &proto::ContextState) -> Self {
+        Self {
+            used: c.current_tokens,
+            max: c.max_tokens,
+            compactions: c.compaction_count,
+            danger: c.danger_zone,
+            can_compact: c.can_compact,
+        }
+    }
+}
+
+/// The last `n` characters of a text.
+fn tail(text: &str, n: usize) -> String {
+    let count = text.chars().count();
+    if count <= n {
+        text.to_string()
+    } else {
+        text.chars().skip(count - n).collect()
     }
 }
 
@@ -1396,11 +2225,14 @@ struct Follow {
     started: bool,
     /// OpenFox said it stopped running (it may start again for a message posted meanwhile).
     idle: bool,
-    retrying: bool,
     resynced: bool,
     stopping: Option<Instant>,
     heard: Instant,
     asked: Instant,
+    /// The step whose thinking the panel shows.
+    thinking_id: String,
+    panel_at: Instant,
+    panel_dirty: bool,
 }
 
 impl Follow {
@@ -1416,11 +2248,13 @@ impl Follow {
             asked_calls: Default::default(),
             started: false,
             idle: false,
-            retrying: false,
             resynced: false,
             stopping: None,
             heard: Instant::now(),
             asked: Instant::now(),
+            thinking_id: String::new(),
+            panel_at: Instant::now(),
+            panel_dirty: false,
         }
     }
 

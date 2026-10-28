@@ -1099,6 +1099,21 @@ impl Node {
             }
         });
         let me = self.cfg.node_id.clone();
+        self.on("agent.*.openfox", |n, m| async move {
+            // something the person did on a thread's OpenFox panel
+            let agent = m.subject.split('.').nth(1).unwrap_or("").to_string();
+            let Some(r) = n.runner.clone().filter(|_| n.running(&agent)) else {
+                return;
+            };
+            let action = s(&m.payload, "action");
+            tokio::spawn(async move {
+                if let Some(fox) = r.openfox_of(&agent) {
+                    if let Err(e) = fox.thread_action(&r, &agent, &action, &m.payload).await {
+                        eprintln!("openfox: {action} on {agent}: {e}");
+                    }
+                }
+            });
+        });
         for action in ["set", "login", "activate", "check"] {
             self.on(
                 &format!("node.{me}.openfox.{action}"),

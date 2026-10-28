@@ -105,6 +105,8 @@ struct State {
     drafts: HashMap<String, String>,
     /// The last OpenFox setting changed from the interface, by "node/harness": done or why not.
     openfox_results: BTreeMap<String, Value>,
+    /// What each OpenFox thread shows beside its conversation (`panel.<agent>`).
+    panels: HashMap<String, Value>,
 }
 
 /// A clone onto a harness the thread's core lacks: fork it there, teleport the copy to a
@@ -223,10 +225,20 @@ pub struct Gateway {
     clients: broadcast::Sender<()>,
     /// Answers so far, as they come (agent, text): sent to the pages on their own, not in snapshots.
     drafts: broadcast::Sender<(String, String)>,
+    /// OpenFox panels as they change (agent, panel), sent on their own like the drafts.
+    panels: broadcast::Sender<(String, Value)>,
     pub usage_interval: Duration,
     sessions: crate::session::Sessions,
     /// The persona each person chose for the mascot.
     personas: crate::personas::Choices,
+}
+
+/// An OpenFox thread's panel, as an SSE event of its own (`panel`).
+fn panel_frame(agent: &str, panel: &Value) -> String {
+    format!(
+        "event: panel\ndata: {}\n\n",
+        json!({"agent": agent, "panel": panel})
+    )
 }
 
 /// A thread's answer so far, as an SSE event of its own (`draft`); empty text: it is journaled now.
@@ -413,6 +425,7 @@ impl Gateway {
         let (usage, data_dir) = (&usage[..], &data_dir);
         let (clients, _) = broadcast::channel(50); // a slow client loses old frames, not the stream
         let (drafts, _) = broadcast::channel(256);
+        let (panels, _) = broadcast::channel(256);
         let mut full_ui = Map::new();
         full_ui.insert("footer".into(), json!(""));
         full_ui.extend(ui);
@@ -428,6 +441,7 @@ impl Gateway {
             state: Mutex::default(),
             clients,
             drafts,
+            panels,
             usage_interval: Duration::from_secs(60),
             sessions: crate::session::Sessions::open(data_dir),
             personas: crate::personas::Choices::open(data_dir),
@@ -451,6 +465,21 @@ impl Gateway {
     }
 
     fn subscribe(self: &Arc<Self>) {
+        // an OpenFox thread's panel: kept for a page that opens later, passed on without a snapshot
+        let mut prx = self.bus.subscribe("panel.*");
+        let me = Arc::clone(self);
+        tokio::spawn(async move {
+            while let Some(m) = prx.recv().await {
+                let agent = s(&m.payload, "agent");
+                let panel = m.payload.get("panel").cloned().unwrap_or(Value::Null);
+                me.state
+                    .lock()
+                    .expect("not poisoned")
+                    .panels
+                    .insert(agent.clone(), panel.clone());
+                let _ = me.panels.send((agent, panel));
+            }
+        });
         // an answer so far: kept for a page that opens meanwhile, and passed on without a snapshot
         let mut rx = self.bus.subscribe("draft.*");
         let me = Arc::clone(self);
@@ -1344,8 +1373,15 @@ impl Gateway {
                 d["pass"] = json!(id);
                 Ok(d)
             }
-            "/api/message" | "/api/upload" | "/api/model" | "/api/mode" | "/api/archive"
-            | "/api/cancel" | "/api/rename" | "/api/pin" => {
+            "/api/message"
+            | "/api/upload"
+            | "/api/model"
+            | "/api/mode"
+            | "/api/archive"
+            | "/api/cancel"
+            | "/api/rename"
+            | "/api/pin"
+            | "/api/openfox/thread" => {
                 if self.owned(access, &s(&d, "agent")) {
                     Ok(d)
                 } else {
@@ -1690,6 +1726,29 @@ impl Gateway {
                 );
                 ok
             }
+            "/api/openfox/thread" => {
+                // something done on a thread's OpenFox panel; the thread's node does it
+                const ACTIONS: [&str; 12] = [
+                    "agent",
+                    "effort",
+                    "danger",
+                    "criteria",
+                    "answer",
+                    "pause",
+                    "resume",
+                    "dequeue",
+                    "compact",
+                    "retry_now",
+                    "retry",
+                    "refresh",
+                ];
+                if !need(&["agent", "action"]) || !ACTIONS.contains(&s(d, "action").as_str()) {
+                    return bad;
+                }
+                self.bus
+                    .publish(&format!("agent.{}.openfox", s(d, "agent")), d.clone());
+                ok
+            }
             "/api/openfox" => {
                 // an OpenFox setting from the interface: its address, agent, limit; sign-in; the
                 // active provider; a check. The node does it and says how it went.
@@ -1833,6 +1892,7 @@ impl Gateway {
     async fn events(&self, w: &mut TcpStream, access: Access) -> std::io::Result<()> {
         let mut rx = self.clients.subscribe();
         let mut drafts = self.drafts.subscribe();
+        let mut panels = self.panels.subscribe();
         w.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\nConnection: keep-alive\r\n\r\n").await?;
         w.write_all(format!("data: {}\n\n", self.snapshot_for(&access)).as_bytes())
             .await?;
@@ -1848,6 +1908,17 @@ impl Gateway {
         for (agent, text) in now.into_iter().filter(|(a, _)| self.owned(&access, a)) {
             w.write_all(draft_frame(&agent, &text).as_bytes()).await?;
         }
+        let shown: Vec<(String, Value)> = self
+            .state
+            .lock()
+            .expect("not poisoned")
+            .panels
+            .iter()
+            .map(|(a, p)| (a.clone(), p.clone()))
+            .collect();
+        for (agent, panel) in shown.into_iter().filter(|(a, _)| self.owned(&access, a)) {
+            w.write_all(panel_frame(&agent, &panel).as_bytes()).await?;
+        }
         w.flush().await?;
         loop {
             let tick = tokio::time::sleep(Duration::from_secs(15));
@@ -1856,6 +1927,11 @@ impl Gateway {
                     Ok(()) | Err(broadcast::error::RecvError::Lagged(_)) => {
                         format!("data: {}\n\n", self.snapshot_for(&access))
                     }
+                    Err(broadcast::error::RecvError::Closed) => return Ok(()),
+                },
+                got = panels.recv() => match got {
+                    Ok((agent, panel)) if self.owned(&access, &agent) => panel_frame(&agent, &panel),
+                    Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(broadcast::error::RecvError::Closed) => return Ok(()),
                 },
                 got = drafts.recv() => match got {

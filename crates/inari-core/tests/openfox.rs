@@ -30,8 +30,11 @@ struct Fox {
     /// The subscribed WebSocket's outbox.
     ws: Option<mpsc::UnboundedSender<Value>>,
     confirmed: Option<bool>,
+    answered: Option<String>,
     stops: usize,
     log: Vec<String>,
+    /// What the REST calls and WebSocket messages carried, for the tests to read.
+    seen: Vec<(String, Value)>,
 }
 
 type Shared = Arc<Mutex<Fox>>;
@@ -123,6 +126,77 @@ async fn work(fox: Shared, content: String) {
             .push(json!({"role": "assistant", "content": answer}));
         f.running = false;
         return; // the end is said to nobody
+    } else if content.contains("plan") {
+        say(
+            &fox,
+            "chat.thinking",
+            json!({"messageId": "m1", "content": "Let me think about "}),
+        );
+        say(
+            &fox,
+            "chat.thinking",
+            json!({"messageId": "m1", "content": "the layout."}),
+        );
+        say(
+            &fox,
+            "mode.changed",
+            json!({"mode": "builder", "auto": true}),
+        );
+        say(
+            &fox,
+            "chat.todo",
+            json!({"todos": [{"content": "write the parser", "status": "in_progress"}, {"content": "test it", "status": "pending"}]}),
+        );
+        say(
+            &fox,
+            "metadata.updated",
+            json!({"key": "criteria", "entries": [{"id": "c1", "description": "parses empty input", "status": "pending"}]}),
+        );
+        say(
+            &fox,
+            "chat.delta",
+            json!({"messageId": "s", "content": "sub-agent notes", "subAgentType": "explorer"}),
+        );
+        say(
+            &fox,
+            "chat.done",
+            json!({"messageId": "s", "reason": "complete", "agentType": "sub-agent"}),
+        );
+        say(
+            &fox,
+            "context.state",
+            json!({"context": {"currentTokens": 1200, "maxTokens": 32000, "compactionCount": 1, "dangerZone": false, "canCompact": true}}),
+        );
+        piece(&fox, "Planned.");
+    } else if content.contains("ask") {
+        say(
+            &fox,
+            "chat.ask_user",
+            json!({"callId": "q1", "question": "Which one?", "type": "choice",
+            "options": [{"value": "a", "label": "Option A"}, {"value": "b", "label": "Option B"}]}),
+        );
+        let mut answer = None;
+        for _ in 0..200 {
+            answer = fox.lock().unwrap().answered.clone();
+            if answer.is_some() {
+                break;
+            }
+            pause(25).await;
+        }
+        piece(&fox, &format!("You chose {}.", answer.unwrap_or_default()));
+    } else if content.contains("fail") {
+        say(
+            &fox,
+            "chat.llm_retry",
+            json!({"attempt": 1, "retryInMs": 2000, "error": "connection refused"}),
+        );
+        say(
+            &fox,
+            "chat.llm_retry_failed",
+            json!({"attempts": 3, "error": "connection refused"}),
+        );
+    } else if content.contains("retried") {
+        piece(&fox, "Second try worked.");
     } else if content.contains("lost") {
         piece(&fox, "Quiet");
         pause(200).await;
@@ -247,10 +321,16 @@ async fn serve(fox: Shared, mut s: TcpStream) {
         });
         while let Some(text) = client_text(&mut r).await {
             let m: Value = serde_json::from_str(&text).unwrap_or_default();
+            fox.lock().unwrap().seen.push((
+                format!("WS {}", m["type"].as_str().unwrap_or("")),
+                m.clone(),
+            ));
             if m["type"] == "session.load" {
                 fox.lock().unwrap().ws = Some(tx.clone());
                 let _ =
                     tx.send(json!({"type": "ack", "id": m["id"], "payload": {"sessionId": "s1"}}));
+            } else if m["type"] == "chat.retry" {
+                tokio::spawn(work(Arc::clone(&fox), "retried".into()));
             }
         }
         drop(tx);
@@ -259,6 +339,10 @@ async fn serve(fox: Shared, mut s: TcpStream) {
     }
     let body: Value = serde_json::from_slice(&body).unwrap_or_default();
     let path = target.split('?').next().unwrap_or("").to_string();
+    fox.lock()
+        .unwrap()
+        .seen
+        .push((format!("{method} {path}"), body.clone()));
     let (status, reply) = if path == "/api/auth" {
         (200, json!({"requiresAuth": true, "hasPassword": true}))
     } else if path == "/api/auth/login" {
@@ -276,6 +360,26 @@ async fn serve(fox: Shared, mut s: TcpStream) {
             {"id": "local", "name": "vLLM", "backend": "vllm", "isLocal": true, "apiKey": "sk-never-shown",
              "models": [{"id": "qwen3", "contextWindow": 32768}]}]}),
         )
+    } else if path == "/api/agents" {
+        (
+            200,
+            json!({"defaults": [{"id": "planner", "name": "Plan", "description": "reads", "subagent": false},
+                                   {"id": "builder", "name": "Build", "description": "acts", "subagent": false},
+                                   {"id": "explorer", "name": "Explorer", "description": "a sub-agent", "subagent": true}],
+                     "userItems": [{"id": "reviewer", "name": "Reviewer", "description": "my own", "subagent": false}],
+                     "projectItems": []}),
+        )
+    } else if path == "/api/sessions/s1/answer" {
+        fox.lock().unwrap().answered = body["answer"].as_str().map(String::from);
+        (200, json!({}))
+    } else if [
+        "/api/sessions/s1/criteria",
+        "/api/sessions/s1/danger-level",
+        "/api/sessions/s1/pause",
+    ]
+    .contains(&path.as_str())
+    {
+        (200, json!({}))
     } else if path == "/api/projects" && method == "GET" {
         (200, json!({"projects": []}))
     } else if path == "/api/projects" {
@@ -354,6 +458,8 @@ struct Lab {
     runner: Arc<Runner>,
     agent: String,
     fox: Shared,
+    /// Every panel the harness sent to the pages, in order.
+    panels: Arc<Mutex<Vec<Value>>>,
 }
 
 async fn lab(approve: bool) -> Lab {
@@ -376,13 +482,26 @@ async fn lab(approve: bool) -> Lab {
     let host = Arc::new(CapsuleHost::new("n1", &dir.path().join("node")).unwrap());
     let approver: Approver =
         Arc::new(move |_a: String, _c: String| Box::pin(async move { approve }));
-    let runner = Runner::new(host, vec![("openfox".to_string(), h)], None, Some(approver));
+    let panels: Arc<Mutex<Vec<Value>>> = Arc::default();
+    let kept = Arc::clone(&panels);
+    let publish: inari_core::agent::Publisher = Arc::new(move |subject: &str, payload: Value| {
+        if subject.starts_with("panel.") {
+            kept.lock().unwrap().push(payload["panel"].clone());
+        }
+    });
+    let runner = Runner::new(
+        host,
+        vec![("openfox".to_string(), h)],
+        Some(publish),
+        Some(approver),
+    );
     let agent = runner.create("t1", "", "a title").unwrap();
     Lab {
         _dir: dir,
         runner,
         agent,
         fox,
+        panels,
     }
 }
 
@@ -525,4 +644,175 @@ async fn the_status_shows_openfox_without_its_keys() {
             ..h.settings()
         })
         .is_err());
+}
+
+fn last_panel(l: &Lab) -> Value {
+    l.panels.lock().unwrap().last().cloned().unwrap_or_default()
+}
+
+fn fox_of(l: &Lab) -> &OpenFoxHarness {
+    l.runner.harnesses["openfox"].openfox().unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_panel_shows_what_openfox_does_beside_the_answer() {
+    let l = lab(true).await;
+    let out = l.runner.run(&l.agent, "make a plan", vec![]).await;
+    assert_eq!(
+        out.final_text, "Planned.",
+        "a sub-agent's words stay out of the answer"
+    );
+    let p = last_panel(&l);
+    assert_eq!(p["agent"], "builder");
+    assert_eq!(
+        p["todos"][0],
+        json!({"id": "", "text": "write the parser", "status": "in_progress"})
+    );
+    assert_eq!(p["criteria"][0]["text"], "parses empty input");
+    assert_eq!(
+        (p["context"]["used"].as_u64(), p["context"]["max"].as_u64()),
+        (Some(1200), Some(32000))
+    );
+    assert_eq!(p["subagents"][0]["text"], "sub-agent notes");
+    assert_eq!(p["subagents"][0]["done"], true);
+    assert_eq!(p["running"], false);
+    let thought = l
+        .panels
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|x| x["thinking"] == "Let me think about the layout.");
+    assert!(thought, "the thinking was shown while it came");
+    assert!(
+        !journal(&l)
+            .iter()
+            .any(|(_, d)| d.to_string().contains("think about")),
+        "thinking is not journaled"
+    );
+    let agents: Vec<String> = p["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["id"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        agents,
+        ["planner", "builder", "reviewer"],
+        "OpenFox's own agents, sub-agents left out"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_choice_question_waits_for_the_page() {
+    let l = lab(true).await;
+    let (runner, agent) = (Arc::clone(&l.runner), l.agent.clone());
+    let turn = tokio::spawn(async move { runner.run(&agent, "ask me", vec![]).await });
+    let mut asked = Value::Null;
+    for _ in 0..100 {
+        asked = last_panel(&l)["question"].clone();
+        if !asked.is_null() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(30)).await;
+    }
+    assert_eq!(asked["options"][1]["label"], "Option B", "{asked}");
+    fox_of(&l)
+        .thread_action(
+            &l.runner,
+            &l.agent,
+            "answer",
+            &json!({"call_id": "q1", "answer": "b"}),
+        )
+        .await
+        .unwrap();
+    let out = turn.await.unwrap();
+    assert_eq!(out.final_text, "You chose b.");
+    assert!(
+        last_panel(&l)["question"].is_null(),
+        "answered: the question is gone"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_model_is_retried_and_the_retry_followed() {
+    let l = lab(true).await;
+    l.runner.run(&l.agent, "this will fail", vec![]).await;
+    assert_eq!(last_panel(&l)["retry"]["failed"], true);
+    fox_of(&l)
+        .thread_action(&l.runner, &l.agent, "retry", &json!({}))
+        .await
+        .unwrap();
+    let mut got = Vec::new();
+    for _ in 0..100 {
+        got = said(&l);
+        if got.last().is_some_and(|x| x.contains("Second try")) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(30)).await;
+    }
+    assert_eq!(
+        got,
+        ["u: this will fail", "a: Second try worked."],
+        "followed, and no new message from the person"
+    );
+    assert!(l
+        .fox
+        .lock()
+        .unwrap()
+        .seen
+        .iter()
+        .any(|(k, _)| k == "WS chat.retry"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_panels_actions_reach_openfox() {
+    let l = lab(true).await;
+    l.runner.run(&l.agent, "hello", vec![]).await;
+    let fox = fox_of(&l);
+    let act = |a: &'static str, p: Value| {
+        let l = &l;
+        async move { fox.thread_action(&l.runner, &l.agent, a, &p).await }
+    };
+    act("agent", json!({"mode": "reviewer"})).await.unwrap();
+    assert_eq!(last_panel(&l)["agent"], "reviewer");
+    act(
+        "criteria",
+        json!({"criteria": [{"id": "c1", "text": "fast"}, {"text": "  "}, {"text": "safe"}]}),
+    )
+    .await
+    .unwrap();
+    act("danger", json!({"level": "dangerous"})).await.unwrap();
+    act("effort", json!({"effort": "high"})).await.unwrap();
+    act("compact", json!({})).await.unwrap();
+    assert!(act("explode", json!({})).await.is_err());
+    assert_eq!(
+        last_panel(&l)["error"],
+        "unknown OpenFox action \"explode\"",
+        "the page is told"
+    );
+    let seen = l.fox.lock().unwrap().seen.clone();
+    let body = |k: &str| {
+        seen.iter()
+            .rev()
+            .find(|(x, _)| x == k)
+            .map(|(_, b)| b.clone())
+            .unwrap_or_default()
+    };
+    assert_eq!(
+        body("PUT /api/sessions/s1/mode"),
+        json!({"mode": "reviewer"})
+    );
+    assert_eq!(
+        body("PUT /api/sessions/s1/criteria"),
+        json!({"criteria": [{"id": "c1", "description": "fast"}, {"description": "safe"}]})
+    );
+    assert_eq!(
+        body("PUT /api/sessions/s1/danger-level"),
+        json!({"dangerLevel": "dangerous"})
+    );
+    assert_eq!(
+        body("POST /api/sessions/s1/provider")["reasoningEffort"],
+        "high"
+    );
+    assert!(seen.iter().any(|(k, _)| k == "WS context.compact"));
 }

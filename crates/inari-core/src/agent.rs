@@ -150,6 +150,8 @@ pub struct Turn {
     pub mode: String,
     /// The pass this thread runs under (empty: the owner's own thread).
     pub pass: String,
+    /// No new message: the agent takes up its last turn again (Runner::resume).
+    pub resume: bool,
 }
 
 impl Turn {
@@ -1017,6 +1019,11 @@ impl Harness {
 
     pub async fn turn(&self, t: &Turn) -> RunSummary {
         match self {
+            // an ACP agent never runs a turn again of its own: nothing to follow
+            Harness::Acp(_) if t.resume => RunSummary {
+                stopped: "done".into(),
+                ..Default::default()
+            },
             Harness::Acp(h) => h.turn(t).await,
             Harness::OpenFox(h) => h.turn(t).await,
         }
@@ -1104,6 +1111,13 @@ impl Runner {
         }
     }
 
+    /// The native OpenFox harness this thread runs on, if it runs on one.
+    pub fn openfox_of(&self, agent: &str) -> Option<&crate::openfox::OpenFoxHarness> {
+        self.harnesses
+            .get(&self.harness_of(agent))
+            .and_then(Harness::openfox)
+    }
+
     /// The harness that thinks for this thread: its own, else the node's default.
     fn harness_of(&self, agent: &str) -> String {
         self.labels(agent)
@@ -1112,6 +1126,13 @@ impl Runner {
             .filter(|h| self.harnesses.contains_key(*h))
             .unwrap_or(&self.default_harness)
             .to_string()
+    }
+
+    /// Say something on the bus (a harness's live state for the pages, say).
+    pub(crate) fn tell(&self, subject: &str, payload: Value) {
+        if let Some(p) = &self.publish {
+            p(subject, payload);
+        }
     }
 
     /// Whether a message waits for this agent's running turn to end.
@@ -1477,6 +1498,22 @@ impl Runner {
                 }
             }
         }
+        self.take_turn(agent, text, attachments, false).await
+    }
+
+    /// Follow a turn the agent runs again of its own (OpenFox retrying after a model's failure):
+    /// the same turn as `run`, with no new message from the person.
+    pub async fn resume(self: &Arc<Self>, agent: &str) -> RunSummary {
+        self.take_turn(agent, "", Vec::new(), true).await
+    }
+
+    async fn take_turn(
+        self: &Arc<Self>,
+        agent: &str,
+        text: &str,
+        attachments: Vec<Attached>,
+        resume: bool,
+    ) -> RunSummary {
         let lock = self.lock(agent);
         *self
             .waiting
@@ -1514,7 +1551,9 @@ impl Runner {
         if !files.is_empty() {
             data["attachments"] = Value::Array(files);
         }
-        if let Ok(c) = io::append_event(
+        if resume {
+            // nothing new from the person: the agent takes up its last turn again
+        } else if let Ok(c) = io::append_event(
             &path,
             &format!("{}@{agent}", self.host.node_id),
             EventKind::UserMessage,
@@ -1547,6 +1586,7 @@ impl Runner {
                         .and_then(Value::as_str)
                         .unwrap_or("")
                         .to_string(),
+                    resume,
                 };
                 h.turn(&turn).await
             }
