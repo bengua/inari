@@ -90,6 +90,10 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Fixed
 
+- **An agent's permission request was lost when its id was a string** (OpenFox's adapter sends
+  `ofx-1`): the reader only accepted numbers, ignored the request, and the thread waited forever
+  while the page showed nothing to approve. Both number and string ids are answered now.
+
 - A thread deleted while its turn was still running came back as an empty ghost in the page
   (the turn's last phase update re-created it). Phases of a deleted thread are now ignored.
 

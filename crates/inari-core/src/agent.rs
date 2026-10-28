@@ -272,7 +272,8 @@ impl Rpc {
 
 enum Incoming {
     Update(Value),
-    Request(u64, String, Value),
+    /// A request the agent makes of us; its id is a number or a string (JSON-RPC allows both).
+    Request(Value, String, Value),
 }
 
 impl AcpHarness {
@@ -346,7 +347,8 @@ impl AcpHarness {
                     continue;
                 }; // banners
                 let method = msg.get("method").and_then(Value::as_str).map(String::from);
-                match (method, msg.get("id").and_then(Value::as_u64)) {
+                let raw_id = msg.get("id").cloned().filter(|v| !v.is_null());
+                match (method, raw_id) {
                     (Some(m), Some(id)) => {
                         let _ = tx.send(Incoming::Request(
                             id,
@@ -362,6 +364,8 @@ impl AcpHarness {
                         let _ = tx.send(Incoming::Update(update));
                     }
                     (None, Some(id)) => {
+                        // replies to our own calls carry the number we sent
+                        let Some(id) = id.as_u64() else { continue };
                         if let Some(waiter) = pending.lock().expect("not poisoned").remove(&id) {
                             let reply = match msg.get("error") {
                                 Some(e) => Err(e

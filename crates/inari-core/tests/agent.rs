@@ -485,3 +485,21 @@ async fn the_context_use_an_agent_reports_is_kept_and_told() {
     );
     assert_eq!(u["cost"], 0.02);
 }
+
+#[tokio::test]
+async fn a_permission_request_with_a_string_id_reaches_the_approver() {
+    let asked = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let seen = Arc::clone(&asked);
+    let approver: Approver = Arc::new(move |_agent: String, what: String| {
+        seen.lock().unwrap().push(what);
+        Box::pin(async { true })
+    });
+    let l = lab(false, Some(approver));
+    let out = l.runner.run(&l.agent, "permstr", vec![]).await;
+    assert_eq!(out.stopped, "done", "{out:?}");
+    assert_eq!(asked.lock().unwrap().len(), 1, "the approver was asked");
+    assert!(
+        out.final_text.contains("permission result: allow"),
+        "{out:?}"
+    );
+}
