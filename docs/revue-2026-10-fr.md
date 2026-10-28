@@ -218,6 +218,18 @@ Sur chaque cœur :
 2. `systemctl --user restart inari-core.service` (le service que `join --service` installe), ou ton équivalent.
 3. Rien à migrer : la configuration et le dossier de données ne changent pas. Au premier démarrage, la passerelle crée `<data_dir>/session.key` (en 0600).
 
+**Mettre à jour une installation de cette branche** (après un correctif poussé dessus) :
+
+```sh
+git pull origin claude/laughing-maxwell-sc9qz4
+./verify.sh && cargo build --release
+```
+
+Puis, comme ci-dessus : remplacer `inari-core-rs` (garder le précédent en `.prev`) et redémarrer le service. La page se recharge seule dans les navigateurs et l'app ouverts, car sa version change.
+
+Correctifs poussés depuis la première installation :
+- `7d7bb92` : sur téléphone, on peut de nouveau lâcher un fil sur FoxBot (il venait se cacher hors de l'écran quand la liste défilait) ; l'astuce sur les gestes n'apparaît plus au doigt.
+
 **À vérifier après installation** :
 - La page s'ouvre. La première fois, il faudra peut-être ressaisir le jeton : le cookie de session remplace le jeton en URL. Derrière ta gate qui ajoute l'en-tête, rien ne change.
 - Un pass déjà enregistré sur un téléphone reste connecté (il est converti en cookie).
