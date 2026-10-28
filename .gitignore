@@ -1,2 +1,12 @@
 # Rust build output.
 target/
+
+# Left behind by the retired Python reference in older checkouts: never tracked again.
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+/uv.lock
+/src/
+/tests/
