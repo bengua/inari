@@ -11,6 +11,7 @@ const PATHS = {
   tool: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-.6-.6-2.4Z"/>', terminal: '<path d="m4 17 6-6-6-6M12 19h8"/>',
   move: '<path d="M5 12h14M13 6l6 6-6 6"/>', fork: '<circle cx="6" cy="5" r="2"/><circle cx="18" cy="5" r="2"/><circle cx="12" cy="19" r="2"/><path d="M6 7v2a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3V7M12 12v5"/>',
   download: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>', spinner: '<path d="M12 3a9 9 0 1 0 9 9"/>',
+  pause: '<path d="M9 5v14M15 5v14"/>', trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
   merge: '<circle cx="6" cy="19" r="2"/><circle cx="6" cy="5" r="2"/><circle cx="18" cy="12" r="2"/><path d="M6 7v10M6 7a7 7 0 0 0 10 5"/>',
 };
 const icon = (n) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${PATHS[n] || ""}</svg>`;
@@ -578,6 +579,8 @@ function onUp(e) { window.onpointermove = window.onpointerup = window.onpointerc
   else if (t.kind === "clone") cloneTo(d.id, t.harness);
   else if (t.kind === "share") shareWith(d.id, t.pass);
   else if (t.kind === "sleep") sleepThread(d.id, true);
+  else if (t.kind === "summary") summarise(d.id);
+  else if (t.kind === "delete") askDelete(d.id);
   else if (t.kind === "fox") foxMenu(d.id); }
 /* A long press without moving: everything else one can do with the thread (moving it is a drag onto a core). */
 /* Rename in place: the title becomes editable; Enter keeps it, Escape leaves it. */
@@ -599,10 +602,10 @@ function actionSheet(id) { const a = snap.agents[id]; if (!a) return; const node
   if (others.length) opts.push([t("Merge into another thread…"), () => sheet(t("Merge {name} into…", { name: a.title || id }), others.map(([o, x]) => [x.title || o, () => mergeInto(o, id)]))]);
   opts.push([t("Rename…"), () => renameThread(id)]);
   opts.push([a.pinned ? t("Unpin") : t("Pin to the top"), () => api("/api/pin", { agent: id, pinned: !a.pinned })]);
-  opts.push([t("Summarise it"), async () => { await api("/api/message", { agent: id, text: t("Summarise this thread so far in a few short lines.") }); select(id); }]);
+  opts.push([t("Summarise it"), () => summarise(id)]);
   opts.push([t("Start a copy from here (fork)"), () => { selected = id; forkAt = null; forkNow(); }]);
   opts.push([t("Put it to sleep"), () => sleepThread(id, true)]);
-  if (!(snap.ui && snap.ui.pass)) opts.push([t("Delete…"), () => sheet(t("Delete “{name}”?", { name: a.title || id }), [[t("Delete it"), async () => { await api("/api/delete", { agent: id }); if (selected === id) { selected = null; render(); } toast(t("Deleted — kept in the core's trash")); }]], t("It leaves Inari. The core keeps it in its trash folder, so it can still be restored by hand."))]);
+  if (!(snap.ui && snap.ui.pass)) opts.push([t("Delete…"), () => askDelete(id)]);
   sheet(a.title || id, opts, t("To move it, drag it onto another core, or use its arrow.")); }
 function dropTarget(x, y, d) { for (const el of document.elementsFromPoint(x, y)) { if (el === d.ghost || (d.ghost && d.ghost.contains(el))) continue;
     if (el.id === "fox" || el.closest("#fox")) return { kind: "fox", el: $("fox") };
@@ -615,7 +618,9 @@ function showDock(id) { const a = snap.agents[id], dock = $("dropdock"), here = 
   const has = (n, h) => !!(((n.capabilities || {}).harnesses || {})[h]), all = [...new Set(snap.nodes.flatMap((n) => Object.keys((n.capabilities || {}).harnesses || {})))].filter((h) => h !== a.harness);
   dock.innerHTML = all.map((h) => { const where = has(here, h) ? "" : (snap.nodes.find((n) => has(n, h)) || {}).node_id; return `<span class="dz" data-kind="clone" data-harness="${esc(h)}">${esc(t("Clone to {harness}", { harness: harnessName(h) }))}${where ? ` <small>${esc(t("on {node}", { node: where }))}</small>` : ""}</span>`; }).join("")
     + (snap.passes || []).map((p) => a.pass === p.id ? `<span class="dz" data-kind="share" data-pass="">${esc(t("Stop sharing with {name}", { name: p.name }))}</span>` : `<span class="dz" data-kind="share" data-pass="${esc(p.id)}">${esc(t("Share with {name}", { name: p.name }))}</span>`).join("")
-    + `<span class="dz" data-kind="sleep">${esc(t("Sleep"))}</span><small>${esc(t("or drop it on a core, a thread, the fox"))}</small>`;
+    + `<span class="dz" data-kind="summary">${icon("doc")}${esc(t("Summarise it"))}</span><span class="dz" data-kind="sleep">${icon("pause")}${esc(t("Put it to sleep"))}</span>`
+    + (snap.ui && snap.ui.pass ? "" : `<span class="dz danger" data-kind="delete">${icon("trash")}${esc(t("Delete…"))}</span>`)
+    + `<small>${esc(t("or drop it on a core, a thread, the fox"))}</small>`;
   dock.querySelectorAll(".dz[data-kind=clone]").forEach((z) => z.prepend(badge((HARNESS[z.dataset.harness] || [z.dataset.harness])[0], 18)));
   // beside the thread: to its right on a wide screen, just above or below it on a phone
   const r = drag.el.getBoundingClientRect(), narrow = innerWidth <= 760; dock.classList.toggle("row-strip", narrow); dock.hidden = false; const w = dock.offsetWidth, hgt = dock.offsetHeight;
@@ -640,7 +645,13 @@ async function cloneTo(id, harness) { const r = await api("/api/clone", { agent:
   toast(t("Cloning to {harness}…", { harness: harnessName(harness) })); if (await until(() => snap.agents[r.thread_id], 20000)) select(r.thread_id); }
 async function shareWith(id, pass) { await api("/api/share", { agent: id, pass }); const p = (snap.passes || []).find((x) => x.id === pass); toast(p ? t("Shared with {name}", { name: p.name }) : t("No longer shared")); }
 async function sleepThread(id, on) { await api("/api/archive", { agent: id, archived: on }); toast(on ? t("Asleep — find it under Sleeping") : t("Awake again")); if (on && selected === id) { selected = null; render(); } }
-function foxMenu(id) { const a = snap.agents[id]; sheet(a.title || id, [[t("Summarise it"), async () => { await api("/api/message", { agent: id, text: t("Summarise this thread so far in a few short lines.") }); select(id); }], [t("Put it to sleep"), () => sleepThread(id, true)]]); }
+/* Deleting always asks first, from the menu or from the red tile: one gesture never loses a thread. */
+function askDelete(id) { const a = snap.agents[id]; if (!a) return;
+  sheet(t("Delete “{name}”?", { name: a.title || id }), [[t("Delete it"), async () => { const r = await api("/api/delete", { agent: id }); if (r.error) return; if (selected === id) { selected = null; render(); } toast(t("Deleted — kept in the core's trash")); }]], t("It leaves Inari. The core keeps it in its trash folder, so it can still be restored by hand."));
+  const yes = [...$("sheetOpts").querySelectorAll("button")].find((b) => b.textContent === t("Delete it")); if (yes) yes.classList.add("danger"); }
+/* The mascot's actions, also offered as tiles while a thread is carried: summarise it, put it to sleep. */
+async function summarise(id) { await api("/api/message", { agent: id, text: t("Summarise this thread so far in a few short lines.") }); select(id); }
+function foxMenu(id) { const a = snap.agents[id]; sheet(a.title || id, [[t("Summarise it"), () => summarise(id)], [t("Put it to sleep"), () => sleepThread(id, true)]]); }
 $("sleepers").onclick = () => sheet(t("Sleeping threads"), Object.entries(snap.agents).filter(([, a]) => a.archived).map(([id, a]) => [t("Wake {name}", { name: a.title || id }), () => sleepThread(id, false)]));
 /* A file dropped on a core starts a thread there, the file attached, ready for what to do with it. */
 $("cores").addEventListener("dragover", (e) => { if (!e.dataTransfer || ![...e.dataTransfer.types].includes("Files")) return; e.preventDefault(); const c = e.target.closest(".core"); document.querySelectorAll(".filehot").forEach((n) => n !== c && n.classList.remove("filehot")); if (c) c.classList.add("filehot"); });

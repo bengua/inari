@@ -170,6 +170,9 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Fixed
 
+- **The mascot's actions are tiles while a thread is carried**, beside the others: *Summarise it*,
+  *Put it to sleep*, and a red *Delete…* that asks before deleting (as the menu does). They work
+  whether or not the mascot can be reached.
 - **A thread can be dropped on FoxBot with a mouse.** FoxBot's frame took the mouse as soon as
   the pointer was over it, so the drop never reached the page; while a thread is carried the frame
   now lets the pointer through, and takes its own clicks again after.

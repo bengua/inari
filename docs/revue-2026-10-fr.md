@@ -228,7 +228,8 @@ git pull origin claude/laughing-maxwell-sc9qz4
 Puis, comme ci-dessus : remplacer `inari-core-rs` (garder le précédent en `.prev`) et redémarrer le service. La page se recharge seule dans les navigateurs et l'app ouverts, car sa version change.
 
 Correctifs poussés depuis la première installation :
-- (ce commit) : à la souris (webapp, navigateur), on peut de nouveau lâcher un fil sur FoxBot ; son iframe ne laissait pas passer la souris.
+- (dernier commit) : pendant un glisser, les actions de la mascotte apparaissent en tuiles à côté des autres — « Le résumer », « L'endormir », et « Supprimer… » en rouge, qui demande confirmation.
+- `2bf94c0` : à la souris (webapp, navigateur), on peut de nouveau lâcher un fil sur FoxBot ; son iframe ne laissait pas passer la souris.
 - `7d7bb92` : sur téléphone, on peut de nouveau lâcher un fil sur FoxBot (il venait se cacher hors de l'écran quand la liste défilait) ; l'astuce sur les gestes n'apparaît plus au doigt.
 
 **À vérifier après installation** :
