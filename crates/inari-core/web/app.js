@@ -31,6 +31,8 @@ let stream = null, lastSnapAt = 0, offlineTick = null, pendingDraft = null;
 let snap = null, selected = null, tab = "artifacts", events = [], files = null, viewing = null, forkAt = null, drag = null, termHist = [], termPos = 0, pendingModel = "", pendingCore = "", attachments = [];
 // messages sent while the agent works, per thread: shown at once, "waiting", until the agent reads them (drawChat)
 const queued = {};
+// each thread's answer so far, while its model writes it (the core's "draft" events); done: it is journaled now
+const drafts = {};
 const loadHist = {}, shut = store.get("shut", {}), feed = [], seen = new Set(); let firstSnap = true, tlStamp = 0, tlBusy = false, lastFiles = "";
 
 /* ---------- families, badges, quotas ---------- */
@@ -93,6 +95,9 @@ async function signIn(secret) {
 const signOut = () => fetch("/api/logout", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).catch(() => null).then(() => location.reload());
 function openStream() { const es = (stream = new EventSource("/events"));
   es.onmessage = (e) => { snap = JSON.parse(e.data); lastSnapAt = Date.now(); online(true); render(); };
+  es.addEventListener("draft", (e) => { const d = JSON.parse(e.data); lastSnapAt = Date.now();
+    if (d.text) drafts[d.agent] = { text: d.text }; else if (drafts[d.agent]) drafts[d.agent].done = Date.now();
+    if (d.agent !== selected) return; if (!d.text) { tlStamp = 0; refreshDetail(); } drawDraft(); });
   es.onopen = () => online(true);
   es.onerror = () => { online(false); if (es.readyState === EventSource.CLOSED && stream === es) setTimeout(async () => { if (stream !== es) return; await api("/api/whoami"); if (stream === es) openStream(); /* a refused access has shown the login instead */ }, 3000); };
 }
@@ -461,6 +466,10 @@ function reconcile(box, out) {
     if (cur) box.replaceChild(n, cur); else box.append(n); });
   while (box.children.length > next.length) box.lastElementChild.remove();
 }
+/* A new piece of the answer being written: only its bubble changes, the thread is not rebuilt. */
+function drawDraft() { const el = $("msgs").querySelector(".msg.draft"), dr = drafts[selected];
+  if (!el || !dr || dr.done) return drawChat();
+  const th = $("thread"), atEnd = th.scrollHeight - th.scrollTop - th.clientHeight < 90; el.innerHTML = md(dr.text); el.dataset.s = dr.text.length; if (atEnd) th.scrollTop = th.scrollHeight; }
 function drawChat() {
   const shown = $("msgs"), th = $("thread"), atEnd = th.scrollHeight - th.scrollTop - th.clientHeight < 90, before = shown.children.length, box = document.createElement("div"), fresh = drawChat.thread !== selected; drawChat.thread = events.length ? selected : null;
   if (!selected) { shown.textContent = ""; shown.innerHTML = `<div class="hero"><h2>${esc(t("What should we build?"))}</h2><p>${esc(t("Pick a thread on the left, or describe a task below. It runs on the core you choose and can move to another one at any time."))}</p></div>`; $("jump").hidden = true; return; }
@@ -478,7 +487,12 @@ function drawChat() {
     else if (e.kind === "provider_switch") note(t("Model <b>{name}</b>", { name: esc(shortModel(e.text)) }));
     else if (e.kind === "decision") note(esc(e.text));
     else if (e.kind === "checkpoint") { const [why, ...rest] = e.text.split(": "); const map = { teleport: "Moved between cores", provider_error: "The model failed", harness_error: "The agent stopped", harness_timeout: "The agent took too long", model_refused: "Model not available", mode_changed: "Mode", stopped: "Stopped", auto_approved: "Allowed automatically", mode_refused: "Mode not available" }; note(esc(t(map[why] || "Checkpoint")) + (rest.length && why !== "teleport" ? ` — ${esc(rest.join(": ").slice(0, 120))}` : "")); } }
-  if (["listening", "loading", "inference"].includes(a.phase)) box.insertAdjacentHTML("beforeend", `<div class="msg assistant typing" aria-label="${esc(t("The agent is working"))}"><i></i><i></i><i></i></div>`);
+  // the answer being written shows as it comes; once journaled (the last answer starts with it) the message replaces it
+  const dr = drafts[selected], lastSaid = [...events].reverse().find((e) => e.kind === "assistant_message");
+  if (dr && dr.done && (Date.now() - dr.done > 10000 || (lastSaid && (lastSaid.text || "").trim().startsWith(dr.text.trim())))) delete drafts[selected];
+  const live = drafts[selected];
+  if (live) box.insertAdjacentHTML("beforeend", `<div class="msg assistant draft" data-k="draft" data-s="${live.text.length}">${md(live.text)}</div>`);
+  else if (["listening", "loading", "inference"].includes(a.phase)) box.insertAdjacentHTML("beforeend", `<div class="msg assistant typing" aria-label="${esc(t("The agent is working"))}"><i></i><i></i><i></i></div>`);
   // a message sent during a turn waits for it to end; the agent read it once the journal has it as a user message,
   // after what the page held when it was sent (matched by its text: the message before it may only arrive now)
   let q = queued[selected] || []; if (q.length) { q = queued[selected] = q.filter((m) => !events.slice(m.after).some((e) => e.kind === "user_message" && (e.text || "").trim() === m.text));

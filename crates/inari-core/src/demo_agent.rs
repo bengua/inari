@@ -44,7 +44,15 @@ impl Agent {
     }
 
     fn say(&mut self, sid: &str, text: &str) {
-        self.update(sid, json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": text}}));
+        if self.mode == Mode::Fake {
+            self.update(sid, json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": text}}));
+            return;
+        }
+        // the demo writes word by word, as a model streams, so the page shows the answer as it comes
+        for word in text.split_inclusive(' ') {
+            self.update(sid, json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": word}}));
+            std::thread::sleep(Duration::from_millis(40));
+        }
     }
 
     /// One line in the test log, written as the Python fake wrote it (`{"key": value}`).

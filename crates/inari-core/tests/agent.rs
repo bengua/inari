@@ -589,4 +589,23 @@ async fn a_streamed_answer_does_not_flood_the_mesh_with_its_phase() {
         Some("idle"),
         "the end of the turn always goes out"
     );
+    // the answer so far goes to the pages as it comes, a few times, never once per piece; empty at the end
+    let drafts: Vec<String> = sent
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(s, _)| s == &format!("draft.{agent}"))
+        .map(|(_, p)| p["text"].as_str().unwrap_or("").to_string())
+        .collect();
+    assert!(
+        drafts.len() >= 2 && drafts.len() < 50,
+        "{} drafts",
+        drafts.len()
+    );
+    assert!(drafts[0].starts_with("w0 "), "{:?}", drafts[0]);
+    assert_eq!(
+        drafts.last().map(String::as_str),
+        Some(""),
+        "the answer is journaled: the draft ends"
+    );
 }

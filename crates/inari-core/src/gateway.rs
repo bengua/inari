@@ -101,6 +101,8 @@ struct State {
     update_jobs: BTreeMap<String, Value>,
     /// The core passes the hub keeps (each known by the hash of its token).
     passes: Vec<Value>,
+    /// Each thread's answer so far, while its model writes it (`draft.<agent>`).
+    drafts: HashMap<String, String>,
 }
 
 /// A clone onto a harness the thread's core lacks: fork it there, teleport the copy to a
@@ -217,10 +219,20 @@ pub struct Gateway {
     uploads: Option<UploadStore>,
     state: Mutex<State>,
     clients: broadcast::Sender<()>,
+    /// Answers so far, as they come (agent, text): sent to the pages on their own, not in snapshots.
+    drafts: broadcast::Sender<(String, String)>,
     pub usage_interval: Duration,
     sessions: crate::session::Sessions,
     /// The persona each person chose for the mascot.
     personas: crate::personas::Choices,
+}
+
+/// A thread's answer so far, as an SSE event of its own (`draft`); empty text: it is journaled now.
+fn draft_frame(agent: &str, text: &str) -> String {
+    format!(
+        "event: draft\ndata: {}\n\n",
+        json!({"agent": agent, "text": text})
+    )
 }
 
 fn s(p: &Value, k: &str) -> String {
@@ -398,6 +410,7 @@ impl Gateway {
         } = o;
         let (usage, data_dir) = (&usage[..], &data_dir);
         let (clients, _) = broadcast::channel(50); // a slow client loses old frames, not the stream
+        let (drafts, _) = broadcast::channel(256);
         let mut full_ui = Map::new();
         full_ui.insert("footer".into(), json!(""));
         full_ui.extend(ui);
@@ -412,6 +425,7 @@ impl Gateway {
             uploads: UploadStore::new(data_dir.join("uploads"), MAX_UPLOAD).ok(),
             state: Mutex::default(),
             clients,
+            drafts,
             usage_interval: Duration::from_secs(60),
             sessions: crate::session::Sessions::open(data_dir),
             personas: crate::personas::Choices::open(data_dir),
@@ -435,6 +449,23 @@ impl Gateway {
     }
 
     fn subscribe(self: &Arc<Self>) {
+        // an answer so far: kept for a page that opens meanwhile, and passed on without a snapshot
+        let mut rx = self.bus.subscribe("draft.*");
+        let me = Arc::clone(self);
+        tokio::spawn(async move {
+            while let Some(m) = rx.recv().await {
+                let (agent, text) = (s(&m.payload, "agent"), s(&m.payload, "text"));
+                {
+                    let mut st = me.state.lock().expect("not poisoned");
+                    if text.is_empty() {
+                        st.drafts.remove(&agent);
+                    } else {
+                        st.drafts.insert(agent.clone(), text.clone());
+                    }
+                }
+                let _ = me.drafts.send((agent, text));
+            }
+        });
         self.on("mesh.nodes", |_, st, m| {
             st.nodes = m
                 .payload
@@ -1771,17 +1802,38 @@ impl Gateway {
 
     async fn events(&self, w: &mut TcpStream, access: Access) -> std::io::Result<()> {
         let mut rx = self.clients.subscribe();
+        let mut drafts = self.drafts.subscribe();
         w.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\nConnection: keep-alive\r\n\r\n").await?;
         w.write_all(format!("data: {}\n\n", self.snapshot_for(&access)).as_bytes())
             .await?;
+        // the answers being written right now, for a page that opens in the middle of one
+        let now: Vec<(String, String)> = self
+            .state
+            .lock()
+            .expect("not poisoned")
+            .drafts
+            .iter()
+            .map(|(a, t)| (a.clone(), t.clone()))
+            .collect();
+        for (agent, text) in now.into_iter().filter(|(a, _)| self.owned(&access, a)) {
+            w.write_all(draft_frame(&agent, &text).as_bytes()).await?;
+        }
         w.flush().await?;
         loop {
-            let frame = match tokio::time::timeout(Duration::from_secs(15), rx.recv()).await {
-                Ok(Ok(())) | Ok(Err(broadcast::error::RecvError::Lagged(_))) => {
-                    format!("data: {}\n\n", self.snapshot_for(&access))
-                }
-                Ok(Err(broadcast::error::RecvError::Closed)) => return Ok(()),
-                Err(_) => ": keep-alive\n\n".to_string(),
+            let tick = tokio::time::sleep(Duration::from_secs(15));
+            let frame = tokio::select! {
+                got = rx.recv() => match got {
+                    Ok(()) | Err(broadcast::error::RecvError::Lagged(_)) => {
+                        format!("data: {}\n\n", self.snapshot_for(&access))
+                    }
+                    Err(broadcast::error::RecvError::Closed) => return Ok(()),
+                },
+                got = drafts.recv() => match got {
+                    Ok((agent, text)) if self.owned(&access, &agent) => draft_frame(&agent, &text),
+                    Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => continue, // the next one carries the whole text
+                    Err(broadcast::error::RecvError::Closed) => return Ok(()),
+                },
+                _ = tick => ": keep-alive\n\n".to_string(),
             };
             w.write_all(frame.as_bytes()).await?;
             w.flush().await?;

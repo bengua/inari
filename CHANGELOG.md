@@ -19,6 +19,13 @@ Newest first. An entry says what changed for someone using the thing.
   workbench tabs aligned with them; the thread's *Actions* is its icon; in a narrow column the
   state leaves out its core and the model name is shortened (whole on hover). A bar that still
   lacks room wraps, it never hides a control.
+- **The answer shows as the model writes it.** The core kept a model's text until the answer
+  ended (or a tool was called) and only then showed it whole. It now sends the answer so far to the
+  pages as it comes (`draft.<agent>` on the bus, at most every 120 ms, outside `agent.>` so a late
+  one is never replayed; an SSE `draft` event to the pages allowed to see the thread, including a
+  page opened mid-answer). The page grows one bubble without rebuilding the thread, and swaps it
+  for the journaled message when the answer ends. The demo agent writes word by word.
+
 - **Fast models no longer slow Inari down.** Each piece of a streamed answer announced the thread's
   phase again: it crossed the mesh and sent every open page a whole new snapshot, dozens of times a
   second (400 pieces made 402 announcements). A thread now announces a new phase at once and the

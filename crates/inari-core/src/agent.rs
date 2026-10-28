@@ -745,12 +745,16 @@ impl AcpHarness {
 
     fn flush(&self, t: &Turn, text: &mut String, summary: &mut RunSummary) {
         let body = text.trim().to_string();
+        let drafted = !text.is_empty();
         text.clear();
         if !body.is_empty() {
             if let Some(e) = t.append(EventKind::AssistantMessage, json!({"text": body})) {
                 t.emit(&e);
             }
             summary.final_text = body;
+        }
+        if drafted {
+            t.runner.draft(&t.agent, "", true); // the pages swap their draft for the message
         }
     }
 
@@ -770,6 +774,7 @@ impl AcpHarness {
                     return;
                 }
                 text.push_str(&chunk);
+                t.runner.draft(&t.agent, text, false);
                 t.phase("inference");
             }
             Some("usage_update") => {
@@ -939,6 +944,8 @@ impl AcpHarness {
 
 /// How often a thread repeats the phase it is already in (Runner::announce_state).
 const ANNOUNCE_EVERY: Duration = Duration::from_secs(1);
+/// How often the answer so far goes out while a model streams it (Runner::draft).
+const DRAFT_EVERY: Duration = Duration::from_millis(120);
 
 /// Drives the agents a node holds: one turn at a time per agent.
 pub struct Runner {
@@ -950,6 +957,8 @@ pub struct Runner {
     pub phases: Mutex<HashMap<String, String>>,
     /// The phase each agent last announced, and when (announce_state).
     announced: Mutex<HashMap<String, (String, Instant)>>,
+    /// When each agent's answer so far last went out (draft).
+    drafted: Mutex<HashMap<String, Instant>>,
     /// Threads whose running turn a person asked to stop.
     pub cancels: Mutex<std::collections::HashSet<String>>,
     /// The last context use each agent reported.
@@ -973,6 +982,7 @@ impl Runner {
             approver,
             phases: Mutex::default(),
             announced: Mutex::default(),
+            drafted: Mutex::default(),
             cancels: Mutex::default(),
             usage: Mutex::default(),
             locks: Mutex::default(),
@@ -997,6 +1007,25 @@ impl Runner {
                 json!({"agent": agent, "id": e.id, "kind": e.kind.as_str(), "text": text}),
             );
         }
+    }
+
+    /// The answer so far, for the pages to show as the model writes it (`draft.<agent>`). It is
+    /// not journaled (the whole answer is, once it ends) and not durable (`draft.` is outside
+    /// `agent.>`): a draft that arrives late is worth nothing. It goes out at most every
+    /// DRAFT_EVERY, unless `now`; empty, it tells the pages the answer is in the journal now.
+    fn draft(&self, agent: &str, text: &str, now: bool) {
+        let Some(p) = &self.publish else { return };
+        {
+            let mut last = self.drafted.lock().expect("not poisoned");
+            if !now && last.get(agent).is_some_and(|at| at.elapsed() < DRAFT_EVERY) {
+                return;
+            }
+            last.insert(agent.into(), Instant::now());
+        }
+        p(
+            &format!("draft.{agent}"),
+            json!({"agent": agent, "text": text}),
+        );
     }
 
     fn set_phase(&self, agent: &str, phase: &str) {
