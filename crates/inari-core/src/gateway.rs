@@ -36,6 +36,11 @@ const ASSETS: &[(&str, &str, &[u8])] = &[
         include_bytes!("../../../src/inari_core/web/app.js"),
     ),
     (
+        "i18n.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../../src/inari_core/web/i18n.js"),
+    ),
+    (
         "fonts/ibm_plex_sans.woff2",
         "font/woff2",
         include_bytes!("../../../src/inari_core/web/fonts/ibm_plex_sans.woff2"),

@@ -33,6 +33,7 @@ MAX_BODY = 64 * 1024
 ASSETS = {
     "app.css": "text/css; charset=utf-8",
     "app.js": "text/javascript; charset=utf-8",
+    "i18n.js": "text/javascript; charset=utf-8",
     "fonts/ibm_plex_sans.woff2": "font/woff2",
     "fonts/ibm_plex_mono_regular.woff2": "font/woff2",
     "fonts/ibm_plex_mono_medium.woff2": "font/woff2",

@@ -21,7 +21,7 @@
 |---|---|---|
 | 1 | Fil incrémental, Markdown, erreurs visibles, hors ligne, contrastes, a11y, accept loop | fait, testé |
 | 2 | Page découpée en fichiers, polices servies, alternatives visibles aux gestes cachés | fait, testé |
-| 3 | Interface web FR/EN | à faire |
+| 3 | Interface web FR/EN | fait, testé |
 | 4 | Sécurité de la page : cookie de session, JS séparé, CSP stricte, limites du serveur HTTP | à faire |
 | 5 | Android : partage par morceaux, bord à bord, thème, chaînes traduites | à faire |
 
@@ -72,3 +72,20 @@ uvx --from 'fonttools[woff]' pyftsubset android/app/src/main/res/font/ibm_plex_s
 uvx --from fonttools fonttools varLib.instancer android/app/src/main/res/font/bricolage_grotesque.ttf wght=600 opsz=24 wdth=100 -o /tmp/b.ttf
 uvx --from 'fonttools[woff]' pyftsubset /tmp/b.ttf --unicodes="$U" --flavor=woff2 --output-file=src/inari_core/web/fonts/bricolage_grotesque.woff2
 ```
+
+## Lot 3 : interface en français et en anglais
+
+**Principe.** La clé d'une traduction est le texte anglais lui-même (style gettext) : `t("Move {name} to…", { name })`. Si une traduction manque, l'anglais s'affiche, jamais un trou. Les variables s'écrivent `{nom}` et sont remplies par `t()`.
+
+| Fichier | Rôle |
+|---|---|
+| `web/i18n.js` | `LANGS` (langues proposées), `DICT.fr` (environ 300 entrées), `LANG` (choix : réglage mémorisé `inari-lang`, sinon langue du navigateur), `t()`, `setLang()`, `translatePage()` |
+| `web/app.js` | toutes les chaînes visibles passent par `t()` (147 endroits modifiés) |
+| `web/index.html` | reste écrit en anglais ; `translatePage()` traduit au démarrage ses textes, `title`, `aria-label` et `placeholder` avec la même table |
+| `tests/test_i18n.py` | échoue si un `t("…")` de `app.js` ou un texte de `index.html` n'a pas de français, ou si une traduction perd une variable `{x}` |
+
+- **Changer de langue** : Réglages (l'engrenage) → Langue. La page se recharge, et le brouillon est conservé.
+- **Ajouter une langue** : ajouter une entrée dans `LANGS`, puis une table `DICT.xx` sur le modèle de `DICT.fr`. Le test vérifie seulement le français : pour une nouvelle langue, il faudra l'étendre.
+- **Ajouter un texte** : écrire `t("Texte anglais")` dans `app.js` et ajouter la ligne dans `DICT.fr`. Le test le rappelle s'il manque.
+- **Non traduit, volontairement** : ce que le serveur envoie tel quel (erreurs d'un agent, messages d'un moteur, noms de modèles) et le contenu des fils.
+- **Vocabulaire choisi** : thread → fil, core → cœur, harness → moteur, artifacts → artefacts, fork → dupliquer, pass → pass.
