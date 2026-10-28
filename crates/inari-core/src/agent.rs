@@ -153,25 +153,25 @@ pub struct Turn {
 }
 
 impl Turn {
-    fn path(&self) -> PathBuf {
+    pub(crate) fn path(&self) -> PathBuf {
         self.runner.host.agents.join(&self.agent)
     }
-    fn append(&self, kind: EventKind, data: Value) -> Option<TimelineEvent> {
+    pub(crate) fn append(&self, kind: EventKind, data: Value) -> Option<TimelineEvent> {
         let author = format!("{}@{}", self.runner.host.node_id, self.agent);
         io::append_event(&self.path(), &author, kind, data, now())
             .ok()
             .and_then(|c| c.timeline.ordered().last().cloned().cloned())
     }
-    fn emit(&self, e: &TimelineEvent) {
+    pub(crate) fn emit(&self, e: &TimelineEvent) {
         self.runner.emit(&self.agent, e);
     }
-    fn phase(&self, phase: &str) {
+    pub(crate) fn phase(&self, phase: &str) {
         self.runner.set_phase(&self.agent, phase);
     }
-    fn running(&self) -> bool {
+    pub(crate) fn running(&self) -> bool {
         self.runner.host.status(&self.agent) == "running"
     }
-    fn cancelled(&self) -> bool {
+    pub(crate) fn cancelled(&self) -> bool {
         self.runner
             .cancels
             .lock()
@@ -469,60 +469,7 @@ impl AcpHarness {
 
     /// Make the chosen model ready before the agent asks it anything.
     async fn make_ready(&self, t: &Turn) -> Result<(), String> {
-        if self.prepare.is_empty() || t.model.is_empty() {
-            return Ok(());
-        }
-        t.phase("loading");
-        let args: Vec<String> = self
-            .prepare
-            .iter()
-            .map(|a| a.replace("{model}", &t.model))
-            .collect();
-        let mut cmd = Command::new(&args[0]);
-        cmd.args(&args[1..])
-            .current_dir(&t.workdir)
-            .env_clear()
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .process_group(0)
-            .kill_on_drop(true);
-        for k in ENV_KEEP {
-            if let Ok(v) = std::env::var(k) {
-                cmd.env(k, v);
-            }
-        }
-        cmd.envs(&self.extra_env);
-        let child = cmd
-            .spawn()
-            .map_err(|e| format!("cannot start the model preparation: {e}"))?;
-        let pid = child.id();
-        match tokio::time::timeout(self.prepare_timeout, child.wait_with_output()).await {
-            Ok(Ok(out)) if out.status.success() => Ok(()),
-            Ok(Ok(out)) => {
-                let mut why = String::from_utf8_lossy(&out.stderr).trim().to_string();
-                if why.is_empty() {
-                    why = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                }
-                Err(format!(
-                    "the model {} could not be made ready: {}",
-                    t.model,
-                    why.chars().take(400).collect::<String>()
-                ))
-            }
-            Ok(Err(e)) => Err(e.to_string()),
-            Err(_) => {
-                if let Some(pid) = pid {
-                    // SAFETY: signalling the process group spawn() created.
-                    unsafe { libc::kill(-(pid as i32), libc::SIGKILL) };
-                }
-                Err(format!(
-                    "the model {} was not ready within {}s",
-                    t.model,
-                    self.prepare_timeout.as_secs()
-                ))
-            }
-        }
+        prepare_model(&self.prepare, self.prepare_timeout, &self.extra_env, t).await
     }
 
     pub async fn turn(&self, t: &Turn) -> RunSummary {
@@ -697,7 +644,7 @@ impl AcpHarness {
                         {
                             finished += 1;
                         }
-                        self.on_update(t, &u, &mut text, &mut open_calls, &mut summary)
+                        acp_update(t, &u, &mut text, &mut open_calls, &mut summary)
                     }
                     Incoming::Request(id, method, params) => {
                         let reply = if method == "session/request_permission" {
@@ -762,106 +709,10 @@ impl AcpHarness {
             }
         }
         while let Ok(Incoming::Update(u)) = incoming.try_recv() {
-            self.on_update(t, &u, &mut text, &mut open_calls, &mut summary);
+            acp_update(t, &u, &mut text, &mut open_calls, &mut summary);
         }
-        self.flush(t, &mut text, &mut summary);
+        flush_answer(t, &mut text, &mut summary);
         summary
-    }
-
-    fn flush(&self, t: &Turn, text: &mut String, summary: &mut RunSummary) {
-        let body = text.trim().to_string();
-        let drafted = !text.is_empty();
-        text.clear();
-        if !body.is_empty() {
-            if let Some(e) = t.append(EventKind::AssistantMessage, json!({"text": body})) {
-                t.emit(&e);
-            }
-            summary.final_text = body;
-        }
-        if drafted {
-            t.runner.draft(&t.agent, "", true); // the pages swap their draft for the message
-        }
-    }
-
-    fn on_update(
-        &self,
-        t: &Turn,
-        u: &Value,
-        text: &mut String,
-        open: &mut HashMap<String, bool>,
-        summary: &mut RunSummary,
-    ) {
-        match u.get("sessionUpdate").and_then(Value::as_str) {
-            Some("agent_message_chunk") => {
-                let chunk = content_text(u.get("content").unwrap_or(&Value::Null));
-                // Gemini announces a mode change as message text: that is a notice, not its answer
-                if chunk.trim_start().starts_with("[MODE_UPDATE]") {
-                    return;
-                }
-                text.push_str(&chunk);
-                t.runner.draft(&t.agent, text, false);
-                t.phase("inference");
-            }
-            Some("usage_update") => {
-                let n = |k: &str| u.get(k).and_then(Value::as_u64).unwrap_or(0);
-                let cost = u.pointer("/cost/amount").and_then(Value::as_f64);
-                t.runner.set_usage(&t.agent, n("used"), n("size"), cost);
-            }
-            Some("tool_call") => {
-                self.flush(t, text, summary);
-                let call_id = u
-                    .get("toolCallId")
-                    .map(|v| {
-                        v.as_str()
-                            .map(String::from)
-                            .unwrap_or_else(|| v.to_string())
-                    })
-                    .unwrap_or_default();
-                let name = u
-                    .get("title")
-                    .or_else(|| u.get("kind"))
-                    .and_then(Value::as_str)
-                    .unwrap_or("tool");
-                let data = json!({"call_id": call_id, "name": name, "arguments": {"kind": u.get("kind"), "input": u.get("rawInput")}});
-                if let Some(e) = t.append(EventKind::ToolCall, data) {
-                    t.emit(&e);
-                }
-                open.insert(call_id, true);
-            }
-            Some("tool_call_update") => {
-                let status = u.get("status").and_then(Value::as_str).unwrap_or("");
-                if status != "completed" && status != "failed" {
-                    return;
-                }
-                let call_id = u
-                    .get("toolCallId")
-                    .map(|v| {
-                        v.as_str()
-                            .map(String::from)
-                            .unwrap_or_else(|| v.to_string())
-                    })
-                    .unwrap_or_default();
-                if open.remove(&call_id).is_some() {
-                    let mut output = content_text(u.get("content").unwrap_or(&Value::Null));
-                    if output.is_empty() {
-                        output = u
-                            .get("rawOutput")
-                            .map(|v| {
-                                v.as_str()
-                                    .map(String::from)
-                                    .unwrap_or_else(|| v.to_string())
-                            })
-                            .unwrap_or_default();
-                    }
-                    let output: String = output.chars().take(20_000).collect();
-                    let data = json!({"call_id": call_id, "output": output, "is_error": status == "failed"});
-                    if let Some(e) = t.append(EventKind::ToolResult, data) {
-                        t.emit(&e);
-                    }
-                }
-            }
-            _ => {} // thoughts and plans are the agent's own: not journaled
-        }
     }
 
     /// The prompt: optional priming, the user's text with the attachments named, then
@@ -921,50 +772,215 @@ impl AcpHarness {
             .ok_or("the agent gave no session id")?
             .to_string();
         self.remember(&t.agent, &sid);
-        let capsule = io::load(&t.path()).map_err(|e| e.to_string())?;
-        let mut events: Vec<&TimelineEvent> = capsule
-            .timeline
-            .ordered()
-            .into_iter()
-            .filter(|e| e.kind != EventKind::Checkpoint)
-            .collect();
-        if events
-            .last()
-            .is_some_and(|e| e.kind == EventKind::UserMessage)
-        {
-            events.pop(); // this turn's message is sent as the prompt
-        }
-        if events.iter().all(|e| e.kind == EventKind::System) {
-            return Ok((sid, String::new()));
-        }
-        let mut lines: Vec<String> = Vec::new();
-        let mut used = 0;
-        for e in events.iter().rev() {
-            let s: String = summary(e).chars().take(500).collect();
-            if s.is_empty() {
-                continue;
-            }
-            let line = format!("[{}] {s}", e.kind.as_str());
-            if used + line.len() > self.prime_chars {
-                lines.push(format!(
-                    "[…] {} earlier events omitted",
-                    events.len() - lines.len()
-                ));
-                break;
-            }
-            used += line.len();
-            lines.push(line);
-        }
-        lines.reverse();
-        Ok((
-            sid,
-            format!(
-            "You are continuing a conversation that started elsewhere (another machine or model). \
-             Earlier journal, oldest first:\n{}\n\nNew message from the user:",
-            lines.join("\n")
-        ),
-        ))
+        Ok((sid, primer(t, self.prime_chars)?))
     }
+}
+
+/// The answer written so far, journaled as one message (and the pages' draft ended).
+pub(crate) fn flush_answer(t: &Turn, text: &mut String, summary: &mut RunSummary) {
+    let body = text.trim().to_string();
+    let drafted = !text.is_empty();
+    text.clear();
+    if !body.is_empty() {
+        if let Some(e) = t.append(EventKind::AssistantMessage, json!({"text": body})) {
+            t.emit(&e);
+        }
+        summary.final_text = body;
+    }
+    if drafted {
+        t.runner.draft(&t.agent, "", true); // the pages swap their draft for the message
+    }
+}
+
+/// One ACP session update, into the journal: the answer's text, tool calls and their results,
+/// the context use. The native OpenFox harness speaks the same updates (crate::openfox).
+pub(crate) fn acp_update(
+    t: &Turn,
+    u: &Value,
+    text: &mut String,
+    open: &mut HashMap<String, bool>,
+    summary: &mut RunSummary,
+) {
+    match u.get("sessionUpdate").and_then(Value::as_str) {
+        Some("agent_message_chunk") => {
+            let chunk = content_text(u.get("content").unwrap_or(&Value::Null));
+            // Gemini announces a mode change as message text: that is a notice, not its answer
+            if chunk.trim_start().starts_with("[MODE_UPDATE]") {
+                return;
+            }
+            text.push_str(&chunk);
+            t.runner.draft(&t.agent, text, false);
+            t.phase("inference");
+        }
+        Some("usage_update") => {
+            let n = |k: &str| u.get(k).and_then(Value::as_u64).unwrap_or(0);
+            let cost = u.pointer("/cost/amount").and_then(Value::as_f64);
+            t.runner.set_usage(&t.agent, n("used"), n("size"), cost);
+        }
+        Some("tool_call") => {
+            flush_answer(t, text, summary);
+            let call_id = u
+                .get("toolCallId")
+                .map(|v| {
+                    v.as_str()
+                        .map(String::from)
+                        .unwrap_or_else(|| v.to_string())
+                })
+                .unwrap_or_default();
+            let name = u
+                .get("title")
+                .or_else(|| u.get("kind"))
+                .and_then(Value::as_str)
+                .unwrap_or("tool");
+            let data = json!({"call_id": call_id, "name": name, "arguments": {"kind": u.get("kind"), "input": u.get("rawInput")}});
+            if let Some(e) = t.append(EventKind::ToolCall, data) {
+                t.emit(&e);
+            }
+            open.insert(call_id, true);
+        }
+        Some("tool_call_update") => {
+            let status = u.get("status").and_then(Value::as_str).unwrap_or("");
+            if status != "completed" && status != "failed" {
+                return;
+            }
+            let call_id = u
+                .get("toolCallId")
+                .map(|v| {
+                    v.as_str()
+                        .map(String::from)
+                        .unwrap_or_else(|| v.to_string())
+                })
+                .unwrap_or_default();
+            if open.remove(&call_id).is_some() {
+                let mut output = content_text(u.get("content").unwrap_or(&Value::Null));
+                if output.is_empty() {
+                    output = u
+                        .get("rawOutput")
+                        .map(|v| {
+                            v.as_str()
+                                .map(String::from)
+                                .unwrap_or_else(|| v.to_string())
+                        })
+                        .unwrap_or_default();
+                }
+                let output: String = output.chars().take(20_000).collect();
+                let data =
+                    json!({"call_id": call_id, "output": output, "is_error": status == "failed"});
+                if let Some(e) = t.append(EventKind::ToolResult, data) {
+                    t.emit(&e);
+                }
+            }
+        }
+        _ => {} // thoughts and plans are the agent's own: not journaled
+    }
+}
+
+/// Run the harness's `prepare` command for the thread's model, `{model}` replaced by its id: what
+/// makes the model ready (load it on a GPU, say). Nothing to do without one or without a model.
+pub(crate) async fn prepare_model(
+    prepare: &[String],
+    prepare_timeout: Duration,
+    extra_env: &BTreeMap<String, String>,
+    t: &Turn,
+) -> Result<(), String> {
+    if prepare.is_empty() || t.model.is_empty() {
+        return Ok(());
+    }
+    t.phase("loading");
+    let args: Vec<String> = prepare
+        .iter()
+        .map(|a| a.replace("{model}", &t.model))
+        .collect();
+    let mut cmd = Command::new(&args[0]);
+    cmd.args(&args[1..])
+        .current_dir(&t.workdir)
+        .env_clear()
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .process_group(0)
+        .kill_on_drop(true);
+    for k in ENV_KEEP {
+        if let Ok(v) = std::env::var(k) {
+            cmd.env(k, v);
+        }
+    }
+    cmd.envs(extra_env);
+    let child = cmd
+        .spawn()
+        .map_err(|e| format!("cannot start the model preparation: {e}"))?;
+    let pid = child.id();
+    match tokio::time::timeout(prepare_timeout, child.wait_with_output()).await {
+        Ok(Ok(out)) if out.status.success() => Ok(()),
+        Ok(Ok(out)) => {
+            let mut why = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            if why.is_empty() {
+                why = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            }
+            Err(format!(
+                "the model {} could not be made ready: {}",
+                t.model,
+                why.chars().take(400).collect::<String>()
+            ))
+        }
+        Ok(Err(e)) => Err(e.to_string()),
+        Err(_) => {
+            if let Some(pid) = pid {
+                // SAFETY: signalling the process group spawn() created.
+                unsafe { libc::kill(-(pid as i32), libc::SIGKILL) };
+            }
+            Err(format!(
+                "the model {} was not ready within {}s",
+                t.model,
+                prepare_timeout.as_secs()
+            ))
+        }
+    }
+}
+
+/// For a thread new to the agent's session (it came from elsewhere): the journal so far, as
+/// a preface to the message, within `prime_chars`; empty when there is nothing to tell.
+pub(crate) fn primer(t: &Turn, prime_chars: usize) -> Result<String, String> {
+    let capsule = io::load(&t.path()).map_err(|e| e.to_string())?;
+    let mut events: Vec<&TimelineEvent> = capsule
+        .timeline
+        .ordered()
+        .into_iter()
+        .filter(|e| e.kind != EventKind::Checkpoint)
+        .collect();
+    if events
+        .last()
+        .is_some_and(|e| e.kind == EventKind::UserMessage)
+    {
+        events.pop(); // this turn's message is sent as the prompt
+    }
+    if events.iter().all(|e| e.kind == EventKind::System) {
+        return Ok(String::new());
+    }
+    let mut lines: Vec<String> = Vec::new();
+    let mut used = 0;
+    for e in events.iter().rev() {
+        let s: String = summary(e).chars().take(500).collect();
+        if s.is_empty() {
+            continue;
+        }
+        let line = format!("[{}] {s}", e.kind.as_str());
+        if used + line.len() > prime_chars {
+            lines.push(format!(
+                "[…] {} earlier events omitted",
+                events.len() - lines.len()
+            ));
+            break;
+        }
+        used += line.len();
+        lines.push(line);
+    }
+    lines.reverse();
+    Ok(format!(
+        "You are continuing a conversation that started elsewhere (another machine or model). \
+         Earlier journal, oldest first:\n{}\n\nNew message from the user:",
+        lines.join("\n")
+    ))
 }
 
 /// How often a thread repeats the phase it is already in (Runner::announce_state).
