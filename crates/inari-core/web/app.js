@@ -340,7 +340,7 @@ $("modeChip").onclick = () => { const a = snap.agents[selected]; if (!a) return;
     for (const m of modes) { const b = document.createElement("button"); b.className = "mrow" + (m.id === (a.mode || modes[0].id) ? " on" : ""); const nm = document.createElement("span"); nm.textContent = m.name; b.append(nm);
       if (m.description) { const d = document.createElement("small"); d.style.cssText = "margin-left:auto;color:var(--faint);max-width:55%;text-align:right"; d.textContent = m.description; b.append(d); }
       b.onclick = () => { $("pop").classList.remove("open"); api("/api/mode", { agent: selected, mode: m.id }); toast(t("Mode: {name}", { name: m.name })); }; list.append(b); } }); };
-function fillModelChip(chip, model) { chip.textContent = ""; chip.append(badge(model, 18)); const n = document.createElement("span"); n.className = "n"; n.textContent = shortModel(model); chip.append(n); const r = ring(model); if (r) chip.append(r); }
+function fillModelChip(chip, model) { chip.textContent = ""; chip.append(badge(model, 18)); const n = document.createElement("span"); n.className = "n"; n.textContent = shortModel(model); chip.title = shortModel(model); chip.append(n); const r = ring(model); if (r) chip.append(r); }
 function drawComposer() {
   const a = selected && snap.agents[selected], cc = $("coreChip"), pm = $("pickModel"); $("msg").placeholder = a ? t("Message the agent…") : t("Build anything…");
   const own = snap.nodes.find((n) => n.node_id === snap.ui.self && n.role === "heavy"), core = a ? a.node : (pendingCore || (own || snap.nodes.find((n) => n.role === "heavy") || {}).node_id || ""); if (!a) pendingCore = core; cc.textContent = "⌂ " + (core || t("no core")); cc.style.display = a ? "none" : "";

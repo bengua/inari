@@ -173,3 +173,20 @@ dl.keys { display:grid; grid-template-columns:auto 1fr; gap:8px 14px; margin:0 0
 @media (max-height:900px) and (min-width:1101px) { #approvals { max-height:32vh; overflow:auto; } #feed { max-height:64px; } }
 /* fingers need room: 44 px targets on touch screens */
 @media (pointer:coarse) { .tip { display:none; } .pnav { opacity:.7; width:40px; } .row.selected .rmove { width:36px; height:36px; } .chead .cnew { width:36px; height:36px; opacity:1; } .btn.icon { width:44px; min-height:44px; } .btn.small { min-height:40px; } .shead .btn { width:40px; height:40px; } .tab { min-height:44px; } .chip { min-height:36px; } .cb .cpy { opacity:1; } }
+/* ---- thin bars on wide screens: the app bar and the thread's bar give the room to the conversation ---- */
+@media (min-width:761px) {
+  #appbar { height:36px; padding:0 8px; gap:8px; }
+  #appbar .btn.icon { width:28px; min-height:28px; border-radius:8px; }
+  #appbar .btn.icon .i, #top .btn .i, .tabs .btn.icon .i { width:15px; height:15px; }
+  #appbar h1 { font-size:13.5px; } #appbar .chip { padding:1px 9px; font-size:12px; min-height:0; }
+  #top { flex-wrap:wrap; min-height:36px; padding:2px 12px; gap:4px 6px; } /* never hides a control: a narrow column wraps */
+  #actionsBtn span { display:none; } #actionsBtn { padding:1px 6px; }
+  #top h2 { font-size:14px; min-width:60px; }
+  #top .chip, #top .btn.small { padding:1px 9px; min-height:24px; font-size:12px; flex:none; }
+  #top .state { padding:1px 8px; font-size:12px; flex:none; } #top .ring { width:16px; height:16px; } #top .ring i { width:11px; height:11px; } #top .mb { width:16px; height:16px; }
+  .tabs { padding:0 8px; min-height:36px; } .tab { padding:0 10px; height:36px; font-size:13px; }
+  .tabs .btn.icon { width:28px; min-height:28px; border-radius:8px; }
+}
+/* a narrow conversation column: the state keeps its word, not the core it runs on (the sidebar shows it) */
+#main { container-type:inline-size; }
+@container (max-width:620px) { #top .state small { display:none; } #top { gap:4px; } #top h2 { min-width:40px; } #modelChip .n { max-width:84px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } }

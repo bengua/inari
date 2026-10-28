@@ -14,6 +14,10 @@ Newest first. An entry says what changed for someone using the thing.
   sequences the persona has. The choice is the person's own, not the model's: the core keeps it
   for the owner and for each pass (`<data_dir>/personas.json`, `GET /api/personas`,
   `POST /api/persona`), and every device of theirs follows.
+- **Thinner bars.** On a wide screen the app bar and the thread's bar are 36 px high, the
+  workbench tabs aligned with them; the thread's *Actions* is its icon; in a narrow column the
+  state leaves out its core and the model name is shortened (whole on hover). A bar that still
+  lacks room wraps, it never hides a control.
 - **The mascot sits on the prompt.** With a thread open on a wide screen, the mascot stands on
   the top edge of the prompt, on its right, as large as in the sidebar; the sidebar keeps a compact
   row to change avatar.

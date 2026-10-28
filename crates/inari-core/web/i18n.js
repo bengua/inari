@@ -25,7 +25,7 @@ fr: /* FR-START */ {
  "Approval requested: {command}": "Approbation demandée : {command}",
  "Artifacts": "Artefacts",
  "Artifacts, terminal, journal": "Artefacts, terminal, journal",
- "Ask first": "Demander d'abord",
+ "Ask first": "Demander",
  "Asleep — find it under Sleeping": "Endormi — retrouvez-le dans « Endormis »",
  "Attach a core": "Rattacher un cœur",
  "Attach a core you deployed": "Rattacher un cœur que vous avez déployé",
