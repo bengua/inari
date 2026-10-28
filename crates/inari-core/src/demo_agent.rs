@@ -231,6 +231,13 @@ impl Agent {
             );
             return true;
         }
+        // "stream": an answer in 400 small pieces, as a fast model streams it
+        if last.contains("stream") {
+            for i in 0..400 {
+                self.say(sid, &format!("w{i} "));
+            }
+            return true;
+        }
         // "long": a reply far longer than any summary, ending on a known word
         let tail = if last.contains("long") {
             vec!["word"; 300].join(" ")

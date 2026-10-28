@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{mpsc, oneshot};
@@ -937,6 +937,9 @@ impl AcpHarness {
     }
 }
 
+/// How often a thread repeats the phase it is already in (Runner::announce_state).
+const ANNOUNCE_EVERY: Duration = Duration::from_secs(1);
+
 /// Drives the agents a node holds: one turn at a time per agent.
 pub struct Runner {
     pub host: Arc<CapsuleHost>,
@@ -945,6 +948,8 @@ pub struct Runner {
     publish: Option<Publisher>,
     approver: Option<Approver>,
     pub phases: Mutex<HashMap<String, String>>,
+    /// The phase each agent last announced, and when (announce_state).
+    announced: Mutex<HashMap<String, (String, Instant)>>,
     /// Threads whose running turn a person asked to stop.
     pub cancels: Mutex<std::collections::HashSet<String>>,
     /// The last context use each agent reported.
@@ -967,6 +972,7 @@ impl Runner {
             publish,
             approver,
             phases: Mutex::default(),
+            announced: Mutex::default(),
             cancels: Mutex::default(),
             usage: Mutex::default(),
             locks: Mutex::default(),
@@ -1006,7 +1012,22 @@ impl Runner {
     }
 
     /// Tell the mesh the thread's phase, with how full its context is when the agent says.
+    ///
+    /// A model streams its answer in many small pieces, each one setting the phase again. A new
+    /// phase goes out at once; the same phase again at most every ANNOUNCE_EVERY (with the
+    /// context use as it is then). Without this, each piece of an answer crossed the mesh and
+    /// sent every open page a whole new snapshot, dozens of times a second: the faster the model,
+    /// the slower Inari.
     fn announce_state(&self, agent: &str, phase: &str) {
+        {
+            let mut last = self.announced.lock().expect("not poisoned");
+            if let Some((p, at)) = last.get(agent) {
+                if p == phase && at.elapsed() < ANNOUNCE_EVERY {
+                    return;
+                }
+            }
+            last.insert(agent.into(), (phase.into(), Instant::now()));
+        }
         if let Some(p) = &self.publish {
             let mut m = json!({"agent": agent, "node": self.host.node_id, "phase": phase});
             if let Some(u) = self.usage.lock().expect("not poisoned").get(agent) {

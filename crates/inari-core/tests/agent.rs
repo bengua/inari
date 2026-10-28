@@ -552,3 +552,41 @@ async fn a_thread_under_a_pass_is_never_in_auto_mode() {
         "{out:?}"
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_streamed_answer_does_not_flood_the_mesh_with_its_phase() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("acp.log");
+    let host = Arc::new(CapsuleHost::new("n1", &dir.path().join("node")).unwrap());
+    let harness = fake(&log, &dir.path().join("sessions.json"), false);
+    let sent: Arc<std::sync::Mutex<Vec<(String, Value)>>> = Arc::default();
+    let seen = Arc::clone(&sent);
+    let publish: inari_core::agent::Publisher = Arc::new(move |subject: &str, payload: Value| {
+        seen.lock().unwrap().push((subject.to_string(), payload));
+    });
+    let runner = Runner::new(host, vec![("fake".into(), harness)], Some(publish), None);
+    let agent = runner.create("t1", "", "a title").unwrap();
+    let out = runner.run(&agent, "please stream", vec![]).await;
+    assert!(
+        out.final_text.starts_with("w0 w1 ") && out.final_text.ends_with("w399"),
+        "{}",
+        out.final_text
+    );
+    let phases: Vec<String> = sent
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(s, _)| s == &format!("agent.{agent}.state"))
+        .map(|(_, p)| p["phase"].as_str().unwrap_or("").to_string())
+        .collect();
+    let inference = phases.iter().filter(|p| *p == "inference").count();
+    assert!(
+        (1..=3).contains(&inference),
+        "400 pieces, {inference} announcements: {phases:?}"
+    );
+    assert_eq!(
+        phases.last().map(String::as_str),
+        Some("idle"),
+        "the end of the turn always goes out"
+    );
+}
