@@ -19,6 +19,7 @@ pub mod host;
 pub mod mesh;
 pub mod node;
 pub mod passes;
+pub mod personas;
 pub mod rpc;
 pub mod session;
 pub mod signature;

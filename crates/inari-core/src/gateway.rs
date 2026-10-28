@@ -219,6 +219,8 @@ pub struct Gateway {
     clients: broadcast::Sender<()>,
     pub usage_interval: Duration,
     sessions: crate::session::Sessions,
+    /// The persona each person chose for the mascot.
+    personas: crate::personas::Choices,
 }
 
 fn s(p: &Value, k: &str) -> String {
@@ -412,6 +414,7 @@ impl Gateway {
             clients,
             usage_interval: Duration::from_secs(60),
             sessions: crate::session::Sessions::open(data_dir),
+            personas: crate::personas::Choices::open(data_dir),
         });
         g.subscribe();
         g
@@ -593,6 +596,8 @@ impl Gateway {
     /// token hashes); for a pass, its own threads, the cores and its allowed harnesses only.
     pub fn snapshot_for(&self, access: &Access) -> Value {
         let mut snap = self.snapshot();
+        // the mascot this person chose, on every device they open
+        snap["ui"]["persona"] = json!(self.personas.get(&Self::who(access)));
         let passes: Vec<Value> = self
             .state
             .lock()
@@ -1013,6 +1018,25 @@ impl Gateway {
         if get && r.path == "/events" {
             return self.events(w, access).await;
         }
+        if get && r.path == "/api/personas" {
+            let list = self
+                .mascot_dir
+                .as_deref()
+                .map(crate::personas::list)
+                .unwrap_or_default();
+            let current = self.personas.get(&Self::who(&access));
+            return send_json(w, 200, &json!({"personas": list, "current": current})).await;
+        }
+        if r.method == "POST" && r.path == "/api/persona" {
+            if !r
+                .headers
+                .get("content-type")
+                .is_some_and(|c| c.starts_with("application/json"))
+            {
+                return send_json(w, 400, &json!({"error": "JSON only"})).await;
+            }
+            return self.choose_persona(&access, &r, w).await;
+        }
         if get && r.path == "/api/whoami" {
             let me = match &access {
                 Access::Owner => json!({"role": "owner"}),
@@ -1103,6 +1127,41 @@ impl Gateway {
             }
         }
         send_json(w, 404, &json!({"error": "not found"})).await
+    }
+
+    /// Who a preference belongs to: the owner, or a pass by its id.
+    fn who(access: &Access) -> String {
+        match access.pass_id() {
+            None => "owner".into(),
+            Some(id) => format!("pass:{id}"),
+        }
+    }
+
+    /// `POST /api/persona {"persona": …}`: the mascot this person shows; empty for the original
+    /// FoxBot. Only a persona FoxBot's folder holds is accepted.
+    async fn choose_persona(
+        &self,
+        access: &Access,
+        r: &Request,
+        w: &mut TcpStream,
+    ) -> std::io::Result<()> {
+        let persona = serde_json::from_slice::<Value>(&r.body)
+            .ok()
+            .and_then(|v| v.get("persona").and_then(Value::as_str).map(String::from))
+            .unwrap_or_default();
+        let known = self
+            .mascot_dir
+            .as_deref()
+            .map(crate::personas::list)
+            .unwrap_or_default();
+        if !persona.is_empty() && !known.iter().any(|p| p["id"] == persona.as_str()) {
+            return send_json(w, 400, &json!({"error": "unknown persona"})).await;
+        }
+        if let Err(e) = self.personas.set(&Self::who(access), &persona) {
+            return send_json(w, 500, &json!({"error": e.to_string()})).await;
+        }
+        self.push(); // every page of this person follows
+        send_json(w, 200, &json!({"persona": persona})).await
     }
 
     /// `POST /api/session {"secret": …}`: the owner's token or a pass, exchanged for a session

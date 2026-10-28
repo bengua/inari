@@ -125,6 +125,11 @@ function foxHome() { const app = $("app"), mobile = matchMedia("(max-width:760px
   if (mobile && open) { const st = $("stage").getBoundingClientRect(), back = $("back").getBoundingClientRect();
     if (st.height >= 72) { const size = st.height; return { x: innerWidth / 2 - size / 2, y: st.top, size }; } // its stage, big enough to see its face
     const size = 56; return { x: innerWidth / 2 - size / 2, y: Math.max(0, back.top + back.height / 2 - size / 2), size }; }
+  // a thread open on a wide screen: the mascot sits on the top edge of the prompt, on its right (the side of
+  // the person's own messages, the least re-read), as large as in the sidebar; its feet rest on the border
+  if (!mobile && open) { const c = $("composer").getBoundingClientRect();
+    if (c.width > 0) { const size = Math.min(FOX, innerHeight * 0.28, c.top - 60) /* the sidebar's size: #foxSlot */, x = Math.min(c.right - size * 0.82, innerWidth - size - 4);
+      return { x, y: c.top - size * 0.86, size }; } }
   if (!mobile && app.classList.contains("noside")) { const m = $("main").getBoundingClientRect(), size = open ? 96 : 160; return { x: m.left + m.width / 2 - size / 2, y: open ? 0 : 6, size }; }
   const slot = $("foxSlot").getBoundingClientRect(), size = Math.min(slot.height, slot.width); return { x: slot.left + slot.width / 2 - size / 2, y: slot.top, size }; }
 function placeFox() { const fox = $("fox"); if ($("app").hidden) return; const t = foxTarget();
@@ -166,6 +171,7 @@ function render() {
   const agents = Object.entries(snap.agents), busy = agents.filter(([, a]) => a.phase !== "idle").length;
   $("stats").textContent = t("{n} agents · {busy} working", { n: agents.length, busy });
   if (!drag && !coreHold) renderCores(agents);
+  if (snap.ui && snap.ui.mascot && personas === null) { personas = []; loadPersonas(); } renderPersonaNav();
   renderFeed(); renderApprovals(); renderTop(); renderPill(); renderUsageCard(); mascot(); drawOrbParams(snap.mascot);
   if (selected && Date.now() - tlStamp > 1500) refreshDetail(); else if (!selected) { drawChat(); drawComposer(); if (!$("bbody").firstChild) drawBench(); }
 }
@@ -276,7 +282,7 @@ $("gear").onclick = () => openPop($("gear"), (pop) => { pop.insertAdjacentHTML("
 
 /* ---------- the mascot: FoxBot when its folder is served, else the orb ---------- */
 let foxFrame = null, foxReady = false, foxLast = "";
-function fox(method, a) { try { const f = foxFrame && foxFrame.contentWindow && foxFrame.contentWindow.fox; if (!f) return false; if (method === "event") f.setEvent && f.setEvent(a); else if (method === "state") { f.setHarness && f.setHarness(a.harness); f.setHealth && f.setHealth(a.health); f.setActivity && f.setActivity(a.activity); } return true; } catch (e) { return false; } }
+function fox(method, a) { try { const f = foxFrame && foxFrame.contentWindow && foxFrame.contentWindow.fox; if (!f) return false; if (method === "event") f.setEvent && f.setEvent(a); else if (method === "persona") { if (!f.setPersona) return false; f.setPersona(a); } else if (method === "state") { f.setHarness && f.setHarness(a.harness); f.setHealth && f.setHealth(a.health); f.setActivity && f.setActivity(a.activity); } return true; } catch (e) { return false; } }
 function mountFox() {
   const box = $("fox"); if (!(snap && snap.ui && snap.ui.mascot)) { if (!box.firstChild) { const c = document.createElement("canvas"); c.id = "orb"; c.width = c.height = 300; c.setAttribute("role", "img"); c.setAttribute("aria-label", t("Network activity indicator")); box.append(c); orbInit(c); } return; }
   if (foxFrame) return; foxFrame = document.createElement("iframe"); foxFrame.title = t("Mascot"); foxFrame.src = "/fox/index.html"; foxFrame.onload = () => { foxReady = true; foxLast = ""; try { foxFrame.contentWindow.fox.setReducedMotion(matchMedia("(prefers-reduced-motion: reduce)").matches); } catch (e) {} mascot(); }; box.textContent = ""; box.append(foxFrame);
@@ -284,8 +290,25 @@ function mountFox() {
 function mascot() {
   mountFox(); if (!foxReady) return; const phases = Object.values(snap.agents).map((a) => a.phase), sel = selected && snap.agents[selected], errors = phases.filter((p) => p === "error").length;
   const activity = snap.approvals.length ? "waiting" : phases.some((p) => p === "inference" || p === "loading" || p === "listening") ? "working" : "idle"; const f = family((sel && sel.model) || "").id;
-  const harness = f === "claude" ? "claude" : f === "kimi" ? "kimi" : "local"; const st = { activity, harness, health: Math.max(20, 100 - errors * 20) }, key = JSON.stringify(st); if (key !== foxLast) { fox("state", st); foxLast = key; }
+  const harness = f === "claude" ? "claude" : f === "kimi" ? "kimi" : "local"; const st = { activity, harness, health: Math.max(20, 100 - errors * 20) }, key = JSON.stringify(st); if (key !== foxLast) { fox("state", st); foxLast = key; personaShown = null; /* an older FoxBot lets the harness pick its persona: say ours again */ }
+  applyPersona();
 }
+/* The avatar is the person's own choice (not the model's): the arrows beside the mascot go through the personas
+   FoxBot's folder holds; the choice is kept by the core for this person, so every device of theirs follows. */
+let personas = null, personaInfo = {}, personaShown = null;
+async function loadPersonas() { const r = await api("/api/personas"); if (r.error) { personas = null; return; }
+  personas = [""].concat((r.personas || []).map((p) => p.id)); personaInfo = Object.fromEntries((r.personas || []).map((p) => [p.id, p])); renderPersonaNav(); }
+function personaLabel(id) { if (!id) return "FoxBot"; const p = personaInfo[id]; const name = id.charAt(0).toUpperCase() + id.slice(1);
+  return p ? t("{name} · {shared}/{of} sequences", { name, shared: p.shared, of: p.of }) : name; }
+function renderPersonaNav() { const on = !!(snap && snap.ui && snap.ui.mascot) && !!personas && personas.length > 1;
+  for (const id of ["personaPrev", "personaNext"]) $(id).hidden = !on;
+  if (on && !$("personaName").classList.contains("on")) $("personaName").textContent = personaLabel((snap.ui && snap.ui.persona) || ""); /* the compact row always names it */ }
+function applyPersona() { const want = (snap.ui && snap.ui.persona) || ""; if (want === personaShown) return; if (fox("persona", want || null)) personaShown = want; }
+let personaTimer = null;
+function showPersonaName(id) { const el = $("personaName"); el.textContent = personaLabel(id); el.classList.add("on"); clearTimeout(personaTimer); personaTimer = setTimeout(() => el.classList.remove("on"), 2600); }
+function stepPersona(d) { if (!personas || personas.length < 2) return; const cur = (snap.ui && snap.ui.persona) || "", i = Math.max(0, personas.indexOf(cur)), next = personas[(i + d + personas.length) % personas.length];
+  snap.ui.persona = next; applyPersona(); showPersonaName(next); api("/api/persona", { persona: next }); }
+$("personaPrev").onclick = () => stepPersona(-1); $("personaNext").onclick = () => stepPersona(1);
 const COPPER = "#e48a46"; let orbCtx = null, orbEl = null, P = { colour: COPPER, pulse_hz: .25, turbulence: 0, glow: .2 }, cur = { ...P };
 function drawOrbParams(m) { P = { ...m, colour: m.colour === "#22d3ee" ? COPPER : m.colour }; }
 function orbInit(c) { orbEl = c; orbCtx = c.getContext("2d"); requestAnimationFrame(frame); }
@@ -591,7 +614,7 @@ $("ptitle").ondblclick = () => { if (selected) renameThread(selected); };
 /* Stop replaces Send while the thread works and the box is empty. */
 function drawStop() { const a = selected && snap && snap.agents[selected], busy = !!a && ["listening", "loading", "inference"].includes(a.phase), empty = !$("msg").value.trim() && !attachments.length; $("stopBtn").hidden = !(busy && empty); $("sendBtn").hidden = busy && empty; }
 $("stopBtn").onclick = () => { if (selected) { api("/api/cancel", { agent: selected }); toast(t("Stopping…")); } };
-$("msg").addEventListener("input", drawStop);
+$("msg").addEventListener("input", drawStop); $("msg").addEventListener("input", () => requestAnimationFrame(placeFox));
 function actionSheet(id) { const a = snap.agents[id]; if (!a) return; const node = snap.nodes.find((n) => n.node_id === a.node) || {};
   const opts = [[t("Open it, with its artifacts"), () => select(id).then(() => { store.set("nobench", false); document.body.classList.add("bench-open"); layout(); })]];
   const has = (n, h) => !!(((n.capabilities || {}).harnesses || {})[h]);

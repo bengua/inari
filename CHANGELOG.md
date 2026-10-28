@@ -9,6 +9,15 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Added
 
+- **Choose your avatar.** Two discreet arrows beside the mascot go through the personas FoxBot's
+  folder holds (`sprites_persona/`); the name shows for a moment, with how many of FoxBot's
+  sequences the persona has. The choice is the person's own, not the model's: the core keeps it
+  for the owner and for each pass (`<data_dir>/personas.json`, `GET /api/personas`,
+  `POST /api/persona`), and every device of theirs follows.
+- **The mascot sits on the prompt.** With a thread open on a wide screen, the mascot stands on
+  the top edge of the prompt, on its right, as large as in the sidebar; the sidebar keeps a compact
+  row to change avatar.
+
 - **`inari-core-rs demo`: the demo in Rust.** Three nodes in one process, the interface on
   `:8787`, live turns and an approval question; `--mascot DIR` shows FoxBot. The agent it runs is
   this binary too (`inari-core-rs demo-agent`): `write <file>: <text>`, `run: <command>` (a
