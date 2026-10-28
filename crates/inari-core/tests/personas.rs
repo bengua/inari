@@ -1,5 +1,5 @@
 //! The mascot's persona is each person's own choice: the owner and a pass holder pick theirs
-//! from what FoxBot's folder holds, every page of theirs follows, and nobody else's changes.
+//! from the personas FoxBot publishes, every page of theirs follows, and nobody else's changes.
 
 use inari_core::gateway::Access;
 use inari_core::node::{Node, NodeConfig};
@@ -43,6 +43,12 @@ async fn each_person_shows_the_persona_they_chose() {
     frames(&fox.join("sprites_persona/rebel/fume_clope"));
     frames(&fox.join("sprites_persona/zen/respire"));
     frames(&fox.join("sprites_persona/zen/cligne"));
+    frames(&fox.join("sprites_persona/draft/respire")); // work in progress: not published
+    std::fs::write(
+        fox.join("personas.json"),
+        r#"{"published": ["rebel", "zen"]}"#,
+    )
+    .unwrap();
     let cfg: NodeConfig = serde_json::from_value(json!({
         "node_id": "home", "data_dir": d.join("home"), "key_file": d.join("mesh.key"),
         "device_key_file": d.join("device.key"), "gateway_listen": "127.0.0.1:0",
@@ -66,6 +72,22 @@ async fn each_person_shows_the_persona_they_chose() {
         (Some("zen"), Some(2), Some(3))
     );
     assert_eq!(got["personas"][0]["signatures"], json!(["fume_clope"]));
+    assert_eq!(
+        got["personas"].as_array().unwrap().len(),
+        2,
+        "only what FoxBot publishes"
+    );
+    assert_eq!(
+        call(
+            port,
+            owner,
+            "/api/persona",
+            Some(json!({"persona": "draft"}))
+        )
+        .await
+        .0,
+        400
+    );
 
     // the owner picks zen: their snapshot says so, and it survives a restart of the choice store
     assert_eq!(
@@ -139,6 +161,19 @@ async fn each_person_shows_the_persona_they_chose() {
         call(port, owner, "/api/personas", None).await.1["current"],
         "zen"
     );
+
+    // a persona FoxBot stops publishing: whoever chose it sees the original FoxBot again
+    std::fs::write(fox.join("personas.json"), r#"{"published": ["zen"]}"#).unwrap();
+    assert_eq!(
+        call(port, &guest, "/api/personas", None).await.1["current"],
+        ""
+    );
+    assert_eq!(g.snapshot_for(&Access::Owner)["ui"]["persona"], "zen");
+    std::fs::write(
+        fox.join("personas.json"),
+        r#"{"published": ["rebel", "zen"]}"#,
+    )
+    .unwrap();
 
     // back to the original FoxBot
     assert_eq!(

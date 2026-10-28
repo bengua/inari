@@ -9,9 +9,10 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Added
 
-- **Choose your avatar.** Two discreet arrows beside the mascot go through the personas FoxBot's
-  folder holds (`sprites_persona/`); the name shows for a moment, with how many of FoxBot's
-  sequences the persona has. The choice is the person's own, not the model's: the core keeps it
+- **Choose your avatar.** Two discreet arrows beside the mascot go through the personas FoxBot
+  publishes (the ones `<mascot_dir>/personas.json` names; the folders of `sprites_persona/` still
+  in progress are never offered, and a choice of a persona taken down falls back to FoxBot); the
+  name shows for a moment, with how many of FoxBot's sequences the persona has. The choice is the person's own, not the model's: the core keeps it
   for the owner and for each pass (`<data_dir>/personas.json`, `GET /api/personas`,
   `POST /api/persona`), and every device of theirs follows.
 - **Thinner bars.** On a wide screen the app bar and the thread's bar are 36 px high, the

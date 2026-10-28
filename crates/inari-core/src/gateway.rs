@@ -597,7 +597,7 @@ impl Gateway {
     pub fn snapshot_for(&self, access: &Access) -> Value {
         let mut snap = self.snapshot();
         // the mascot this person chose, on every device they open
-        snap["ui"]["persona"] = json!(self.personas.get(&Self::who(access)));
+        snap["ui"]["persona"] = json!(self.persona_of(access));
         let passes: Vec<Value> = self
             .state
             .lock()
@@ -1024,7 +1024,7 @@ impl Gateway {
                 .as_deref()
                 .map(crate::personas::list)
                 .unwrap_or_default();
-            let current = self.personas.get(&Self::who(&access));
+            let current = self.persona_of(&access);
             return send_json(w, 200, &json!({"personas": list, "current": current})).await;
         }
         if r.method == "POST" && r.path == "/api/persona" {
@@ -1134,6 +1134,15 @@ impl Gateway {
         match access.pass_id() {
             None => "owner".into(),
             Some(id) => format!("pass:{id}"),
+        }
+    }
+
+    /// The persona this person chose, while FoxBot still publishes it; else the original FoxBot.
+    fn persona_of(&self, access: &Access) -> String {
+        let chosen = self.personas.get(&Self::who(access));
+        match self.mascot_dir.as_deref() {
+            Some(dir) if crate::personas::published(dir).contains(&chosen) => chosen,
+            _ => String::new(),
         }
     }
 

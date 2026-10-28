@@ -5,6 +5,10 @@
 //! not the model's: the owner and each pass holder keep theirs, here, in
 //! `<data_dir>/personas.json`, so it follows them from one device to the other. An empty choice
 //! is the original FoxBot.
+//!
+//! Only the personas FoxBot publishes are offered: those named in `<mascot_dir>/personas.json`
+//! (`{"published": [...]}`, kept in step with FoxBot's own list). The other folders of
+//! `sprites_persona/` are work in progress, never shown.
 
 use serde_json::{json, Map, Value};
 use std::collections::BTreeSet;
@@ -33,10 +37,25 @@ fn actions(dir: &Path) -> BTreeSet<String> {
         .collect()
 }
 
-/// The personas in FoxBot's folder: for each, how many of the original fox's actions it has
-/// (`shared` of `of`), and its own (`signatures`). Sorted by name.
+/// The personas FoxBot publishes (`<mascot_dir>/personas.json`); none without that file.
+pub fn published(mascot_dir: &Path) -> BTreeSet<String> {
+    std::fs::read(mascot_dir.join("personas.json"))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .and_then(|v| v.get("published").and_then(Value::as_array).cloned())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(Value::as_str)
+        .filter(|n| valid_name(n))
+        .map(String::from)
+        .collect()
+}
+
+/// The published personas in FoxBot's folder: for each, how many of the original fox's actions it
+/// has (`shared` of `of`), and its own (`signatures`). Sorted by name.
 pub fn list(mascot_dir: &Path) -> Vec<Value> {
     let original = actions(&mascot_dir.join("sprites"));
+    let published = published(mascot_dir);
     let Ok(entries) = std::fs::read_dir(mascot_dir.join("sprites_persona")) else {
         return Vec::new();
     };
@@ -44,7 +63,7 @@ pub fn list(mascot_dir: &Path) -> Vec<Value> {
         .filter_map(Result::ok)
         .filter(|e| e.path().is_dir())
         .filter_map(|e| e.file_name().into_string().ok())
-        .filter(|n| valid_name(n))
+        .filter(|n| published.contains(n))
         .map(|name| {
             let own = actions(&mascot_dir.join("sprites_persona").join(&name));
             let shared = own.intersection(&original).count();
@@ -120,6 +139,16 @@ mod tests {
         frames(&d.path().join("sprites_persona/zen/respire"));
         std::fs::create_dir_all(d.path().join("sprites_persona/empty/respire")).unwrap(); // no frames
         frames(&d.path().join("sprites_persona/Bad Name/respire"));
+        frames(&d.path().join("sprites_persona/draft/respire")); // work in progress
+        assert!(
+            list(d.path()).is_empty(),
+            "nothing is published without the list"
+        );
+        std::fs::write(
+            d.path().join("personas.json"),
+            r#"{"published": ["rebel", "zen", "empty", "Bad Name", "gone"]}"#,
+        )
+        .unwrap();
         let all = list(d.path());
         let ids: Vec<&str> = all.iter().map(|p| p["id"].as_str().unwrap()).collect();
         assert_eq!(ids, ["rebel", "zen"]);
