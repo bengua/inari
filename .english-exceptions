@@ -4,3 +4,4 @@ android/app/src/main/java/app/inari/client/Theme.kt # font family names (ibm_ple
 docs/revue-2026-10-fr.md # the handoff of the October 2026 review, written in French for the owner on purpose
 crates/inari-core/web/i18n.js # the French table of the page: a locale, not prose
 docs/INSTALLER-BRANCHE-fr.md # step-by-step install of the test branch for Ben's local agent, in French for them
+docs/openfox-dans-inari-fr.md
