@@ -4,7 +4,7 @@
 //! configuration file and the data directory are those the retired Python nodes used, so
 //! a core they ran was taken over in place.
 
-use crate::agent::{summary, AcpHarness, Approver, Publisher, Runner};
+use crate::agent::{summary, AcpHarness, Approver, Harness, Publisher, Runner};
 use crate::approvals::NodeApprovals;
 use crate::bus::{Bus, Message};
 use crate::buslink::{BusClient, BusServer};
@@ -12,6 +12,7 @@ use crate::capsule::{io, EventKind};
 use crate::gateway::{Gateway, GatewayOptions};
 use crate::host::CapsuleHost;
 use crate::mesh::{Coordinator, NodeInfo, Progress, Registry, Teleporter};
+use crate::openfox::OpenFoxHarness;
 use crate::rpc::{EndpointServer, RemoteEndpoint};
 use crate::teleport::{teleport_observed, CallResult, Endpoint};
 use crate::updates::UpdateSpec;
@@ -163,7 +164,11 @@ impl NodeConfig {
     /// Harness specs, the single `harness` (kind acp) first under the name "default".
     pub fn harness_specs(&self) -> Vec<(String, HarnessSpec)> {
         let mut out = Vec::new();
-        if let Some(h) = self.harness.as_ref().filter(|h| h.kind == "acp") {
+        if let Some(h) = self
+            .harness
+            .as_ref()
+            .filter(|h| h.kind == "acp" || h.kind == "openfox")
+        {
             out.push(("default".to_string(), h.clone()));
         }
         out.extend(self.harnesses.0.iter().cloned());
@@ -399,9 +404,17 @@ impl Node {
             let publish: Publisher = Arc::new(move |subject: &str, payload: Value| {
                 publish_bus.publish(subject, payload);
             });
-            let built = specs
+            let built: Vec<(String, Harness)> = specs
                 .iter()
                 .map(|(name, spec)| {
+                    if spec.kind == "openfox" {
+                        // OpenFox driven natively: its settings are the interface's, in the data folder
+                        let mut h = OpenFoxHarness::new(cfg.data_dir.join("openfox").join(name));
+                        h.extra_env = spec.env.clone();
+                        h.prepare = spec.prepare.clone();
+                        h.prepare_timeout = Duration::from_secs_f64(spec.prepare_timeout.max(1.0));
+                        return (name.clone(), Harness::from(h));
+                    }
                     let file = cfg
                         .data_dir
                         .join("host")
@@ -413,7 +426,7 @@ impl Node {
                     h.pass_env = spec.pass_env.clone();
                     h.steer = spec.steer;
                     h.prepare_timeout = Duration::from_secs_f64(spec.prepare_timeout.max(1.0));
-                    (name.clone(), h)
+                    (name.clone(), Harness::from(h))
                 })
                 .collect();
             Some(Runner::new(
@@ -822,6 +835,9 @@ impl Node {
                 let attached = r.attached(&agent, &paths);
                 let out = r.run(&agent, &text, attached).await;
                 let text: String = out.final_text.chars().take(400).collect();
+                if out.stopped == "joined" {
+                    return; // slipped into the turn running in OpenFox: that turn says when it is done
+                }
                 n.bus.publish(&format!("agent.{agent}.done"), json!({"agent": agent, "stopped": out.stopped, "error": out.error, "text": text}));
             });
         });

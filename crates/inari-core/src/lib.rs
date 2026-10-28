@@ -18,6 +18,7 @@ pub mod gateway;
 pub mod host;
 pub mod mesh;
 pub mod node;
+pub mod openfox;
 pub mod passes;
 pub mod personas;
 pub mod rpc;

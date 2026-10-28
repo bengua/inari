@@ -983,6 +983,54 @@ pub(crate) fn primer(t: &Turn, prime_chars: usize) -> Result<String, String> {
     ))
 }
 
+/// A thread's harness: an agent spoken to over ACP, or OpenFox driven natively (crate::openfox).
+pub enum Harness {
+    Acp(AcpHarness),
+    OpenFox(crate::openfox::OpenFoxHarness),
+}
+
+impl From<AcpHarness> for Harness {
+    fn from(h: AcpHarness) -> Self {
+        Harness::Acp(h)
+    }
+}
+
+impl From<crate::openfox::OpenFoxHarness> for Harness {
+    fn from(h: crate::openfox::OpenFoxHarness) -> Self {
+        Harness::OpenFox(h)
+    }
+}
+
+impl Harness {
+    /// What the agent announces: its models, modes and commands.
+    pub async fn probe(&self, cwd: &Path) -> Probe {
+        match self {
+            Harness::Acp(h) => h.probe(cwd).await,
+            Harness::OpenFox(h) => h.probe().await,
+        }
+    }
+
+    /// The model ids the agent offers.
+    pub async fn list_models(&self, cwd: &Path) -> Vec<String> {
+        self.probe(cwd).await.models
+    }
+
+    pub async fn turn(&self, t: &Turn) -> RunSummary {
+        match self {
+            Harness::Acp(h) => h.turn(t).await,
+            Harness::OpenFox(h) => h.turn(t).await,
+        }
+    }
+
+    /// The native OpenFox harness, when this is one.
+    pub fn openfox(&self) -> Option<&crate::openfox::OpenFoxHarness> {
+        match self {
+            Harness::OpenFox(h) => Some(h),
+            Harness::Acp(_) => None,
+        }
+    }
+}
+
 /// How often a thread repeats the phase it is already in (Runner::announce_state).
 const ANNOUNCE_EVERY: Duration = Duration::from_secs(1);
 /// How often the answer so far goes out while a model streams it (Runner::draft).
@@ -991,7 +1039,7 @@ const DRAFT_EVERY: Duration = Duration::from_millis(120);
 /// Drives the agents a node holds: one turn at a time per agent.
 pub struct Runner {
     pub host: Arc<CapsuleHost>,
-    pub harnesses: BTreeMap<String, AcpHarness>,
+    pub harnesses: BTreeMap<String, Harness>,
     pub default_harness: String,
     publish: Option<Publisher>,
     approver: Option<Approver>,
@@ -1010,16 +1058,19 @@ pub struct Runner {
 }
 
 impl Runner {
-    pub fn new(
+    pub fn new<H: Into<Harness>>(
         host: Arc<CapsuleHost>,
-        harnesses: Vec<(String, AcpHarness)>,
+        harnesses: Vec<(String, H)>,
         publish: Option<Publisher>,
         approver: Option<Approver>,
     ) -> Arc<Self> {
         let default_harness = harnesses.first().map(|h| h.0.clone()).unwrap_or_default();
         Arc::new(Self {
             host,
-            harnesses: harnesses.into_iter().collect(),
+            harnesses: harnesses
+                .into_iter()
+                .map(|(name, h)| (name, h.into()))
+                .collect(),
             default_harness,
             publish,
             approver,
@@ -1051,6 +1102,16 @@ impl Runner {
                 json!({"agent": agent, "id": e.id, "kind": e.kind.as_str(), "text": text}),
             );
         }
+    }
+
+    /// The harness that thinks for this thread: its own, else the node's default.
+    fn harness_of(&self, agent: &str) -> String {
+        self.labels(agent)
+            .get("harness")
+            .and_then(Value::as_str)
+            .filter(|h| self.harnesses.contains_key(*h))
+            .unwrap_or(&self.default_harness)
+            .to_string()
     }
 
     /// Whether a message waits for this agent's running turn to end.
@@ -1142,7 +1203,7 @@ impl Runner {
         self.announce_state(agent, &phase);
     }
 
-    async fn approve(&self, agent: &str, command: &str) -> bool {
+    pub(crate) async fn approve(&self, agent: &str, command: &str) -> bool {
         // Auto mode: the owner chose to let this thread act without asking. It never applies to a
         // thread under a core pass (a child's thread is followed and approved by the parent).
         let labels = self.labels(agent);
@@ -1401,6 +1462,21 @@ impl Runner {
         text: &str,
         attachments: Vec<Attached>,
     ) -> RunSummary {
+        // OpenFox takes a message during a turn into its own queue, and slips it in at its next step
+        if attachments.is_empty() {
+            if let Some(h) = self
+                .harnesses
+                .get(&self.harness_of(agent))
+                .and_then(Harness::openfox)
+            {
+                if h.join(agent, text).await {
+                    return RunSummary {
+                        stopped: "joined".into(),
+                        ..Default::default()
+                    };
+                }
+            }
+        }
         let lock = self.lock(agent);
         *self
             .waiting
@@ -1420,12 +1496,7 @@ impl Runner {
             };
         }
         let labels = self.labels(agent);
-        let harness_name = labels
-            .get("harness")
-            .and_then(Value::as_str)
-            .filter(|h| self.harnesses.contains_key(*h))
-            .unwrap_or(&self.default_harness)
-            .to_string();
+        let harness_name = self.harness_of(agent);
         let model = labels
             .get("model")
             .and_then(Value::as_str)
