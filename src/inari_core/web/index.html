@@ -104,7 +104,7 @@ details.tool pre { margin:0; padding:8px 12px; white-space:pre-wrap; overflow-wr
 .note { display:flex; align-items:center; gap:10px; color:var(--faint); font-size:12px; margin:14px 0; } .note::before,.note::after { content:""; flex:1; height:1px; background:var(--hair); } .note b { color:var(--dim); font-weight:600; } .typing { display:inline-flex; gap:4px; padding:12px 14px; } .typing i { width:6px; height:6px; border-radius:50%; background:var(--dim); animation:pulse 1s infinite; } .typing i:nth-child(2){animation-delay:.15s} .typing i:nth-child(3){animation-delay:.3s}
 .composer { max-width:900px; margin:0 auto; width:100%; border:1px solid var(--hair); border-radius:18px; background:var(--panel-solid); box-shadow:var(--shadow); padding:10px 12px; } .composer:focus-within { border-color:var(--copper); box-shadow:0 0 0 3px var(--glow), var(--shadow); }
 .composer textarea { width:100%; border:0; background:none; resize:none; outline:none; min-height:52px; max-height:260px; line-height:1.5; } .ctools { display:flex; align-items:center; gap:8px; margin-top:6px; flex-wrap:wrap; } .ctools .sp { flex:1; }
-.chip { display:inline-flex; align-items:center; gap:7px; padding:4px 10px; border:1px solid var(--hair); border-radius:999px; background:var(--raise); cursor:pointer; font-size:13px; max-width:240px; } .chip:hover { border-color:var(--copper); } .chip span.n { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.chip { display:inline-flex; align-items:center; gap:7px; padding:4px 10px; border:1px solid var(--hair); border-radius:999px; background:var(--raise); cursor:pointer; font-size:13px; max-width:240px; } #autoChip.on { border-color:var(--copper); color:var(--copper-text); background:rgba(193,98,42,.12); } #askbox { max-width:900px; margin:0 auto; padding:0 14px 14px; } #askbox .ask { margin-top:10px; } .chip:hover { border-color:var(--copper); } .chip span.n { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .send { width:38px; height:38px; border-radius:50%; border:0; background:var(--copper); color:#fff; cursor:pointer; display:grid; place-items:center; } .send .i { stroke-width:2.2; } :root[data-theme=dark] .send { color:#17161a; } .send:disabled { opacity:.4; } .attached { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:6px; }
 #dock { padding:10px 16px 14px; } #dock .hint { max-width:900px; margin:6px auto 0; color:var(--faint); font-size:12px; text-align:center; } #app.nosel #dock .hint { display:none; } body.bench-open #fox { opacity:0; pointer-events:none; }
 /* ---- artifacts pane (right): folds away, or takes the whole width ---- */
@@ -155,8 +155,8 @@ pre.code span.l::before { counter-increment:l; content:counter(l); position:abso
   <section id="main">
     <div id="passBanner" role="status" hidden></div>
     <div id="top"><button class="btn small" id="back">‹ Back</button><button class="btn icon" id="benchMobile" title="Artifacts, terminal, journal" aria-label="Artifacts" data-icon="panel"></button><h2 id="ptitle">Inari</h2><span id="pphase"></span>
-      <button class="chip" id="modelChip" hidden></button><button class="chip" id="modeChip" hidden></button><button class="chip" id="ctxChip" hidden></button><button class="btn small" id="actionsBtn" data-icon="more" hidden><span>Actions</span></button></div>
-    <div id="stage" aria-hidden="true"></div><div id="thread"><div id="msgs"></div></div>
+      <button class="chip" id="modelChip" hidden></button><button class="chip" id="modeChip" hidden></button><button class="chip" id="ctxChip" hidden></button><button class="chip" id="autoChip" hidden></button><button class="btn small" id="actionsBtn" data-icon="more" hidden><span>Actions</span></button></div>
+    <div id="stage" aria-hidden="true"></div><div id="thread"><div id="msgs"></div><div id="askbox" aria-live="polite"></div></div>
     <div id="dock"><form class="composer" id="composer"><div class="attached" id="attached"></div><textarea id="msg" rows="2" placeholder="Build anything…" aria-label="Message"></textarea>
       <div class="ctools"><button type="button" class="btn icon" id="attach" title="Attach a file" aria-label="Attach a file" data-icon="plus"></button><input type="file" id="file" multiple hidden>
         <button type="button" class="chip" id="coreChip" title="Where it runs"></button><button type="button" class="chip" id="pickModel" title="Choose the model"></button><span class="sp"></span>
@@ -342,11 +342,26 @@ function renderPassBanner() { const p = snap.ui && snap.ui.pass, b = $("passBann
   b.innerHTML = p.role === "supervision" ? `<b>Supervised</b> — ${owner} can read these threads and answers the agents' requests.` : `<b>Shared</b> — ${owner} sees these threads and can take part.`;
   const out = document.createElement("button"); out.className = "btn small"; out.textContent = "Leave this pass"; out.onclick = () => { store.set("pass", ""); location.hash = ""; location.reload(); }; b.append(out); }
 function renderApprovals() {
-  const box = $("approvals"); box.textContent = ""; const guest = snap.ui && snap.ui.pass;
-  if (guest && guest.role === "supervision") { for (const r of snap.approvals) { const d = document.createElement("div"); d.className = "ask glass"; d.innerHTML = "<strong>Waiting for approval</strong><code></code>"; d.querySelector("code").textContent = r.command; box.append(d); } return; }
-  for (const r of snap.approvals) { const d = document.createElement("div"); d.className = "ask glass"; d.setAttribute("role", "alert"); d.innerHTML = '<strong>Approve this?</strong><code></code><div class="row2"><button class="btn">Deny</button><button class="btn go">Approve</button></div>';
-    d.querySelector("code").textContent = r.command + " · " + r.agent_id; const [no, yes] = d.querySelectorAll("button"); no.onclick = () => api("/api/approval", { request_id: r.request_id, approved: false }); yes.onclick = () => api("/api/approval", { request_id: r.request_id, approved: true }); box.append(d); }
+  const box = $("approvals"), here = $("askbox"); box.textContent = ""; here.textContent = ""; const guest = snap.ui && snap.ui.pass;
+  const card = (r, wide) => { const d = document.createElement("div"); d.className = "ask glass"; d.setAttribute("role", "alert");
+    if (guest && guest.role === "supervision") { d.innerHTML = "<strong>Waiting for approval</strong><code></code>"; d.querySelector("code").textContent = r.command; return d; }
+    d.innerHTML = '<strong>The agent asks to run</strong><code></code><div class="row2"><button class="btn" data-a="no">Deny</button><button class="btn primary" data-a="yes">Allow once</button>' + (!guest && wide ? '<button class="btn" data-a="auto" title="Stop asking in this thread">Always allow here</button>' : "") + "</div>";
+    d.querySelector("code").textContent = r.command + (wide ? "" : " · " + r.agent_id);
+    const answer = (ok) => api("/api/approval", { request_id: r.request_id, approved: ok });
+    d.querySelector('[data-a="no"]').onclick = () => answer(false); d.querySelector('[data-a="yes"]').onclick = () => answer(true);
+    const al = d.querySelector('[data-a="auto"]'); if (al) al.onclick = async () => { await api("/api/auto", { agent: r.agent_id, auto: true }); answer(true); toast("Auto mode on for this thread"); };
+    return d; };
+  let fresh = false;
+  for (const r of snap.approvals) {
+    if (selected && r.agent_id === selected) { here.append(card(r, true)); fresh = true; }
+    else box.append(card(r, false)); }
+  if (fresh && !renderApprovals.seen) { const th = $("thread"); th.scrollTop = th.scrollHeight; }
+  renderApprovals.seen = fresh;
 }
+/* Auto mode: the owner lets a thread act without asking; the chip shows and flips it. Never for a pass. */
+function fillAutoChip(a) { const chip = $("autoChip"), guest = snap.ui && snap.ui.pass; chip.hidden = !a || !!guest; if (chip.hidden) return;
+  chip.classList.toggle("on", !!a.auto); chip.textContent = a.auto ? "⚡ Auto" : "Ask first"; chip.title = a.auto ? "This thread acts without asking. Click to ask again." : "The agent asks before sensitive actions. Click to let it act without asking."; }
+$("autoChip").onclick = () => { const a = snap.agents[selected]; if (!a) return; api("/api/auto", { agent: selected, auto: !a.auto }); toast(a.auto ? "The agent will ask again" : "Auto mode: the agent acts without asking"); };
 /* Harness updates, as the old sidebar badge: a download mark and the logos of what is out of date, on every core. */
 const HARNESS = { claude: ["claude", "Claude Code"], gemini: ["gemini", "Gemini CLI"], openfox: ["local", "OpenFox"] };
 function harnessName(h) { return (HARNESS[h] || [h, h])[1]; }
@@ -375,7 +390,7 @@ function updatesPanel(pop, refresh) { if (refresh) pop.innerHTML = ""; pop.inser
 function renderUsageCard() { const open = store.get("usageOpen", false); $("usageCard").hidden = !open; $("usageBtn").setAttribute("aria-expanded", String(open)); if (open) { const body = $("usageBody"); body.textContent = ""; usageRows(body); } }
 function openPop(anchor, build) { const pop = $("pop"); if (pop.classList.contains("open") && pop.dataset.for === anchor.id) { pop.classList.remove("open"); return; } pop.innerHTML = ""; build(pop); pop.dataset.for = anchor.id; const r = anchor.getBoundingClientRect(); pop.classList.add("open");
   pop.style.left = Math.max(8, Math.min(r.left, innerWidth - pop.offsetWidth - 8)) + "px"; pop.style.top = Math.max(8, r.top - pop.offsetHeight - 8 > 8 ? r.top - pop.offsetHeight - 8 : r.bottom + 8) + "px"; }
-addEventListener("pointerdown", (e) => { const pop = $("pop"); if (pop.classList.contains("open") && !pop.contains(e.target) && !e.target.closest("#gear,#pill,#modelChip,#modeChip,#ctxChip,#pickModel,#coreChip,#actionsBtn")) pop.classList.remove("open"); });
+addEventListener("pointerdown", (e) => { const pop = $("pop"); if (pop.classList.contains("open") && !pop.contains(e.target) && !e.target.closest("#gear,#pill,#modelChip,#modeChip,#ctxChip,#autoChip,#pickModel,#coreChip,#actionsBtn")) pop.classList.remove("open"); });
 function usageRows(pop) { const items = snap.usage || [];
   if (!items.length) pop.insertAdjacentHTML("beforeend", '<div class="empty">No quota source is configured. Local models have no quota.</div>');
   for (const u of items) { const row = document.createElement("div"); row.className = "urow"; const head = document.createElement("div"); head.className = "uhead"; head.append(badge(u.provider_id, 22)); head.insertAdjacentHTML("beforeend", `<b>${esc(u.name)}</b><small>${esc(u.plan || (u.status === "unlimited" ? "no quota" : u.status))}</small>`); row.append(head);
@@ -411,7 +426,7 @@ function frame(t) { if (!orbEl || !orbEl.isConnected) return; const ctx = orbCtx
 function renderTop() {
   const a = selected && snap.agents[selected], app = $("app"); app.classList.toggle("nosel", !a); if ($("ptitle").contentEditable !== "true") $("ptitle").textContent = a ? (a.title || selected) : composing ? `New thread · ${pendingCore || ""}` : "Inari";
   $("pphase").innerHTML = a ? `<span class="state${["listening", "loading", "inference"].includes(a.phase) ? " live" : ""}" style="--c:var(--${{ inference: "copper", loading: "copper", listening: "purple", success: "ok", error: "bad" }[a.phase] || "dim"})">${LABEL[a.phase]} <small>on ${esc(a.node)}</small></span>` : "";
-  $("actionsBtn").hidden = !a; fillModeChip(a); fillCtxChip(a); const chip = $("modelChip"); chip.hidden = !a; if (a) fillModelChip(chip, a.model); document.body.classList.toggle("open", !!a || composing); placeFox(); drawComposer(); drawStop();
+  $("actionsBtn").hidden = !a; fillModeChip(a); fillCtxChip(a); fillAutoChip(a); const chip = $("modelChip"); chip.hidden = !a; if (a) fillModelChip(chip, a.model); document.body.classList.toggle("open", !!a || composing); placeFox(); drawComposer(); drawStop();
 }
 function fillModeChip(a) { const chip = $("modeChip"), modes = a ? harnessModes(a.node, a.harness) : []; chip.hidden = !modes.length; if (chip.hidden) return;
   const cur = modes.find((m) => m.id === a.mode) || modes[0]; chip.textContent = ""; const n = document.createElement("span"); n.className = "n"; n.textContent = cur.name; chip.title = cur.description || ""; chip.append(n); }
@@ -511,7 +526,7 @@ function drawChat() {
       const path = (e.text.match(/(?:write_file|read_file|write|edit|create)[^:]*:\s*([\w./-]+\.\w+)/i) || [])[1]; if (path) { const b = document.createElement("button"); b.className = "btn small open"; b.innerHTML = icon("file") + "<span></span>"; b.lastChild.textContent = "Open " + path; b.onclick = () => openFile(path); d.append(b); } box.append(d); }
     else if (e.kind === "provider_switch") note(`Model <b>${esc(shortModel(e.text))}</b>`);
     else if (e.kind === "decision") note(esc(e.text));
-    else if (e.kind === "checkpoint") { const [why, ...rest] = e.text.split(": "); const map = { teleport: "Moved between cores", provider_error: "The model failed", harness_error: "The agent stopped", harness_timeout: "The agent took too long", model_refused: "Model not available", mode_changed: "Mode", stopped: "Stopped", mode_refused: "Mode not available" }; note(esc(map[why] || "Checkpoint") + (rest.length && why !== "teleport" ? ` — ${esc(rest.join(": ").slice(0, 120))}` : "")); } }
+    else if (e.kind === "checkpoint") { const [why, ...rest] = e.text.split(": "); const map = { teleport: "Moved between cores", provider_error: "The model failed", harness_error: "The agent stopped", harness_timeout: "The agent took too long", model_refused: "Model not available", mode_changed: "Mode", stopped: "Stopped", auto_approved: "Allowed automatically", mode_refused: "Mode not available" }; note(esc(map[why] || "Checkpoint") + (rest.length && why !== "teleport" ? ` — ${esc(rest.join(": ").slice(0, 120))}` : "")); } }
   if (["listening", "loading", "inference"].includes(a.phase)) box.insertAdjacentHTML("beforeend", '<div class="msg assistant typing"><i></i><i></i><i></i></div>'); if (atEnd) th.scrollTop = th.scrollHeight;
 }
 $("back").onclick = () => { selected = null; composing = false; renderTop(); drawChat(); drawBench(); if (snap) renderCores(Object.entries(snap.agents)); };

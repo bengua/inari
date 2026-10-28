@@ -1078,6 +1078,18 @@ impl Gateway {
                 );
                 ok
             }
+            "/api/auto" => {
+                // owner only: a pass is never routed here (see the pass allow-list above)
+                if !need(&["agent"]) {
+                    return bad;
+                }
+                let on = d.get("auto").and_then(Value::as_bool).unwrap_or(true);
+                self.bus.publish(
+                    &format!("agent.{}.label", s(d, "agent")),
+                    json!({"key": "auto", "value": if on { "1" } else { "" }}),
+                );
+                ok
+            }
             "/api/cancel" => {
                 if !need(&["agent"]) {
                     return bad;

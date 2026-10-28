@@ -1040,6 +1040,21 @@ impl Runner {
     }
 
     async fn approve(&self, agent: &str, command: &str) -> bool {
+        // Auto mode: the owner chose to let this thread act without asking. It never applies to a
+        // thread under a core pass (a child's thread is followed and approved by the parent).
+        let labels = self.labels(agent);
+        let under_pass = labels
+            .get("pass")
+            .and_then(Value::as_str)
+            .is_some_and(|p| !p.is_empty());
+        if !under_pass && labels.get("auto").and_then(Value::as_str) == Some("1") {
+            let _ = self.journal(
+                agent,
+                EventKind::Checkpoint,
+                json!({"reason": "auto_approved", "detail": command}),
+            );
+            return true;
+        }
         match &self.approver {
             Some(a) => a(agent.into(), command.into()).await,
             None => false, // no approver connected: no

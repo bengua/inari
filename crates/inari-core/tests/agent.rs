@@ -503,3 +503,52 @@ async fn a_permission_request_with_a_string_id_reaches_the_approver() {
         "{out:?}"
     );
 }
+
+fn counting_approver(allow: bool) -> (Approver, Arc<std::sync::atomic::AtomicUsize>) {
+    let n = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let seen = Arc::clone(&n);
+    let approver: Approver = Arc::new(move |_agent: String, _what: String| {
+        seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Box::pin(async move { allow })
+    });
+    (approver, n)
+}
+
+#[tokio::test]
+async fn auto_mode_lets_the_thread_act_without_asking_and_says_so() {
+    let (approver, asked) = counting_approver(false); // asked, it would say no
+    let l = lab(false, Some(approver));
+    l.runner.label(&l.agent, "auto", "1").unwrap();
+    let out = l.runner.run(&l.agent, "perm", vec![]).await;
+    assert_eq!(out.stopped, "done", "{out:?}");
+    assert_eq!(
+        asked.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "nobody was asked"
+    );
+    assert!(
+        out.final_text.contains("permission result: allow"),
+        "{out:?}"
+    );
+    assert!(journal(&l)
+        .iter()
+        .any(|(k, d)| k == "checkpoint" && d["reason"] == "auto_approved"));
+}
+
+#[tokio::test]
+async fn a_thread_under_a_pass_is_never_in_auto_mode() {
+    let (approver, asked) = counting_approver(false);
+    let l = lab(false, Some(approver));
+    l.runner.label(&l.agent, "pass", "leo").unwrap();
+    l.runner.label(&l.agent, "auto", "1").unwrap();
+    let out = l.runner.run(&l.agent, "perm", vec![]).await;
+    assert_eq!(
+        asked.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "the parent is asked"
+    );
+    assert!(
+        out.final_text.contains("permission result: deny"),
+        "{out:?}"
+    );
+}
