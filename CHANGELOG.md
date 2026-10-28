@@ -170,6 +170,11 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Fixed
 
+- **A thread can be dropped on the mascot again on a phone.** When the list was long enough to
+  scroll the page, the mascot scrolled out of view with its slot and could not be reached; while a
+  thread is carried it now comes to the top of the screen, and goes back after. The tip about
+  gestures, which pushed the list down, is no longer shown on touch screens (it spoke of a mouse
+  and a keyboard).
 - **An open tool call stays open.** The thread was rebuilt every second and a half while an agent
   worked, closing the tool call you were reading and dropping your text selection; only what changed
   is now redrawn, and a screen reader hears only the new messages.
