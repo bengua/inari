@@ -379,3 +379,23 @@ async fn a_thread_under_a_pass_runs_in_a_home_of_its_own() {
     assert_eq!(out.final_text, format!("fake reply to: {want}"), "{out:?}");
     assert!(std::path::Path::new(&want).is_dir(), "its home was made");
 }
+
+#[tokio::test]
+async fn a_thread_deleted_during_its_turn_does_not_come_back() {
+    let l = lab(false, None);
+    let runner = Arc::clone(&l.runner);
+    let agent = l.agent.clone();
+    let turn = tokio::spawn(async move { runner.run(&agent, "slow", vec![]).await });
+    tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+    l.runner.host.discard(&l.agent).unwrap();
+    let phase = |r: &Runner| r.phases.lock().unwrap().get(&l.agent).cloned();
+    let before = phase(&l.runner);
+    let _ = turn.await;
+    assert_eq!(l.runner.host.status(&l.agent), "deleted");
+    assert_eq!(
+        phase(&l.runner),
+        before,
+        "the phase of a deleted thread stays as it was"
+    );
+    assert_ne!(phase(&l.runner).as_deref(), Some("idle"));
+}

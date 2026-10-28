@@ -872,6 +872,10 @@ impl Runner {
     }
 
     fn set_phase(&self, agent: &str, phase: &str) {
+        // a thread deleted while a turn was still running must not come back as a phantom
+        if matches!(self.host.status(agent).as_str(), "deleted" | "absent") {
+            return;
+        }
         self.phases
             .lock()
             .expect("not poisoned")

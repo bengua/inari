@@ -74,6 +74,9 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Fixed
 
+- A thread deleted while its turn was still running came back as an empty ghost in the page
+  (the turn's last phase update re-created it). Phases of a deleted thread are now ignored.
+
 - The agent's replies reached the page cut at 400 characters (live and in the history): a
   summary's length was applied to messages too. Messages now arrive whole; other events are
   shortened to 4,000 characters.
