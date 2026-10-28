@@ -9,18 +9,18 @@
 :root {
   color-scheme: light dark;
   --canvas:#f2eee7; --panel:rgba(255,255,255,.62); --panel-solid:#faf8f4; --raise:rgba(255,255,255,.85); --hair:#d9d2c6;
-  --ink:#1c1b20; --dim:#6b6670; --faint:#938d98; --copper:#b8612a; --copper-text:#9e4f1c; --copper-soft:rgba(184,97,42,.12);
+  --ink:#1c1b20; --dim:#5e5964; --faint:#706a76; --copper:#a85620; --copper-text:#9e4f1c; --copper-soft:rgba(184,97,42,.12);
   --ok:#4a7a59; --warn:#b8862b; --bad:#b94a4a; --purple:#7a55c9; --glow:rgba(184,97,42,.28); --shadow:0 10px 30px rgba(60,40,20,.10);
   --bg:radial-gradient(900px 520px at 85% -8%, rgba(228,138,70,.20), transparent 60%), radial-gradient(700px 500px at -5% 105%, rgba(180,142,240,.12), transparent 60%), var(--canvas);
   --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; --sans:"IBM Plex Sans","Inter Variable",Inter,system-ui,sans-serif;
   --side:300px; --bench:minmax(380px,42%);
 }
 :root[data-theme=dark] { color-scheme:dark; --canvas:#17161a; --panel:rgba(33,31,36,.72); --panel-solid:#211f24; --raise:rgba(43,40,48,.9); --hair:#3a3640;
-  --ink:#f3efe9; --dim:#9e9aa8; --faint:#6f6a78; --copper:#e48a46; --copper-text:#f0a05e; --copper-soft:rgba(228,138,70,.14);
+  --ink:#f3efe9; --dim:#b0acb9; --faint:#948e9d; --copper:#e48a46; --copper-text:#f0a05e; --copper-soft:rgba(228,138,70,.14);
   --ok:#5fb86b; --warn:#e3b341; --bad:#ec6a5e; --purple:#b48ef0; --glow:rgba(228,138,70,.35); --shadow:0 12px 36px rgba(0,0,0,.45);
   --bg:radial-gradient(900px 520px at 85% -8%, rgba(228,138,70,.16), transparent 60%), radial-gradient(700px 500px at -5% 105%, rgba(180,142,240,.10), transparent 60%), var(--canvas); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme=light]) { color-scheme:dark; --canvas:#17161a; --panel:rgba(33,31,36,.72); --panel-solid:#211f24; --raise:rgba(43,40,48,.9); --hair:#3a3640;
-  --ink:#f3efe9; --dim:#9e9aa8; --faint:#6f6a78; --copper:#e48a46; --copper-text:#f0a05e; --copper-soft:rgba(228,138,70,.14);
+  --ink:#f3efe9; --dim:#b0acb9; --faint:#948e9d; --copper:#e48a46; --copper-text:#f0a05e; --copper-soft:rgba(228,138,70,.14);
   --ok:#5fb86b; --warn:#e3b341; --bad:#ec6a5e; --purple:#b48ef0; --glow:rgba(228,138,70,.35); --shadow:0 12px 36px rgba(0,0,0,.45);
   --bg:radial-gradient(900px 520px at 85% -8%, rgba(228,138,70,.16), transparent 60%), radial-gradient(700px 500px at -5% 105%, rgba(180,142,240,.10), transparent 60%), var(--canvas); } }
 * { box-sizing:border-box; } [hidden] { display:none !important; }
@@ -48,7 +48,7 @@ button,input,textarea,select { font:inherit; color:inherit; }
 #search { display:none; width:100%; padding:8px 10px; border-radius:10px; border:1px solid var(--hair); background:var(--raise); } #search.on { display:block; }
 #hits { position:absolute; left:10px; right:10px; z-index:45; padding:6px; display:none; } #hits button { display:block; width:100%; text-align:left; background:none; border:0; padding:7px 8px; border-radius:8px; cursor:pointer; } #hits button:hover { background:var(--copper-soft); } #hits small { color:var(--dim); display:block; }
 #cores { overflow-y:auto; overflow-x:hidden; min-height:0; display:grid; grid-auto-rows:max-content; gap:10px; align-content:start; padding-right:2px; }
-.shead { display:flex; align-items:center; } .shead .btn { margin-left:auto; width:22px; height:22px; font-size:15px; line-height:1; text-transform:none; }
+.shead { display:flex; align-items:center; } .shead .btn { margin-left:auto; width:28px; height:28px; font-size:15px; line-height:1; text-transform:none; }
 .invite { display:grid; gap:8px; } .invite code { display:block; padding:8px; border-radius:8px; background:var(--raise); border:1px solid var(--hair); font-size:12px; word-break:break-all; user-select:all; } .invite input { width:100%; }
 .sect { font-size:11.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--faint); padding:0 4px; }
 .core { border:1px solid var(--hair); border-radius:12px; background:var(--raise); overflow:hidden; min-width:0; transition:box-shadow .3s,border-color .3s,opacity .2s; }
@@ -92,7 +92,7 @@ body:not(.open) #top { display:none; } /* no thread open: the top of the page is
 .passform { display:grid; gap:8px; } .passform label { display:flex; gap:8px; align-items:center; } .passform input[type=text], .passform input[type=date] { width:100%; }
 #top { display:flex; align-items:center; gap:8px; padding:10px 16px; border-bottom:1px solid var(--hair); flex-wrap:wrap; min-height:56px; } #top h2 { margin:0; font-size:16px; flex:1; min-width:100px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 #back, #benchMobile { display:none; } .phase { font-size:12px; color:var(--c,var(--dim)); display:inline-flex; gap:5px; align-items:center; white-space:nowrap; }
-#thread { overflow:auto; padding:18px 8px; min-height:0; scroll-behavior:smooth; } #msgs { max-width:900px; margin:0 auto; padding:0 14px; }
+#thread { overflow:auto; padding:18px 8px; min-height:0; } #msgs { max-width:900px; margin:0 auto; padding:0 14px; }
 .hero { max-width:760px; margin:9vh auto 0; text-align:center; } .hero h2 { font:600 26px/1.2 "Bricolage Grotesque",Georgia,serif; margin:0 0 6px; } .hero p { color:var(--dim); margin:0 0 18px; }
 .msg { max-width:80%; margin:10px 0; padding:11px 15px; border-radius:16px; overflow-wrap:anywhere; line-height:1.55; }
 .msg.user { margin-left:auto; background:var(--copper-soft); border:1px solid color-mix(in srgb,var(--copper) 40%,transparent); border-bottom-right-radius:5px; } .msg.assistant { background:var(--raise); border:1px solid var(--hair); border-bottom-left-radius:5px; }
@@ -132,6 +132,25 @@ pre.code span.l::before { counter-increment:l; content:counter(l); position:abso
   #main { grid-template-rows:auto auto auto minmax(0,1fr) auto; } #stage { display:block; grid-row:3; height:min(200px, 26vh); transition:height .26s cubic-bezier(.2,.8,.2,1); } #thread { grid-row:4; padding-bottom:calc(18px + var(--kbpad, 0px)); } #dock { grid-row:5; background:var(--canvas); transform:translateY(calc(-1 * var(--kb, 0px))); will-change:transform; }
   body.kb #stage { height:0; } }
 @media (prefers-reduced-motion:reduce) { .core,.row,#app,#side,#fox,#bench { transition:none; } .pdot,#tethers path,.typing i { animation:none !important; } #thread { scroll-behavior:auto; } }
+/* ---- rich text (chat and Markdown viewer) ---- */
+.msg p, .doc p { margin:0 0 .6em; } .msg p:last-child, .doc p:last-child { margin-bottom:0; }
+.msg ul, .msg ol, .doc ul, .doc ol { margin:.3em 0 .6em; padding-left:1.4em; } .msg li, .doc li { margin:.15em 0; }
+.msg .mh { margin:.7em 0 .3em; font-size:1.02em; line-height:1.3; } .msg h3.mh { font-size:1.12em; } .msg .mh:first-child { margin-top:0; }
+.msg blockquote, .doc blockquote { margin:.4em 0; padding:2px 12px; border-left:3px solid var(--copper); color:var(--dim); }
+.msg hr, .doc hr { border:0; border-top:1px solid var(--hair); margin:.8em 0; }
+.msg a, .doc a { color:var(--copper-text); text-decoration:underline; text-underline-offset:2px; }
+.tbl { overflow-x:auto; margin:.5em 0; } .tbl table { border-collapse:collapse; font-size:13px; } .tbl th, .tbl td { border:1px solid var(--hair); padding:5px 9px; text-align:left; vertical-align:top; } .tbl th { background:var(--copper-soft); font-weight:600; }
+.cb { position:relative; margin:8px 0; } .cb pre { margin:0 !important; padding:26px 10px 10px !important; background:rgba(127,127,127,.16); border-radius:10px; overflow:auto; font:13px var(--mono); } .cb pre code { background:none; padding:0; font:13px/1.5 var(--mono); }
+.cb .lang { position:absolute; top:6px; left:10px; font:11px var(--mono); color:var(--faint); text-transform:lowercase; }
+.cb .cpy { position:absolute; top:4px; right:4px; min-height:26px; padding:2px 9px; font-size:12px; border-radius:8px; border:1px solid var(--hair); background:var(--panel-solid); color:var(--dim); cursor:pointer; opacity:0; transition:opacity .15s; }
+.cb:hover .cpy, .cb .cpy:focus-visible, .cb .cpy.done { opacity:1; } .cb .cpy.done { color:var(--ok); border-color:var(--ok); }
+/* ---- connection state, jump to the latest message ---- */
+#offline { position:fixed; top:10px; left:50%; transform:translateX(-50%); z-index:95; padding:8px 14px; border-radius:999px; background:var(--panel-solid); border:1px solid var(--warn); color:var(--ink); font-size:13px; box-shadow:var(--shadow); display:flex; gap:10px; align-items:center; max-width:calc(100vw - 32px); }
+#offline::before { content:""; width:8px; height:8px; border-radius:50%; background:var(--warn); flex:none; animation:pulse 1.1s infinite; } #offline small { color:var(--dim); }
+#dock { position:relative; } #jump { position:absolute; left:50%; top:-46px; transform:translateX(-50%); z-index:5; border-radius:999px; box-shadow:var(--shadow); background:var(--panel-solid); }
+:focus-visible { outline:2px solid var(--copper); outline-offset:2px; }
+/* fingers need room: 44 px targets on touch screens */
+@media (pointer:coarse) { .btn.icon { width:44px; min-height:44px; } .btn.small { min-height:40px; } .shead .btn { width:40px; height:40px; } .tab { min-height:44px; } .chip { min-height:36px; } .cb .cpy { opacity:1; } }
 </style>
 </head>
 <body>
@@ -156,8 +175,8 @@ pre.code span.l::before { counter-increment:l; content:counter(l); position:abso
     <div id="passBanner" role="status" hidden></div>
     <div id="top"><button class="btn small" id="back">‹ Back</button><button class="btn icon" id="benchMobile" title="Artifacts, terminal, journal" aria-label="Artifacts" data-icon="panel"></button><h2 id="ptitle">Inari</h2><span id="pphase"></span>
       <button class="chip" id="modelChip" hidden></button><button class="chip" id="modeChip" hidden></button><button class="chip" id="ctxChip" hidden></button><button class="chip" id="autoChip" hidden></button><button class="btn small" id="actionsBtn" data-icon="more" hidden><span>Actions</span></button></div>
-    <div id="stage" aria-hidden="true"></div><div id="thread"><div id="msgs"></div><div id="askbox" aria-live="polite"></div></div>
-    <div id="dock"><form class="composer" id="composer"><div class="attached" id="attached"></div><textarea id="msg" rows="2" placeholder="Build anything…" aria-label="Message"></textarea>
+    <div id="stage" aria-hidden="true"></div><div id="thread"><div id="msgs" role="log" aria-live="polite" aria-relevant="additions"></div><div id="askbox" aria-live="polite"></div></div>
+    <div id="dock"><button type="button" class="btn small" id="jump" hidden>↓ New messages</button><form class="composer" id="composer"><div class="attached" id="attached"></div><textarea id="msg" rows="2" placeholder="Build anything…" aria-label="Message"></textarea>
       <div class="ctools"><button type="button" class="btn icon" id="attach" title="Attach a file" aria-label="Attach a file" data-icon="plus"></button><input type="file" id="file" multiple hidden>
         <button type="button" class="chip" id="coreChip" title="Where it runs"></button><button type="button" class="chip" id="pickModel" title="Choose the model"></button><span class="sp"></span>
         <button type="button" class="btn icon" id="mic" title="Dictate" aria-label="Dictate" data-icon="mic" hidden></button><button class="send stop" type="button" id="stopBtn" aria-label="Stop" title="Stop" data-icon="stop" hidden></button><button class="send" type="submit" id="sendBtn" aria-label="Send" data-icon="send"></button></div></form>
@@ -166,11 +185,11 @@ pre.code span.l::before { counter-increment:l; content:counter(l); position:abso
   <aside id="bench"><div id="split" title="Drag to resize"></div>
     <div class="tabs" role="tablist"><button class="tab on" data-tab="artifacts" role="tab">Artifacts</button><button class="tab" data-tab="terminal" role="tab">Terminal</button><button class="tab" data-tab="viewer" role="tab">Viewer</button><button class="tab" data-tab="journal" role="tab">Journal</button><span class="sp"></span>
       <button class="btn icon" id="wbmax" title="Give the artifacts all the room" aria-label="Expand" data-icon="expand"></button><button class="btn icon" id="benchClose" title="Fold this pane away" aria-label="Fold" data-icon="fold"></button></div>
-    <div id="bbody"></div></aside>
+    <div id="bbody" role="tabpanel"></div></aside>
 </div>
 <svg id="tethers" aria-hidden="true"></svg>
 <div id="sheet" class="glass" role="dialog" aria-modal="true"><h2 id="sheetTitle"></h2><div class="opts" id="sheetOpts"></div></div>
-<div id="pop" class="pop glass"></div><div id="toast" class="glass" role="status" aria-live="assertive"></div>
+<div id="pop" class="pop glass"></div><div id="toast" class="glass" role="status" aria-live="polite"></div><div id="offline" role="status" hidden></div>
 <script>
 "use strict";
 const PATHS = {
@@ -198,6 +217,7 @@ let token = new URLSearchParams(location.hash.slice(1)).get("token") || sessionS
 let pass = new URLSearchParams(location.hash.slice(1)).get("pass") || store.get("pass", "");
 const authQuery = () => (pass ? "pass=" + encodeURIComponent(pass) : token ? "token=" + encodeURIComponent(token) : "");
 const PAGE = "__INARI_PAGE__"; // replaced by the core with the version of this page
+let stream = null, lastSnapAt = 0, offlineTick = null, pendingDraft = null;
 let snap = null, selected = null, tab = "artifacts", events = [], files = null, viewing = null, forkAt = null, drag = null, termHist = [], termPos = 0, pendingModel = "", pendingCore = "", attachments = [];
 const loadHist = {}, shut = store.get("shut", {}), feed = [], seen = new Set(); let firstSnap = true, tlStamp = 0, tlBusy = false, lastFiles = "";
 
@@ -225,7 +245,15 @@ function harnessModes(node, h) { const n = snap.nodes.find((x) => x.node_id === 
 function harnessCommands(node, h) { const n = snap.nodes.find((x) => x.node_id === node); return ((n && n.capabilities && n.capabilities.harness_commands) || {})[h] || []; }
 function nodeModels(node) { const n = snap.nodes.find((x) => x.node_id === node), hide = (n && n.capabilities && n.capabilities.model_hidden) || []; return ((n && n.capabilities && n.capabilities.models) || []).filter((m) => !hide.some((suf) => suf && m.endsWith(suf))); }
 
-function api(path, body) { const headers = { "Content-Type": "application/json" }; if (pass) headers["X-Inari-Pass"] = pass; else if (token) headers.Authorization = "Bearer " + token; return fetch(path, { method: body ? "POST" : "GET", headers, body: body ? JSON.stringify(body) : undefined }).then((r) => r.json()); }
+// Every call answers an object: the reply, or {error} after telling the person what went wrong.
+async function api(path, body) { const headers = { "Content-Type": "application/json" }; if (pass) headers["X-Inari-Pass"] = pass; else if (token) headers.Authorization = "Bearer " + token;
+  let r; try { r = await fetch(path, { method: body ? "POST" : "GET", headers, body: body ? JSON.stringify(body) : undefined }); } catch (e) { toast("The core cannot be reached. Check the connection and try again."); return { error: "offline" }; }
+  const data = await r.json().catch(() => ({}));
+  if (r.status === 401) showLogin(pass ? "This pass is no longer valid." : "The core refused this access token. Enter it again.");
+  else if (!r.ok) toast(data.error ? "The core says: " + data.error : `The core answered with an error (${r.status}).`);
+  return r.ok ? data : { ...data, error: data.error || String(r.status) }; }
+function showLogin(why) { if (stream) { stream.close(); stream = null; } sessionStorage.removeItem("inari-token"); if (pass) store.set("pass", ""); token = ""; pass = "";
+  $("loginWhy").textContent = why || ""; $("app").hidden = true; $("offline").hidden = true; $("login").hidden = false; $("tokenInput").value = ""; $("tokenInput").focus(); }
 function toast(t) { const e = $("toast"); e.textContent = t; e.style.display = "block"; clearTimeout(toast.h); toast.h = setTimeout(() => (e.style.display = "none"), 4200); }
 function log(text, tone) { feed.unshift({ t: new Date(), text, tone: tone || "" }); feed.length = Math.min(feed.length, 30); }
 function theme(v) { if (v === "auto") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", v); store.set("theme", v); }
@@ -238,10 +266,23 @@ async function connect() {
   else if (!token) { const ok = await fetch("/api/search?q=").then((r) => r.ok).catch(() => false); if (!ok) { $("login").hidden = false; return; } }
   else sessionStorage.setItem("inari-token", token);
   history.replaceState(null, "", location.pathname); $("login").hidden = true; $("app").hidden = false; layout();
-  const q = authQuery(), es = new EventSource(q ? "/events?" + q : "/events");
-  es.onmessage = (e) => { snap = JSON.parse(e.data); render(); }; es.onerror = () => { $("stats").textContent = "offline"; $("app").style.opacity = ".6"; }; es.onopen = () => ($("app").style.opacity = "1");
+  openStream(); restoreDraft();
 }
+function openStream() { const q = authQuery(), es = (stream = new EventSource(q ? "/events?" + q : "/events"));
+  es.onmessage = (e) => { snap = JSON.parse(e.data); lastSnapAt = Date.now(); online(true); render(); };
+  es.onopen = () => online(true);
+  es.onerror = () => { online(false); if (es.readyState === EventSource.CLOSED && stream === es) setTimeout(async () => { if (stream !== es) return; await api("/api/whoami"); if (stream === es) openStream(); /* a refused access has shown the login instead */ }, 3000); };
+}
+function online(ok) { const bar = $("offline"); $("app").style.opacity = ok ? "1" : ".75"; clearInterval(offlineTick);
+  if (ok) { bar.hidden = true; return; }
+  const say = () => { const s = lastSnapAt ? Math.round((Date.now() - lastSnapAt) / 1000) : 0, age = !lastSnapAt ? "" : s < 60 ? `${s} s` : `${Math.round(s / 60)} min`;
+    bar.innerHTML = "<span>Connection to the core lost — reconnecting…</span>" + (age ? `<small>last update ${age} ago</small>` : ""); };
+  say(); bar.hidden = false; offlineTick = setInterval(say, 5000); }
+/* A draft survives the page reloading itself for a new version. */
+function saveDraft() { try { sessionStorage.setItem("inari-draft", JSON.stringify({ agent: selected, text: $("msg").value })); } catch (e) {} }
+function restoreDraft() { try { pendingDraft = JSON.parse(sessionStorage.getItem("inari-draft")); sessionStorage.removeItem("inari-draft"); } catch (e) { pendingDraft = null; } if (pendingDraft && pendingDraft.text) $("msg").value = pendingDraft.text; }
 // One field for both: a pass if the core knows it as one, the owner's token otherwise.
+$("tokenInput").onkeydown = (e) => { if (e.key === "Enter") $("tokenGo").click(); };
 $("tokenGo").onclick = async () => { const v = $("tokenInput").value.trim(); if (!v) return;
   const asPass = await fetch("/api/whoami", { headers: { "X-Inari-Pass": v } }).then((r) => r.ok).catch(() => false);
   if (asPass) { pass = v; token = ""; } else { token = v; pass = ""; } connect(); };
@@ -296,7 +337,8 @@ function absorb() {
   firstSnap = false;
 }
 function render() {
-  if (snap.ui && snap.ui.page && PAGE !== "__INARI_" + "PAGE__" && snap.ui.page !== PAGE) { location.reload(); return; } // a newer page is served
+  if (snap.ui && snap.ui.page && PAGE !== "__INARI_" + "PAGE__" && snap.ui.page !== PAGE) { saveDraft(); location.reload(); return; } // a newer page is served
+  if (pendingDraft) { const d = pendingDraft; pendingDraft = null; if (d.agent && snap.agents[d.agent] && !selected) { const text = $("msg").value; select(d.agent).then(() => { if (!$("msg").value) $("msg").value = text; }); } }
   absorb(); $("brandfoot").textContent = (snap.ui && snap.ui.footer) || ""; $("brandName").textContent = (snap.ui && snap.ui.brand) || ""; renderPassBanner(); if (!$("fox").classList.contains("shown")) placeFox();
   for (const n of snap.nodes) { const h = (loadHist[n.node_id] = loadHist[n.node_id] || []); h.push((snap.load[n.node_id] || {}).gpu || 0); if (h.length > 40) h.shift(); }
   const agents = Object.entries(snap.agents), busy = agents.filter(([, a]) => a.phase !== "idle").length;
@@ -342,12 +384,13 @@ function renderPassBanner() { const p = snap.ui && snap.ui.pass, b = $("passBann
   b.innerHTML = p.role === "supervision" ? `<b>Supervised</b> — ${owner} can read these threads and answers the agents' requests.` : `<b>Shared</b> — ${owner} sees these threads and can take part.`;
   const out = document.createElement("button"); out.className = "btn small"; out.textContent = "Leave this pass"; out.onclick = () => { store.set("pass", ""); location.hash = ""; location.reload(); }; b.append(out); }
 function renderApprovals() {
+  const sig = selected + "|" + snap.approvals.map((r) => r.request_id).join(","); if (sig === renderApprovals.sig) return; renderApprovals.sig = sig;
   const box = $("approvals"), here = $("askbox"); box.textContent = ""; here.textContent = ""; const guest = snap.ui && snap.ui.pass;
   const card = (r, wide) => { const d = document.createElement("div"); d.className = "ask glass"; d.setAttribute("role", "alert");
     if (guest && guest.role === "supervision") { d.innerHTML = "<strong>Waiting for approval</strong><code></code>"; d.querySelector("code").textContent = r.command; return d; }
     d.innerHTML = '<strong>The agent asks to run</strong><code></code><div class="row2"><button class="btn" data-a="no">Deny</button><button class="btn primary" data-a="yes">Allow once</button>' + (!guest && wide ? '<button class="btn" data-a="auto" title="Stop asking in this thread">Always allow here</button>' : "") + "</div>";
     d.querySelector("code").textContent = r.command + (wide ? "" : " · " + r.agent_id);
-    const answer = (ok) => api("/api/approval", { request_id: r.request_id, approved: ok });
+    const answer = (ok) => { d.querySelectorAll("button").forEach((b) => (b.disabled = true)); d.style.opacity = ".6"; return api("/api/approval", { request_id: r.request_id, approved: ok }); };
     d.querySelector('[data-a="no"]').onclick = () => answer(false); d.querySelector('[data-a="yes"]').onclick = () => answer(true);
     const al = d.querySelector('[data-a="auto"]'); if (al) al.onclick = async () => { await api("/api/auto", { agent: r.agent_id, auto: true }); answer(true); toast("Auto mode on for this thread"); };
     return d; };
@@ -509,26 +552,72 @@ $("msg").onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventD
 /* ---------- conversation ---------- */
 async function select(id) { selected = id; forkAt = null; viewing = null; files = null; events = []; tlStamp = 0; lastFiles = ""; renderTop(); drawChat(); drawBench(); await refreshDetail(); if (snap) renderCores(Object.entries(snap.agents)); $("msg").focus(); }
 async function refreshDetail() { if (!selected || tlBusy) return; tlBusy = true; tlStamp = Date.now(); try { events = (await api(`/api/agent/${encodeURIComponent(selected)}/timeline`)).events || []; const a = snap.agents[selected] || {}, sig = a.files + ":" + a.events; if (!files || sig !== lastFiles) { files = (await api(`/api/agent/${encodeURIComponent(selected)}/files`)).files || []; lastFiles = sig; } drawChat(); drawBench(true); } finally { tlBusy = false; } }
-function md(text) { text = String(text).replace(/\n{3,}/g, "\n\n").trim(); const inline = (s) => esc(s).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>"); return String(text).split("```").map((p, i) => i % 2 ? `<pre>${esc(p.replace(/^\w*\n/, ""))}</pre>` : inline(p)).join(""); }
+/* Markdown, the subset models write: headings, lists, quotes, tables, rules, links, code. Everything is
+   escaped first; only http(s) links become anchors. One renderer for the chat and the viewer. */
+const LINK = 'target="_blank" rel="noopener noreferrer"';
+function inlineMd(s) {
+  return esc(s).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/(^|[^*\w])\*(\S(?:[^*\n]*\S)?)\*(?![*\w])/g, "$1<i>$2</i>")
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, `<a href="$2" ${LINK}>$1</a>`).replace(/(^|[\s(])(https?:\/\/[^\s<)]+[^\s<).,;:!?])/g, `$1<a href="$2" ${LINK}>$2</a>`);
+}
+function mdBlocks(src) {
+  const lines = src.split("\n"), out = []; let para = [], list = null, quote = [];
+  const flush = () => { if (para.length) out.push("<p>" + para.map(inlineMd).join("<br>") + "</p>"); para = [];
+    if (list) out.push(`<${list.t}>` + list.items.map((x) => `<li>${inlineMd(x)}</li>`).join("") + `</${list.t}>`); list = null;
+    if (quote.length) out.push(`<blockquote>${mdBlocks(quote.join("\n"))}</blockquote>`); quote = []; };
+  const cells = (l) => l.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+  for (let i = 0; i < lines.length; i++) { const l = lines[i]; let m;
+    if (!l.trim()) { flush(); continue; }
+    if ((m = l.match(/^>\s?(.*)$/))) { if (para.length || list) flush(); quote.push(m[1]); continue; } else if (quote.length) flush();
+    if ((m = l.match(/^(#{1,4})\s+(.*)$/))) { flush(); const h = m[1].length + 2; out.push(`<h${h} class="mh">${inlineMd(m[2])}</h${h}>`); continue; }
+    if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(l)) { flush(); out.push("<hr>"); continue; }
+    if (/^\s*\|.*\|\s*$/.test(l) && /^\s*\|?\s*:?-{3,}/.test(lines[i + 1] || "")) { flush(); const head = cells(l), rows = []; i += 2;
+      while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) rows.push(cells(lines[i++])); i--;
+      out.push(`<div class="tbl"><table><thead><tr>${head.map((c) => `<th>${inlineMd(c)}</th>`).join("")}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${inlineMd(c)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`); continue; }
+    if ((m = l.match(/^\s*(?:([-*+])|(\d+)[.)])\s+(.*)$/))) { const t = m[1] ? "ul" : "ol"; if (para.length) flush(); if (list && list.t !== t) flush(); list = list || { t, items: [] }; list.items.push(m[3]); continue; }
+    if (list && /^\s{2,}\S/.test(l)) { list.items[list.items.length - 1] += " " + l.trim(); continue; }
+    if (list) flush(); para.push(l); }
+  flush(); return out.join("");
+}
+function md(text) { return String(text).replace(/\r\n?/g, "\n").trim().split("```").map((p, i) => { if (!(i % 2)) return mdBlocks(p);
+  const lang = (p.match(/^([\w+#.-]*)\n/) || [])[1] || "", code = p.replace(/^[\w+#.-]*\n/, "").replace(/\n$/, "");
+  return `<div class="cb">${lang ? `<span class="lang">${esc(lang)}</span>` : ""}<pre><code>${esc(code)}</code></pre><button type="button" class="cpy" aria-label="Copy the code">Copy</button></div>`; }).join(""); }
+/* Copy buttons on code blocks, wherever they are rendered. */
+document.addEventListener("click", async (e) => { const b = e.target.closest(".cb .cpy"); if (!b) return; const text = b.parentElement.querySelector("code").textContent;
+  try { await navigator.clipboard.writeText(text); } catch (err) { const t = document.createElement("textarea"); t.value = text; document.body.append(t); t.select(); document.execCommand("copy"); t.remove(); }
+  b.textContent = "Copied"; b.classList.add("done"); setTimeout(() => { b.textContent = "Copy"; b.classList.remove("done"); }, 1400); });
+/* The thread is rebuilt off-screen, then only what changed is swapped in: an open tool call stays open,
+   a selection stays selected, and a screen reader hears only the new messages. */
+function reconcile(box, out) {
+  const next = [...out.children];
+  next.forEach((n, i) => { const cur = box.children[i];
+    if (cur && (n.dataset.k ? cur.dataset.k === n.dataset.k && cur.dataset.s === n.dataset.s : !cur.dataset.k && cur.outerHTML === n.outerHTML)) return;
+    if (cur && cur.dataset.k && cur.dataset.k === n.dataset.k && cur.open) n.open = true;
+    if (cur) box.replaceChild(n, cur); else box.append(n); });
+  while (box.children.length > next.length) box.lastElementChild.remove();
+}
 function drawChat() {
-  const box = $("msgs"), th = $("thread"), atEnd = th.scrollHeight - th.scrollTop - th.clientHeight < 90; box.textContent = "";
-  if (!selected) { box.innerHTML = '<div class="hero"><h2>What should we build?</h2><p>Pick a thread on the left, or describe a task below. It runs on the core you choose and can move to another one at any time.</p></div>'; return; }
+  const shown = $("msgs"), th = $("thread"), atEnd = th.scrollHeight - th.scrollTop - th.clientHeight < 90, before = shown.children.length, box = document.createElement("div"), fresh = drawChat.thread !== selected; drawChat.thread = events.length ? selected : null;
+  if (!selected) { shown.textContent = ""; shown.innerHTML = '<div class="hero"><h2>What should we build?</h2><p>Pick a thread on the left, or describe a task below. It runs on the core you choose and can move to another one at any time.</p></div>'; $("jump").hidden = true; return; }
   const a = snap.agents[selected] || {};
   if (!events.filter((e) => e.kind !== "system" && e.kind !== "provider_switch").length) { box.innerHTML = '<div class="hero"><h2>What should this agent do?</h2><p>It works in its own sandboxed workspace. Anything it creates appears under Artifacts.</p></div>'; }
   let lastNote = "";
   const note = (html) => { if (html === lastNote) return; lastNote = html; box.insertAdjacentHTML("beforeend", `<div class="note">${html}</div>`); };
   for (let i = 0; i < events.length; i++) { const e = events[i];
-    if (e.kind === "user_message" || e.kind === "assistant_message") { lastNote = ""; const d = document.createElement("div"); d.className = "msg " + (e.kind === "user_message" ? "user" : "assistant"); d.dataset.event = e.id; d.innerHTML = md(e.text); box.append(d); }
+    if (e.kind === "user_message" || e.kind === "assistant_message") { lastNote = ""; const d = document.createElement("div"); d.className = "msg " + (e.kind === "user_message" ? "user" : "assistant"); d.dataset.event = d.dataset.k = e.id; d.innerHTML = md(e.text); box.append(d); }
     else if (e.kind === "tool_call") { lastNote = ""; const r = events[i + 1] && events[i + 1].kind === "tool_result" ? events[++i] : null, err = r && /^(denied|\w+Error)/.test(r.text);
-      const d = document.createElement("details"); d.className = "tool" + (err ? " err" : ""); const shell = /^(\$ |bash|execute|shell|run)/.test(e.text);
+      const d = document.createElement("details"); d.className = "tool" + (err ? " err" : ""); d.dataset.k = e.id; d.dataset.s = r ? r.id : ""; const shell = /^(\$ |bash|execute|shell|run)/.test(e.text);
       d.innerHTML = `<summary>${icon(shell ? "terminal" : "tool")}<span class="tn"></span><span class="ts">${r ? (err ? "failed" : "done") : "running…"}</span><span class="cv">${icon("chevron")}</span></summary><pre></pre>`;
       d.querySelector(".tn").textContent = e.text; d.querySelector("pre").textContent = r ? r.text : "running…";
       const path = (e.text.match(/(?:write_file|read_file|write|edit|create)[^:]*:\s*([\w./-]+\.\w+)/i) || [])[1]; if (path) { const b = document.createElement("button"); b.className = "btn small open"; b.innerHTML = icon("file") + "<span></span>"; b.lastChild.textContent = "Open " + path; b.onclick = () => openFile(path); d.append(b); } box.append(d); }
     else if (e.kind === "provider_switch") note(`Model <b>${esc(shortModel(e.text))}</b>`);
     else if (e.kind === "decision") note(esc(e.text));
     else if (e.kind === "checkpoint") { const [why, ...rest] = e.text.split(": "); const map = { teleport: "Moved between cores", provider_error: "The model failed", harness_error: "The agent stopped", harness_timeout: "The agent took too long", model_refused: "Model not available", mode_changed: "Mode", stopped: "Stopped", auto_approved: "Allowed automatically", mode_refused: "Mode not available" }; note(esc(map[why] || "Checkpoint") + (rest.length && why !== "teleport" ? ` — ${esc(rest.join(": ").slice(0, 120))}` : "")); } }
-  if (["listening", "loading", "inference"].includes(a.phase)) box.insertAdjacentHTML("beforeend", '<div class="msg assistant typing"><i></i><i></i><i></i></div>'); if (atEnd) th.scrollTop = th.scrollHeight;
+  if (["listening", "loading", "inference"].includes(a.phase)) box.insertAdjacentHTML("beforeend", '<div class="msg assistant typing" aria-label="The agent is working"><i></i><i></i><i></i></div>');
+  if (fresh) { shown.setAttribute("aria-live", "off"); setTimeout(() => shown.setAttribute("aria-live", "polite"), 600); } /* a thread just opened is not read aloud whole */
+  reconcile(shown, box); if (atEnd || fresh) { th.scrollTop = th.scrollHeight; $("jump").hidden = true; } else if (shown.children.length > before) $("jump").hidden = false;
 }
+$("jump").onclick = () => { const th = $("thread"); th.scrollTo({ top: th.scrollHeight, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }); $("jump").hidden = true; };
+$("thread").addEventListener("scroll", () => { const th = $("thread"); if (th.scrollHeight - th.scrollTop - th.clientHeight < 90) $("jump").hidden = true; }, { passive: true });
 $("back").onclick = () => { selected = null; composing = false; renderTop(); drawChat(); drawBench(); if (snap) renderCores(Object.entries(snap.agents)); };
 $("newThread").onclick = () => newThreadOn(pendingCore || (snap && snap.ui && snap.ui.self) || "");
 /* A new thread on a given core: the composer opens (on a phone too, where the page only shows with a thread), aimed at it. */
@@ -543,21 +632,21 @@ $("cores").addEventListener("pointerdown", (e) => { const head = e.target.closes
   coreHold = { t: setTimeout(() => { stop(); swallowUntil = Date.now() + 600; newThreadOn(node); }, 550) };
   addEventListener("pointerup", stop); addEventListener("pointercancel", stop); addEventListener("pointermove", far); });
 $("searchBtn").onclick = () => { $("search").classList.toggle("on"); $("search").focus(); };
-async function forkNow() { await api("/api/fork", { agent: selected, new_thread: selected + "-fork-" + (Date.now() % 10000), upto: forkAt }); toast(`Forking ${selected}${forkAt ? " at the chosen event" : ""}…`); }
+async function forkNow() { await api("/api/fork", { agent: selected, new_thread: selected + "-fork-" + Math.random().toString(36).slice(2, 8), upto: forkAt }); toast(`Forking ${selected}${forkAt ? " at the chosen event" : ""}…`); }
 function doMerge() { const me = snap.agents[selected], others = Object.entries(snap.agents).filter(([id, a]) => id !== selected && a.node === me.node); sheet(`Merge which thread into ${selected}?`, others.map(([id]) => [id, () => api("/api/merge", { target: selected, source: id })]), others.length ? "Both threads must run on the same core." : "No other thread on this core."); }
 $("actionsBtn").onclick = () => openPop($("actionsBtn"), (pop) => { const a = snap.agents[selected]; pop.insertAdjacentHTML("beforeend", "<h3>Thread</h3>"); for (const [ic, label, fn] of [["move", "Move to another core…", () => openMove(selected, a.node)], ["fork", forkAt ? "Fork from the chosen event" : "Fork this thread", forkNow], ["merge", "Merge another thread into this one…", doMerge]]) { const b = document.createElement("button"); b.className = "mrow"; b.innerHTML = icon(ic) + "<span></span>"; b.lastChild.textContent = label; b.onclick = () => { $("pop").classList.remove("open"); fn(); }; pop.append(b); } });
 
 /* ---------- artifacts pane ---------- */
 const KIND = { md: "doc", txt: "doc", py: "code", js: "code", ts: "code", json: "code", html: "code", css: "code", sh: "code", rs: "code", go: "code", png: "image", jpg: "image", jpeg: "image", gif: "image", svg: "image", webp: "image" }, MIME = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", svg: "image/svg+xml" }, ext = (p) => (p.split(".").pop() || "").toLowerCase();
-document.querySelectorAll(".tab").forEach((t) => (t.onclick = () => { tab = t.dataset.tab; drawBench(); })); function setTab(n) { tab = n; drawBench(); }
+document.querySelectorAll(".tab").forEach((t) => { t.onclick = () => { tab = t.dataset.tab; drawBench(); };
+  t.onkeydown = (e) => { const all = [...document.querySelectorAll(".tab")].filter((x) => getComputedStyle(x).display !== "none"), i = all.indexOf(t), d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0; if (!d) return; e.preventDefault(); const n = all[(i + d + all.length) % all.length]; n.focus(); n.click(); }; }); function setTab(n) { tab = n; drawBench(); }
 async function openFile(path) { if (!selected) return; viewing = { path, ...(await api(`/api/agent/${encodeURIComponent(selected)}/file?path=${encodeURIComponent(path)}`)) }; store.set("nobench", false); layout(); document.body.classList.add("bench-open"); setTab("viewer"); }
-function renderMarkdown(src) { return String(src).split("```").map((p, i) => i % 2 ? `<pre class="code">${p.replace(/^\w*\n/, "").split("\n").map((l) => `<span class="l">${esc(l)}</span>`).join("")}</pre>` : esc(p).replace(/^### (.*)$/gm, "<h3>$1</h3>").replace(/^## (.*)$/gm, "<h2>$1</h2>").replace(/^# (.*)$/gm, "<h1>$1</h1>").replace(/^[-*] (.*)$/gm, "• $1").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\n/g, "<br>")).join(""); }
 function viewer(body) {
   if (!viewing) { body.innerHTML = '<p class="empty">Open a file from Artifacts, or from a tool call in the conversation, to see it here.</p>'; return; } const v = viewing, x = ext(v.path);
   body.innerHTML = '<div class="vhead"><h3></h3><button class="btn small" id="vcopy">Copy</button><button class="btn small" id="vdl">Download</button></div><div class="viewer"></div>'; body.querySelector("h3").textContent = `${v.path} · ${v.size} B`; const out = body.querySelector(".viewer");
   if (v.binary && MIME[x] && v.b64) out.innerHTML = `<img alt="${esc(v.path)}" src="data:${MIME[x]};base64,${v.b64}">`; else if (v.binary) out.innerHTML = '<p class="empty">Binary file — download it to open.</p>';
   else if (x === "svg") out.innerHTML = `<img alt="${esc(v.path)}" src="data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(v.text)))}">`; else if (x === "html" || x === "htm") { out.innerHTML = '<iframe class="preview" sandbox="" title="Preview"></iframe>'; out.querySelector("iframe").srcdoc = v.text; }
-  else if (x === "md") out.innerHTML = `<div class="doc">${renderMarkdown(v.text)}</div>`; else { let t = v.text; if (x === "json") { try { t = JSON.stringify(JSON.parse(t), null, 2); } catch (e) {} } out.innerHTML = `<pre class="code">${t.split("\n").map((l) => `<span class="l">${esc(l)}</span>`).join("")}</pre>`; }
+  else if (x === "md") out.innerHTML = `<div class="doc">${md(v.text)}</div>`; else { let t = v.text; if (x === "json") { try { t = JSON.stringify(JSON.parse(t), null, 2); } catch (e) {} } out.innerHTML = `<pre class="code">${t.split("\n").map((l) => `<span class="l">${esc(l)}</span>`).join("")}</pre>`; }
   $("vcopy").onclick = () => navigator.clipboard && navigator.clipboard.writeText(v.text || "").then(() => toast("Copied")); $("vdl").onclick = () => { const blob = v.b64 ? new Blob([Uint8Array.from(atob(v.b64), (c) => c.charCodeAt(0))]) : new Blob([v.text]), u = URL.createObjectURL(blob), a = document.createElement("a"); a.href = u; a.download = v.path.split("/").pop(); a.click(); URL.revokeObjectURL(u); };
 }
 function terminalLines() { const out = []; for (let i = 0; i < events.length; i++) { const e = events[i]; if (e.kind !== "tool_call") continue; const r = events[i + 1] && events[i + 1].kind === "tool_result" ? events[i + 1] : null;
@@ -570,7 +659,7 @@ function terminal(body) {
   inp.onkeydown = (e) => { if (e.key === "ArrowUp" && termPos > 0) { inp.value = termHist[--termPos]; e.preventDefault(); } else if (e.key === "ArrowDown") inp.value = termHist[++termPos] || ""; };
 }
 function drawBench(soft) {
-  document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("on", t.dataset.tab === tab)); const body = $("bbody"); if (soft && tab === "terminal" && document.activeElement && document.activeElement.id === "terminput") return;
+  document.querySelectorAll(".tab").forEach((t) => { const on = t.dataset.tab === tab; t.classList.toggle("on", on); t.setAttribute("aria-selected", on); t.tabIndex = on ? 0 : -1; }); const body = $("bbody"); body.setAttribute("aria-label", tab); if (soft && tab === "terminal" && document.activeElement && document.activeElement.id === "terminput") return;
   const keep = body.scrollTop; body.textContent = ""; body.style.padding = ""; if (!selected) { body.innerHTML = '<p class="empty">Select a thread to see its files, run commands, view results and read its journal.</p>'; return; }
   if (tab === "artifacts") { const hidden = !store.get("showgit", false); const shown = files ? files.filter((f) => !hidden || !f.path.startsWith(".git/")) : files; if (!files) { body.innerHTML = '<p class="empty">Loading…</p>'; return; } if (!shown.length) { body.innerHTML = '<p class="empty">No files yet. Ask the agent to create something — its workspace travels with it when you move it.</p>'; return; } body.insertAdjacentHTML("beforeend", `<label class="empty" style="display:flex;gap:6px;align-items:center;margin-bottom:6px"><input type="checkbox" id="showgit" ${hidden ? "" : "checked"}> show .git (${files.length - files.filter((f) => !f.path.startsWith(".git/")).length} files)</label><div class="files"></div>`); $("showgit").onchange = (e) => { store.set("showgit", e.target.checked); drawBench(); };
     for (const f of shown) { const b = document.createElement("button"); b.innerHTML = `<span class="ic">${icon(KIND[ext(f.path)] || "file")}</span><span></span><small></small>`; b.children[1].textContent = f.path; b.children[2].textContent = f.size + " B"; b.onclick = () => openFile(f.path); body.querySelector(".files").append(b); } }
@@ -581,7 +670,7 @@ function drawBench(soft) {
 
 /* ---------- search, sheets, create, drag to teleport ---------- */
 let hitTimer = null;
-$("search").oninput = () => { clearTimeout(hitTimer); hitTimer = setTimeout(async () => { const q = $("search").value.trim(), box = $("hits"); box.textContent = ""; if (!q) { box.style.display = "none"; return; } const { hits } = await api("/api/search?q=" + encodeURIComponent(q)); box.style.display = "block"; box.style.top = $("search").getBoundingClientRect().bottom + 4 + "px"; if (!hits.length) box.innerHTML = '<small class="empty">No match</small>'; for (const h of hits) { const b = document.createElement("button"); b.innerHTML = "<span></span><small></small>"; b.firstChild.textContent = h.text.slice(0, 90); b.lastChild.textContent = h.agent + " · " + h.kind; b.onclick = () => { box.style.display = "none"; select(h.agent); }; box.append(b); } }, 300); };
+$("search").oninput = () => { clearTimeout(hitTimer); hitTimer = setTimeout(async () => { const q = $("search").value.trim(), box = $("hits"); box.textContent = ""; if (!q) { box.style.display = "none"; return; } const { hits = [] } = await api("/api/search?q=" + encodeURIComponent(q)); box.style.display = "block"; box.style.top = $("search").getBoundingClientRect().bottom + 4 + "px"; if (!hits.length) box.innerHTML = '<small class="empty">No match</small>'; for (const h of hits) { const b = document.createElement("button"); b.innerHTML = "<span></span><small></small>"; b.firstChild.textContent = h.text.slice(0, 90); b.lastChild.textContent = h.agent + " · " + h.kind; b.onclick = () => { box.style.display = "none"; select(h.agent); }; box.append(b); } }, 300); };
 function sheet(title, options, note, extra) { $("sheetTitle").textContent = title; const opts = $("sheetOpts"); opts.textContent = ""; if (extra) opts.append(extra); if (note) { const p = document.createElement("small"); p.className = "empty"; p.textContent = note; opts.append(p); } for (const [label, fn] of options) { const b = document.createElement("button"); b.className = "btn"; b.textContent = label; b.onclick = () => { $("sheet").classList.remove("open"); fn(); }; opts.append(b); } const c = document.createElement("button"); c.className = "btn"; c.textContent = "Cancel"; c.onclick = () => $("sheet").classList.remove("open"); opts.append(c); $("sheet").classList.add("open"); (extra || opts.querySelector("button")).focus(); }
 /* Add a core: attach one you deployed (a VPS, a new VM, another workstation) through your
    private network, or a core pass (coming next). */

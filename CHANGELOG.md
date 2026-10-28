@@ -9,6 +9,17 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Added
 
+- **Richer replies.** The thread and the Markdown viewer share one renderer: headings, bulleted and
+  numbered lists, quotes, tables, rules, links (http and https only, opened outside the page) and
+  code blocks with their language and a *Copy* button.
+
+- **Connection state you can read.** When the page loses its core, a banner says so, how old what is
+  on screen is, and that it is reconnecting; the stream reopens by itself. A refused token or pass
+  brings the login back with the reason, and an error from the core is shown instead of dropped.
+
+- **A *New messages* button** appears when the agent writes while you have scrolled up; the thread
+  no longer pulls you down.
+
 - **Approvals appear in the thread, and an auto mode.** An agent's request to run something is a
   card at the bottom of *its* thread (Deny, Allow once, Always allow here) instead of a line in
   the cores' pane; requests from other threads stay in the pane. A chip on each thread switches
@@ -95,6 +106,19 @@ Newest first. An entry says what changed for someone using the thing.
   agents to each other over TCP, in both directions.
 
 ### Fixed
+
+- **An open tool call stays open.** The thread was rebuilt every second and a half while an agent
+  worked, closing the tool call you were reading and dropping your text selection; only what changed
+  is now redrawn, and a screen reader hears only the new messages.
+- **Readable text and reachable buttons.** The faint and dim greys and the copper of the main
+  buttons now meet WCAG AA contrast in both themes; buttons are at least 44 px on touch screens; the
+  workbench tabs say which one is selected and follow the arrow keys; keyboard focus is visible.
+- **Approvals are answered once.** Their cards are no longer rebuilt and re-announced on every
+  update, and a tap disables the card's buttons until the core answers.
+- **A draft survives the page updating itself**, and comes back in its thread.
+- **Forks get names that cannot collide**, and the login field submits with Enter.
+- **The gateway keeps accepting connections after a failed accept** (out of file descriptors, a
+  reset) instead of stopping until restarted.
 
 - **An agent's permission request was lost when its id was a string** (OpenFox's adapter sends
   `ofx-1`): the reader only accepted numbers, ignored the request, and the thread waited forever

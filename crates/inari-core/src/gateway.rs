@@ -640,9 +640,18 @@ impl Gateway {
         let bound = listener.local_addr()?.port();
         let me = Arc::clone(self);
         tokio::spawn(async move {
-            while let Ok((stream, _)) = listener.accept().await {
-                let me = Arc::clone(&me);
-                tokio::spawn(async move { me.serve(stream).await });
+            // One failed accept (out of file descriptors, a reset) must not stop the page for good.
+            loop {
+                match listener.accept().await {
+                    Ok((stream, _)) => {
+                        let me = Arc::clone(&me);
+                        tokio::spawn(async move { me.serve(stream).await });
+                    }
+                    Err(e) => {
+                        eprintln!("gateway: accept failed: {e}");
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    }
+                }
             }
         });
         if !self.sources.is_empty() {
