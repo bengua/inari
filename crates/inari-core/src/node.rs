@@ -547,6 +547,7 @@ impl Node {
         m.insert("harness".into(), json!(harness));
         m.insert("pass".into(), json!(label("pass")));
         m.insert("mode".into(), json!(label("mode")));
+        m.insert("pinned".into(), json!(label("pinned") == "1"));
         m.insert("archived".into(), json!(label("archived") == "1"));
         m
     }
@@ -882,11 +883,9 @@ impl Node {
             // the labels a person may set from the interface: who it is shared with, asleep or not
             let agent = m.subject.split('.').nth(1).unwrap_or("").to_string();
             let key = s(&m.payload, "key");
-            if let Some(r) = n
-                .runner
-                .as_ref()
-                .filter(|_| n.running(&agent) && ["pass", "archived"].contains(&key.as_str()))
-            {
+            if let Some(r) = n.runner.as_ref().filter(|_| {
+                n.running(&agent) && ["pass", "archived", "pinned"].contains(&key.as_str())
+            }) {
                 let _ = r.label(&agent, &key, &s(&m.payload, "value"));
             }
         });
@@ -985,6 +984,23 @@ impl Node {
                 Err(e) => json!({"agent": agent, "ok": false, "error": format!("bad base64: {e}")}),
             };
             n.bus.publish(&reply, out);
+        });
+        self.on("agent.*.cancel", |n, m| async move {
+            let agent = m.subject.split('.').nth(1).unwrap_or("").to_string();
+            if let Some(r) = n.runner.as_ref().filter(|_| n.running(&agent)) {
+                r.cancel(&agent);
+            }
+        });
+        self.on("agent.*.rename", |n, m| async move {
+            let agent = m.subject.split('.').nth(1).unwrap_or("").to_string();
+            let title: String = s(&m.payload, "title").trim().chars().take(80).collect();
+            if let Some(r) = n
+                .runner
+                .as_ref()
+                .filter(|_| n.running(&agent) && !title.is_empty())
+            {
+                let _ = r.set_title(&agent, &title);
+            }
         });
         self.on("agent.*.mode", |n, m| async move {
             let agent = m.subject.split('.').nth(1).unwrap_or("").to_string();

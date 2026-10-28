@@ -445,3 +445,24 @@ async fn modes_and_commands_are_read_and_the_chosen_mode_reaches_the_agent() {
         .count();
     assert_eq!(asked, 1, "the mode is set once per session");
 }
+
+#[tokio::test]
+async fn stop_ends_a_running_turn_and_says_so() {
+    let l = lab(false, None);
+    let runner = Arc::clone(&l.runner);
+    let agent = l.agent.clone();
+    let turn = tokio::spawn(async move { runner.run(&agent, "slow", vec![]).await });
+    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+    let started = std::time::Instant::now();
+    l.runner.cancel(&l.agent);
+    let out = turn.await.unwrap();
+    assert_eq!(out.stopped, "cancelled", "{out:?}");
+    assert!(started.elapsed().as_secs() < 9, "it stopped at once");
+    assert!(journal(&l)
+        .iter()
+        .any(|(k, d)| k == "checkpoint" && d["reason"] == "stopped"));
+    // the thread is usable again, and a stop with nothing running does nothing
+    l.runner.cancel(&l.agent);
+    let out = l.runner.run(&l.agent, "hello", vec![]).await;
+    assert_eq!(out.stopped, "done", "{out:?}");
+}

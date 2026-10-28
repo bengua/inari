@@ -171,6 +171,13 @@ impl Turn {
     fn running(&self) -> bool {
         self.runner.host.status(&self.agent) == "running"
     }
+    fn cancelled(&self) -> bool {
+        self.runner
+            .cancels
+            .lock()
+            .expect("not poisoned")
+            .contains(&self.agent)
+    }
 }
 
 /// Stop an agent process and everything it started (its process group): an ACP agent
@@ -711,6 +718,11 @@ impl AcpHarness {
                         if grace > 10 {
                             break; // the agent ignores the cancel: stop waiting, the process is killed
                         }
+                    } else if t.cancelled() {
+                        // the person pressed Stop: ask the agent to stop, keep what it did
+                        let _ = rpc.send(&json!({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": sid}})).await;
+                        cancelled = true;
+                        summary.stopped = "cancelled".into();
                     } else if !t.running() {
                         // a teleport froze the agent: stop the agent at once
                         let _ = rpc.send(&json!({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": sid}})).await;
@@ -924,6 +936,8 @@ pub struct Runner {
     publish: Option<Publisher>,
     approver: Option<Approver>,
     pub phases: Mutex<HashMap<String, String>>,
+    /// Threads whose running turn a person asked to stop.
+    pub cancels: Mutex<std::collections::HashSet<String>>,
     locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
@@ -942,6 +956,7 @@ impl Runner {
             publish,
             approver,
             phases: Mutex::default(),
+            cancels: Mutex::default(),
             locks: Mutex::default(),
         })
     }
@@ -1040,6 +1055,7 @@ impl Runner {
     pub async fn attach(&self, agent: &str, rel: &str, data: &[u8]) -> Result<Attached, String> {
         let lock = self.lock(agent);
         let _guard = lock.lock().await;
+        self.cancels.lock().expect("not poisoned").remove(agent);
         if self.host.status(agent) != "running" {
             return Err("this node does not run the agent".into());
         }
@@ -1106,6 +1122,22 @@ impl Runner {
             json!({"from": "", "to": format!("{name}:default"), "harness": name}),
         )?;
         Ok(true)
+    }
+
+    /// Ask the running turn of a thread to stop (a no-op when none runs).
+    pub fn cancel(&self, agent: &str) {
+        if self
+            .phases
+            .lock()
+            .expect("not poisoned")
+            .get(agent)
+            .is_some_and(|p| p == "inference" || p == "listening" || p == "loading")
+        {
+            self.cancels
+                .lock()
+                .expect("not poisoned")
+                .insert(agent.into());
+        }
     }
 
     /// Remember the mode chosen for a thread (empty: the agent's default); false when unchanged.
@@ -1290,6 +1322,10 @@ impl Runner {
                 ..Default::default()
             },
         };
+        let was_stopped = self.cancels.lock().expect("not poisoned").remove(agent);
+        if was_stopped || summary.stopped == "cancelled" {
+            let _ = self.journal(agent, EventKind::Checkpoint, json!({"reason": "stopped"}));
+        }
         if let Err(e) = io::update_snapshot(&path, &workdir) {
             eprintln!("snapshot of {agent} failed: {e}");
         }

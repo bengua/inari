@@ -992,7 +992,8 @@ impl Gateway {
                 d["pass"] = json!(id);
                 Ok(d)
             }
-            "/api/message" | "/api/upload" | "/api/model" | "/api/mode" | "/api/archive" => {
+            "/api/message" | "/api/upload" | "/api/model" | "/api/mode" | "/api/archive"
+            | "/api/cancel" | "/api/rename" | "/api/pin" => {
                 if self.owned(access, &s(&d, "agent")) {
                     Ok(d)
                 } else {
@@ -1074,6 +1075,35 @@ impl Gateway {
                 self.bus.publish(
                     &format!("agent.{}.harness", s(d, "agent")),
                     json!({"harness": s(d, "harness")}),
+                );
+                ok
+            }
+            "/api/cancel" => {
+                if !need(&["agent"]) {
+                    return bad;
+                }
+                self.bus
+                    .publish(&format!("agent.{}.cancel", s(d, "agent")), json!({}));
+                ok
+            }
+            "/api/rename" => {
+                if !need(&["agent", "title"]) {
+                    return bad;
+                }
+                self.bus.publish(
+                    &format!("agent.{}.rename", s(d, "agent")),
+                    json!({"title": s(d, "title")}),
+                );
+                ok
+            }
+            "/api/pin" => {
+                if !need(&["agent"]) {
+                    return bad;
+                }
+                let on = d.get("pinned").and_then(Value::as_bool).unwrap_or(true);
+                self.bus.publish(
+                    &format!("agent.{}.label", s(d, "agent")),
+                    json!({"key": "pinned", "value": if on { "1" } else { "" }}),
                 );
                 ok
             }
