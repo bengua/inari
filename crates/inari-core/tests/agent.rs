@@ -399,3 +399,49 @@ async fn a_thread_deleted_during_its_turn_does_not_come_back() {
     );
     assert_ne!(phase(&l.runner).as_deref(), Some("idle"));
 }
+
+#[tokio::test]
+async fn modes_and_commands_are_read_and_the_chosen_mode_reaches_the_agent() {
+    let l = lab(false, None);
+    let probe = l.runner.harnesses["fake"].probe(l._dir.path()).await;
+    let ids: Vec<&str> = probe
+        .modes
+        .iter()
+        .filter_map(|m| m["id"].as_str())
+        .collect();
+    assert_eq!(ids, ["default", "plan"]);
+    assert_eq!(probe.modes[1]["name"], "Plan");
+    let names: Vec<&str> = probe
+        .commands
+        .iter()
+        .filter_map(|c| c["name"].as_str())
+        .collect();
+    assert_eq!(names, ["summarize", "review"]);
+
+    assert!(l.runner.set_mode(&l.agent, "plan").unwrap());
+    assert!(!l.runner.set_mode(&l.agent, "plan").unwrap());
+    l.runner.run(&l.agent, "hi", vec![]).await;
+    assert!(std::fs::read_to_string(&l.log)
+        .unwrap()
+        .contains(r#"{"set_mode": "plan"}"#));
+    assert!(journal(&l)
+        .iter()
+        .any(|(k, d)| k == "checkpoint" && d["reason"] == "mode_changed" && d["detail"] == "plan"));
+    let reply = journal(&l)
+        .into_iter()
+        .filter(|(k, _)| k == "assistant_message")
+        .map(|(_, d)| d["text"].as_str().unwrap_or("").to_string())
+        .next()
+        .unwrap_or_default();
+    assert!(
+        !reply.contains("MODE_UPDATE"),
+        "the mode notice stays out of the answer: {reply}"
+    );
+    // a second turn does not ask again
+    l.runner.run(&l.agent, "again", vec![]).await;
+    let asked = std::fs::read_to_string(&l.log)
+        .unwrap()
+        .matches("set_mode")
+        .count();
+    assert_eq!(asked, 1, "the mode is set once per session");
+}

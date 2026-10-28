@@ -546,8 +546,23 @@ impl Gateway {
                     .pointer("/capabilities/model_hidden")
                     .cloned()
                     .unwrap_or(json!([]));
-                n["capabilities"] =
-                    json!({"harnesses": harnesses, "model_labels": labels, "model_hidden": hidden});
+                let keep = |key: &str| -> Value {
+                    let all = n
+                        .pointer(&format!("/capabilities/{key}"))
+                        .and_then(Value::as_object);
+                    Value::Object(
+                        all.map(|h| {
+                            h.iter()
+                                .filter(|(k, _)| allowed.contains(k))
+                                .map(|(k, v)| (k.clone(), v.clone()))
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                    )
+                };
+                let (modes, commands) = (keep("harness_modes"), keep("harness_commands"));
+                n["capabilities"] = json!({"harnesses": harnesses, "model_labels": labels, "model_hidden": hidden,
+                                           "harness_modes": modes, "harness_commands": commands});
             }
         }
         for k in ["moves", "update_jobs"] {
@@ -977,7 +992,7 @@ impl Gateway {
                 d["pass"] = json!(id);
                 Ok(d)
             }
-            "/api/message" | "/api/upload" | "/api/model" | "/api/archive" => {
+            "/api/message" | "/api/upload" | "/api/model" | "/api/mode" | "/api/archive" => {
                 if self.owned(access, &s(&d, "agent")) {
                     Ok(d)
                 } else {
@@ -1059,6 +1074,16 @@ impl Gateway {
                 self.bus.publish(
                     &format!("agent.{}.harness", s(d, "agent")),
                     json!({"harness": s(d, "harness")}),
+                );
+                ok
+            }
+            "/api/mode" => {
+                if !need(&["agent", "mode"]) {
+                    return bad;
+                }
+                self.bus.publish(
+                    &format!("agent.{}.mode", s(d, "agent")),
+                    json!({"mode": s(d, "mode")}),
                 );
                 ok
             }

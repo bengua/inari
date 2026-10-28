@@ -119,11 +119,17 @@ pub fn summary(e: &TimelineEvent) -> String {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string(),
-        EventKind::Checkpoint => d
-            .get("reason")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string(),
+        EventKind::Checkpoint => {
+            let reason = d.get("reason").and_then(Value::as_str).unwrap_or("");
+            match d
+                .get("detail")
+                .and_then(Value::as_str)
+                .filter(|x| !x.is_empty())
+            {
+                Some(detail) => format!("{reason}: {detail}"),
+                None => reason.to_string(),
+            }
+        }
         _ => ["text", "name", "output"]
             .iter()
             .filter_map(|k| d.get(*k).and_then(Value::as_str).filter(|x| !x.is_empty()))
@@ -140,6 +146,8 @@ pub struct Turn {
     pub attachments: Vec<Attached>,
     pub workdir: PathBuf,
     pub model: String,
+    /// The mode chosen for the thread (plan, auto-edit…); empty: the agent's own default.
+    pub mode: String,
     /// The pass this thread runs under (empty: the owner's own thread).
     pub pass: String,
 }
@@ -175,6 +183,27 @@ async fn end(child: &mut Child) {
     let _ = child.kill().await;
 }
 
+/// What an agent announces about itself.
+#[derive(Default, Clone)]
+pub struct Probe {
+    pub models: Vec<String>,
+    pub modes: Vec<Value>,
+    pub commands: Vec<Value>,
+}
+
+/// The named string fields of a JSON object, as a new object (None when it has no first field).
+fn pick(v: &Value, keys: &[&str]) -> Option<Value> {
+    v.get(keys[0])?;
+    let mut o = Map::new();
+    for k in keys {
+        o.insert(
+            (*k).into(),
+            json!(v.get(*k).and_then(Value::as_str).unwrap_or("")),
+        );
+    }
+    Some(Value::Object(o))
+}
+
 pub struct AcpHarness {
     pub command: Vec<String>,
     sessions_file: PathBuf,
@@ -190,6 +219,7 @@ pub struct AcpHarness {
     /// tools or credentials. Empty: pass threads share the owner's environment.
     pub pass_env: BTreeMap<String, String>,
     models_set: Mutex<HashMap<String, String>>,
+    modes_set: Mutex<HashMap<String, String>>,
 }
 
 /// Calls awaiting the agent's reply, by request id.
@@ -250,6 +280,7 @@ impl AcpHarness {
             prepare_timeout: Duration::from_secs(600),
             pass_env: BTreeMap::new(),
             models_set: Mutex::default(),
+            modes_set: Mutex::default(),
         }
     }
 
@@ -346,47 +377,78 @@ impl AcpHarness {
         rx
     }
 
-    /// The model ids the agent offers, read from a throw-away session.
-    pub async fn list_models(&self, cwd: &Path) -> Vec<String> {
+    /// What the agent offers, read from a throw-away session: its models, its modes (plan,
+    /// auto-edit…) and the slash commands it announces.
+    pub async fn probe(&self, cwd: &Path) -> Probe {
         let Ok(mut child) = self.spawn(cwd, "") else {
-            return vec![];
+            return Probe::default();
         };
         let pending = Arc::new(Mutex::new(HashMap::new()));
-        let _incoming = Self::read_loop(&mut child, Arc::clone(&pending));
+        let mut incoming = Self::read_loop(&mut child, Arc::clone(&pending));
         let mut rpc = Rpc {
             stdin: child.stdin.take().expect("stdin is piped"),
             next: 0,
             pending,
         };
-        let probe = async {
+        let session = async {
             rpc.call(
                 "initialize",
                 json!({"protocolVersion": 1, "clientCapabilities": {}}),
             )
             .await?;
-            let made = rpc
-                .call("session/new", json!({"cwd": cwd, "mcpServers": []}))
-                .await?;
-            Ok::<_, String>(
-                made.pointer("/models/availableModels")
-                    .and_then(Value::as_array)
-                    .map(|a| {
-                        a.iter()
-                            .filter_map(|m| {
-                                m.get("modelId").and_then(Value::as_str).map(String::from)
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default(),
-            )
+            rpc.call("session/new", json!({"cwd": cwd, "mcpServers": []}))
+                .await
         };
-        let out = tokio::time::timeout(Duration::from_secs(60), probe)
-            .await
-            .ok()
-            .and_then(Result::ok)
-            .unwrap_or_default();
+        let mut out = Probe::default();
+        if let Ok(Ok(made)) = tokio::time::timeout(Duration::from_secs(60), session).await {
+            out.models = made
+                .pointer("/models/availableModels")
+                .and_then(Value::as_array)
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|m| m.get("modelId").and_then(Value::as_str).map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+            out.modes = made
+                .pointer("/modes/availableModes")
+                .and_then(Value::as_array)
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|m| pick(m, &["id", "name", "description"]))
+                        .collect()
+                })
+                .unwrap_or_default();
+            // the commands arrive as an update just after the session exists
+            let _ = tokio::time::timeout(Duration::from_secs(4), async {
+                while let Some(msg) = incoming.recv().await {
+                    if let Incoming::Update(u) = msg {
+                        if u.get("sessionUpdate").and_then(Value::as_str)
+                            == Some("available_commands_update")
+                        {
+                            out.commands = u
+                                .get("availableCommands")
+                                .and_then(Value::as_array)
+                                .map(|a| {
+                                    a.iter()
+                                        .filter_map(|c| pick(c, &["name", "description"]))
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+                            break;
+                        }
+                    }
+                }
+            })
+            .await;
+        }
         end(&mut child).await;
         out
+    }
+
+    /// The model ids the agent offers.
+    pub async fn list_models(&self, cwd: &Path) -> Vec<String> {
+        self.probe(cwd).await.models
     }
 
     /// Make the chosen model ready before the agent asks it anything.
@@ -540,6 +602,34 @@ impl AcpHarness {
                         .insert(sid.clone(), m);
                 }
             }
+            let known_mode = self
+                .modes_set
+                .lock()
+                .expect("not poisoned")
+                .get(&sid)
+                .cloned();
+            if !t.mode.is_empty() && known_mode.as_deref() != Some(t.mode.as_str()) {
+                match rpc
+                    .call(
+                        "session/set_mode",
+                        json!({"sessionId": sid, "modeId": t.mode}),
+                    )
+                    .await
+                {
+                    Ok(_) => {
+                        self.modes_set
+                            .lock()
+                            .expect("not poisoned")
+                            .insert(sid.clone(), t.mode.clone());
+                    }
+                    Err(e) => {
+                        t.append(
+                            EventKind::Checkpoint,
+                            json!({"reason": "mode_refused", "detail": e}),
+                        );
+                    }
+                }
+            }
             Ok::<_, String>((sid, primed, caps))
         };
         let (sid, primed, caps) = match setup.await {
@@ -658,7 +748,12 @@ impl AcpHarness {
     ) {
         match u.get("sessionUpdate").and_then(Value::as_str) {
             Some("agent_message_chunk") => {
-                text.push_str(&content_text(u.get("content").unwrap_or(&Value::Null)));
+                let chunk = content_text(u.get("content").unwrap_or(&Value::Null));
+                // Gemini announces a mode change as message text: that is a notice, not its answer
+                if chunk.trim_start().starts_with("[MODE_UPDATE]") {
+                    return;
+                }
+                text.push_str(&chunk);
                 t.phase("inference");
             }
             Some("tool_call") => {
@@ -1004,11 +1099,31 @@ impl Runner {
         if self.labels(agent).get("harness").and_then(Value::as_str) == Some(name) {
             return Ok(false);
         }
-        self.relabel(agent, &[("harness", name), ("model", "")])?;
+        self.relabel(agent, &[("harness", name), ("model", ""), ("mode", "")])?;
         self.journal(
             agent,
             EventKind::ProviderSwitch,
             json!({"from": "", "to": format!("{name}:default"), "harness": name}),
+        )?;
+        Ok(true)
+    }
+
+    /// Remember the mode chosen for a thread (empty: the agent's default); false when unchanged.
+    pub fn set_mode(&self, agent: &str, mode: &str) -> Result<bool, String> {
+        let previous = self
+            .labels(agent)
+            .get("mode")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        if previous == mode {
+            return Ok(false);
+        }
+        self.relabel(agent, &[("mode", mode)])?;
+        self.journal(
+            agent,
+            EventKind::Checkpoint,
+            json!({"reason": "mode_changed", "detail": if mode.is_empty() { "default" } else { mode }}),
         )?;
         Ok(true)
     }
@@ -1151,6 +1266,11 @@ impl Runner {
                     attachments,
                     workdir: workdir.clone(),
                     model,
+                    mode: labels
+                        .get("mode")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
                     pass: labels
                         .get("pass")
                         .and_then(Value::as_str)

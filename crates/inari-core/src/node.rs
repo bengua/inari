@@ -546,20 +546,25 @@ impl Node {
         m.insert("model".into(), json!(label("model")));
         m.insert("harness".into(), json!(harness));
         m.insert("pass".into(), json!(label("pass")));
+        m.insert("mode".into(), json!(label("mode")));
         m.insert("archived".into(), json!(label("archived") == "1"));
         m
     }
 
-    async fn harness_models(&self) -> Map<String, Value> {
+    /// What each harness announces: models, modes, slash commands (one map each, by harness).
+    async fn harness_probes(&self) -> (Map<String, Value>, Map<String, Value>, Map<String, Value>) {
         let scratch = self.cfg.data_dir.join("scratch");
         let _ = std::fs::create_dir_all(&scratch);
-        let mut out = Map::new();
+        let (mut models, mut modes, mut commands) = (Map::new(), Map::new(), Map::new());
         if let Some(r) = &self.runner {
             for (name, h) in &r.harnesses {
-                out.insert(name.clone(), json!(h.list_models(&scratch).await));
+                let p = h.probe(&scratch).await;
+                models.insert(name.clone(), json!(p.models));
+                modes.insert(name.clone(), json!(p.modes));
+                commands.insert(name.clone(), json!(p.commands));
             }
         }
-        out
+        (models, modes, commands)
     }
 
     async fn beat(self: Arc<Self>) {
@@ -613,7 +618,7 @@ impl Node {
                 .swap(false, std::sync::atomic::Ordering::Relaxed);
             if forced || models_at.is_none_or(|t| t.elapsed() > Duration::from_secs(6 * 3600)) {
                 // the catalogue changes rarely: look at start, after an update, and every six hours
-                let harnesses = self.harness_models().await;
+                let (harnesses, modes, commands) = self.harness_probes().await;
                 let default = self
                     .runner
                     .as_ref()
@@ -625,6 +630,10 @@ impl Node {
                 );
                 info.capabilities
                     .insert("harnesses".into(), Value::Object(harnesses));
+                info.capabilities
+                    .insert("harness_modes".into(), Value::Object(modes));
+                info.capabilities
+                    .insert("harness_commands".into(), Value::Object(commands));
                 models_at = Some(std::time::Instant::now());
             }
             let updates = self.updates.lock().expect("not poisoned").clone();
@@ -976,6 +985,12 @@ impl Node {
                 Err(e) => json!({"agent": agent, "ok": false, "error": format!("bad base64: {e}")}),
             };
             n.bus.publish(&reply, out);
+        });
+        self.on("agent.*.mode", |n, m| async move {
+            let agent = m.subject.split('.').nth(1).unwrap_or("").to_string();
+            if let Some(r) = n.runner.as_ref().filter(|_| n.running(&agent)) {
+                let _ = r.set_mode(&agent, &s(&m.payload, "mode"));
+            }
         });
         self.on("agent.*.model", |n, m| async move {
             let agent = m.subject.split('.').nth(1).unwrap_or("").to_string();

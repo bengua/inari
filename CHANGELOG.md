@@ -9,6 +9,13 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Added
 
+- **Each agent's own modes and slash commands, in the page.** Inari reads what every harness
+  announces when it starts a session and shows it: a **mode** chip on the thread (Claude Code:
+  Default, Accept Edits, Plan, Don't Ask, Bypass; Gemini: Default, Auto Edit, YOLO, Plan; OpenFox:
+  Build, Plan) that the thread keeps and sets before each session, and the agent's **slash
+  commands** offered when typing `/` in the composer. A mode change is journaled. Gemini's
+  `[MODE_UPDATE]` notice, sent as message text, is kept out of the answer.
+
 - **Pass threads can run in an environment of their own** (`pass_env` on a harness): a separate
   HOME per pass, so a child or a guest never inherits the owner's instructions, tools or
   credentials, and can bring their own login there.

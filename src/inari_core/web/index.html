@@ -155,7 +155,7 @@ pre.code span.l::before { counter-increment:l; content:counter(l); position:abso
   <section id="main">
     <div id="passBanner" role="status" hidden></div>
     <div id="top"><button class="btn small" id="back">‹ Back</button><button class="btn icon" id="benchMobile" title="Artifacts, terminal, journal" aria-label="Artifacts" data-icon="panel"></button><h2 id="ptitle">Inari</h2><span id="pphase"></span>
-      <button class="chip" id="modelChip" hidden></button><button class="btn small" id="actionsBtn" data-icon="more" hidden><span>Actions</span></button></div>
+      <button class="chip" id="modelChip" hidden></button><button class="chip" id="modeChip" hidden></button><button class="btn small" id="actionsBtn" data-icon="more" hidden><span>Actions</span></button></div>
     <div id="stage" aria-hidden="true"></div><div id="thread"><div id="msgs"></div></div>
     <div id="dock"><form class="composer" id="composer"><div class="attached" id="attached"></div><textarea id="msg" rows="2" placeholder="Build anything…" aria-label="Message"></textarea>
       <div class="ctools"><button type="button" class="btn icon" id="attach" title="Attach a file" aria-label="Attach a file" data-icon="plus"></button><input type="file" id="file" multiple hidden>
@@ -220,6 +220,9 @@ function ring(model) { const p = pctOf(usageFor(model)); if (p == null) return n
 function harnessesOf(node) { const n = snap.nodes.find((x) => x.node_id === node); return (n && n.capabilities && n.capabilities.harnesses) || {}; }
 // A core may keep some of its models out of the menus (`model_hidden` suffixes): helpers its harness uses on its own.
 function harnessModels(node, h) { const n = snap.nodes.find((x) => x.node_id === node), hide = (n && n.capabilities && n.capabilities.model_hidden) || []; return (harnessesOf(node)[h] || []).filter((m) => !hide.some((suf) => suf && m.endsWith(suf))); }
+// What each harness announces besides its models: modes (plan, auto-edit…) and slash commands.
+function harnessModes(node, h) { const n = snap.nodes.find((x) => x.node_id === node); return ((n && n.capabilities && n.capabilities.harness_modes) || {})[h] || []; }
+function harnessCommands(node, h) { const n = snap.nodes.find((x) => x.node_id === node); return ((n && n.capabilities && n.capabilities.harness_commands) || {})[h] || []; }
 function nodeModels(node) { const n = snap.nodes.find((x) => x.node_id === node), hide = (n && n.capabilities && n.capabilities.model_hidden) || []; return ((n && n.capabilities && n.capabilities.models) || []).filter((m) => !hide.some((suf) => suf && m.endsWith(suf))); }
 
 function api(path, body) { const headers = { "Content-Type": "application/json" }; if (pass) headers["X-Inari-Pass"] = pass; else if (token) headers.Authorization = "Bearer " + token; return fetch(path, { method: body ? "POST" : "GET", headers, body: body ? JSON.stringify(body) : undefined }).then((r) => r.json()); }
@@ -372,7 +375,7 @@ function updatesPanel(pop, refresh) { if (refresh) pop.innerHTML = ""; pop.inser
 function renderUsageCard() { const open = store.get("usageOpen", false); $("usageCard").hidden = !open; $("usageBtn").setAttribute("aria-expanded", String(open)); if (open) { const body = $("usageBody"); body.textContent = ""; usageRows(body); } }
 function openPop(anchor, build) { const pop = $("pop"); if (pop.classList.contains("open") && pop.dataset.for === anchor.id) { pop.classList.remove("open"); return; } pop.innerHTML = ""; build(pop); pop.dataset.for = anchor.id; const r = anchor.getBoundingClientRect(); pop.classList.add("open");
   pop.style.left = Math.max(8, Math.min(r.left, innerWidth - pop.offsetWidth - 8)) + "px"; pop.style.top = Math.max(8, r.top - pop.offsetHeight - 8 > 8 ? r.top - pop.offsetHeight - 8 : r.bottom + 8) + "px"; }
-addEventListener("pointerdown", (e) => { const pop = $("pop"); if (pop.classList.contains("open") && !pop.contains(e.target) && !e.target.closest("#gear,#pill,#modelChip,#pickModel,#coreChip,#actionsBtn")) pop.classList.remove("open"); });
+addEventListener("pointerdown", (e) => { const pop = $("pop"); if (pop.classList.contains("open") && !pop.contains(e.target) && !e.target.closest("#gear,#pill,#modelChip,#modeChip,#pickModel,#coreChip,#actionsBtn")) pop.classList.remove("open"); });
 function usageRows(pop) { const items = snap.usage || [];
   if (!items.length) pop.insertAdjacentHTML("beforeend", '<div class="empty">No quota source is configured. Local models have no quota.</div>');
   for (const u of items) { const row = document.createElement("div"); row.className = "urow"; const head = document.createElement("div"); head.className = "uhead"; head.append(badge(u.provider_id, 22)); head.insertAdjacentHTML("beforeend", `<b>${esc(u.name)}</b><small>${esc(u.plan || (u.status === "unlimited" ? "no quota" : u.status))}</small>`); row.append(head);
@@ -408,8 +411,15 @@ function frame(t) { if (!orbEl || !orbEl.isConnected) return; const ctx = orbCtx
 function renderTop() {
   const a = selected && snap.agents[selected], app = $("app"); app.classList.toggle("nosel", !a); $("ptitle").textContent = a ? (a.title || selected) : composing ? `New thread · ${pendingCore || ""}` : "Inari";
   $("pphase").innerHTML = a ? `<span class="state${["listening", "loading", "inference"].includes(a.phase) ? " live" : ""}" style="--c:var(--${{ inference: "copper", loading: "copper", listening: "purple", success: "ok", error: "bad" }[a.phase] || "dim"})">${LABEL[a.phase]} <small>on ${esc(a.node)}</small></span>` : "";
-  $("actionsBtn").hidden = !a; const chip = $("modelChip"); chip.hidden = !a; if (a) fillModelChip(chip, a.model); document.body.classList.toggle("open", !!a || composing); placeFox(); drawComposer();
+  $("actionsBtn").hidden = !a; fillModeChip(a); const chip = $("modelChip"); chip.hidden = !a; if (a) fillModelChip(chip, a.model); document.body.classList.toggle("open", !!a || composing); placeFox(); drawComposer();
 }
+function fillModeChip(a) { const chip = $("modeChip"), modes = a ? harnessModes(a.node, a.harness) : []; chip.hidden = !modes.length; if (chip.hidden) return;
+  const cur = modes.find((m) => m.id === a.mode) || modes[0]; chip.textContent = ""; const n = document.createElement("span"); n.className = "n"; n.textContent = cur.name; chip.title = cur.description || ""; chip.append(n); }
+$("modeChip").onclick = () => { const a = snap.agents[selected]; if (!a) return; const modes = harnessModes(a.node, a.harness);
+  openPop($("modeChip"), (pop) => { pop.insertAdjacentHTML("beforeend", `<h3>${esc(harnessName(a.harness))} — mode</h3><div id="mlist"></div>`); const list = pop.querySelector("#mlist");
+    for (const m of modes) { const b = document.createElement("button"); b.className = "mrow" + (m.id === (a.mode || modes[0].id) ? " on" : ""); const t = document.createElement("span"); t.textContent = m.name; b.append(t);
+      if (m.description) { const d = document.createElement("small"); d.style.cssText = "margin-left:auto;color:var(--faint);max-width:55%;text-align:right"; d.textContent = m.description; b.append(d); }
+      b.onclick = () => { $("pop").classList.remove("open"); api("/api/mode", { agent: selected, mode: m.id }); toast("Mode: " + m.name); }; list.append(b); } }); };
 function fillModelChip(chip, model) { chip.textContent = ""; chip.append(badge(model, 18)); const n = document.createElement("span"); n.className = "n"; n.textContent = shortModel(model); chip.append(n); const r = ring(model); if (r) chip.append(r); }
 function drawComposer() {
   const a = selected && snap.agents[selected], cc = $("coreChip"), pm = $("pickModel"); $("msg").placeholder = a ? "Message the agent…" : "Build anything…";
@@ -435,6 +445,16 @@ function chooseSession(node, then) { const hs = Object.keys(harnessesOf(node));
   if (hs.length <= 1) return pickModel(hs[0] || "");
   sheet(`New thread on ${node} — which agent?`, hs.map((h) => [`${harnessName(h)} · ${new Set(harnessModels(node, h).map(shortModel)).size || "?"} models`, () => pickModel(h)]), "Then choose its model; you can change both later."); }
 $("coreChip").onclick = () => { const heavy = snap.nodes.filter((n) => n.role === "heavy"); sheet("Run it on…", heavy.map((n) => [n.node_id, () => { pendingCore = n.node_id; pendingHarness = ""; pendingModel = ""; drawComposer(); chooseSession(n.node_id); }])); };
+/* Typing "/" offers the commands the thread's agent announces (sent as plain text, as the agent expects). */
+(() => { const box = document.createElement("div"); box.id = "slash"; box.hidden = true; box.setAttribute("role", "listbox"); box.style.cssText = "position:absolute;left:12px;right:12px;bottom:calc(100% + 6px);max-height:240px;overflow:auto;background:var(--panel-solid);border:1px solid var(--hair);border-radius:14px;box-shadow:var(--shadow);padding:6px;z-index:60";
+  $("composer").style.position = "relative"; $("composer").append(box);
+  const cmds = () => { const a = selected && snap.agents[selected]; return a ? harnessCommands(a.node, a.harness) : (pendingHarness ? harnessCommands(pendingCore, pendingHarness) : []); };
+  const hide = () => { box.hidden = true; };
+  $("msg").addEventListener("input", () => { const v = $("msg").value, m = /^\/(\S*)$/.exec(v); if (!m || !snap) return hide(); const q = m[1].toLowerCase(), list = cmds().filter((c) => c.name.toLowerCase().includes(q)).slice(0, 40); if (!list.length) return hide();
+    box.textContent = ""; for (const c of list) { const b = document.createElement("button"); b.type = "button"; b.className = "mrow"; b.setAttribute("role", "option"); const n = document.createElement("b"); n.textContent = "/" + c.name; b.append(n);
+      if (c.description) { const d = document.createElement("small"); d.style.cssText = "margin-left:10px;color:var(--faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap"; d.textContent = c.description; b.append(d); }
+      b.onclick = () => { $("msg").value = "/" + c.name + " "; hide(); $("msg").focus(); }; box.append(b); } box.hidden = false; });
+  $("msg").addEventListener("keydown", (e) => { if (e.key === "Escape") hide(); }); $("msg").addEventListener("blur", () => setTimeout(hide, 150)); })();
 $("attach").onclick = () => $("file").click();
 $("file").onchange = (e) => { for (const f of e.target.files) { if (f.size > 25e6) { toast(f.name + " is over 25 MB"); continue; } attachments.push({ name: f.name, file: f }); } e.target.value = ""; drawComposer(); };
 // A file goes in parts of 512 KiB: no large request, and a part that failed is simply sent again.
@@ -482,7 +502,7 @@ function drawChat() {
       const path = (e.text.match(/(?:write_file|read_file|write|edit|create)[^:]*:\s*([\w./-]+\.\w+)/i) || [])[1]; if (path) { const b = document.createElement("button"); b.className = "btn small open"; b.innerHTML = icon("file") + "<span></span>"; b.lastChild.textContent = "Open " + path; b.onclick = () => openFile(path); d.append(b); } box.append(d); }
     else if (e.kind === "provider_switch") note(`Model <b>${esc(shortModel(e.text))}</b>`);
     else if (e.kind === "decision") note(esc(e.text));
-    else if (e.kind === "checkpoint") { const [why, ...rest] = e.text.split(": "); const map = { teleport: "Moved between cores", provider_error: "The model failed", harness_error: "The agent stopped", harness_timeout: "The agent took too long", model_refused: "Model not available" }; note(esc(map[why] || "Checkpoint") + (rest.length && why !== "teleport" ? ` — ${esc(rest.join(": ").slice(0, 120))}` : "")); } }
+    else if (e.kind === "checkpoint") { const [why, ...rest] = e.text.split(": "); const map = { teleport: "Moved between cores", provider_error: "The model failed", harness_error: "The agent stopped", harness_timeout: "The agent took too long", model_refused: "Model not available", mode_changed: "Mode", mode_refused: "Mode not available" }; note(esc(map[why] || "Checkpoint") + (rest.length && why !== "teleport" ? ` — ${esc(rest.join(": ").slice(0, 120))}` : "")); } }
   if (["listening", "loading", "inference"].includes(a.phase)) box.insertAdjacentHTML("beforeend", '<div class="msg assistant typing"><i></i><i></i><i></i></div>'); if (atEnd) th.scrollTop = th.scrollHeight;
 }
 $("back").onclick = () => { selected = null; composing = false; renderTop(); drawChat(); drawBench(); if (snap) renderCores(Object.entries(snap.agents)); };

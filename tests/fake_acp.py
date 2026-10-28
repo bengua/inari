@@ -57,9 +57,33 @@ for line in sys.stdin:
                         "availableModels": [{"modelId": "fam/alpha"}, {"modelId": "fam/beta"}],
                         "currentModelId": "fam/alpha",
                     },
+                    "modes": {
+                        "currentModeId": "default",
+                        "availableModes": [
+                            {"id": "default", "name": "Default", "description": "Asks first"},
+                            {"id": "plan", "name": "Plan", "description": "Read-only"},
+                        ],
+                    },
                 },
             }
         )
+        update(
+            sid,
+            {
+                "sessionUpdate": "available_commands_update",
+                "availableCommands": [
+                    {"name": "summarize", "description": "Summarize the thread"},
+                    {"name": "review", "description": "Review the changes"},
+                ],
+            },
+        )
+    elif m == "session/set_mode":
+        with LOG.open("a") as fh:
+            fh.write(json.dumps({"set_mode": p["modeId"]}) + "\n")
+        # like Gemini: the change is also announced as message text
+        notice = {"type": "text", "text": "[MODE_UPDATE] " + p["modeId"]}
+        update(p["sessionId"], {"sessionUpdate": "agent_message_chunk", "content": notice})
+        send({"jsonrpc": "2.0", "id": ident, "result": {}})
     elif m == "session/load":
         if p["sessionId"] in known():
             send({"jsonrpc": "2.0", "id": ident, "result": {}})
