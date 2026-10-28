@@ -375,7 +375,11 @@ $("msg").onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventD
 
 /* ---------- conversation ---------- */
 async function select(id) { selected = id; forkAt = null; viewing = null; files = null; events = []; tlStamp = 0; lastFiles = ""; renderTop(); drawChat(); drawBench(); await refreshDetail(); if (snap) renderCores(Object.entries(snap.agents)); $("msg").focus(); }
-async function refreshDetail() { if (!selected || tlBusy) return; tlBusy = true; tlStamp = Date.now(); try { events = (await api(`/api/agent/${encodeURIComponent(selected)}/timeline`)).events || []; const a = snap.agents[selected] || {}, sig = a.files + ":" + a.events; if (!files || sig !== lastFiles) { files = (await api(`/api/agent/${encodeURIComponent(selected)}/files`)).files || []; lastFiles = sig; } drawChat(); drawBench(true); } finally { tlBusy = false; } }
+async function refreshDetail() { if (!selected || tlBusy) return; tlBusy = true; tlStamp = Date.now(); try { const id = selected, base = `/api/agent/${encodeURIComponent(id)}/timeline`, last = events.length ? events[events.length - 1].id : "";
+    let tl = await api(last ? `${base}?after=${encodeURIComponent(last)}` : base); if (id !== selected) return;
+    // a plain continuation is appended; a journal that changed under the page (a merge, a fork) is asked for whole
+    if (last && !(tl.from === events.length && events.length + (tl.events || []).length === tl.count)) tl = await api(base);
+    if (id !== selected || tl.error) return; events = tl.from ? events.concat(tl.events || []) : tl.events || []; const a = snap.agents[selected] || {}, sig = a.files + ":" + a.events; if (!files || sig !== lastFiles) { files = (await api(`/api/agent/${encodeURIComponent(selected)}/files`)).files || []; lastFiles = sig; } drawChat(); drawBench(true); } finally { tlBusy = false; } }
 /* Markdown, the subset models write: headings, lists, quotes, tables, rules, links, code. Everything is
    escaped first; only http(s) links become anchors. One renderer for the chat and the viewer. */
 const LINK = 'target="_blank" rel="noopener noreferrer"';

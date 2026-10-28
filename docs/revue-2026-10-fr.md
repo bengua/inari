@@ -23,6 +23,7 @@
 | 2 | Page découpée en fichiers, polices servies, alternatives visibles aux gestes cachés | fait, testé |
 | 3 | Interface web FR/EN | fait, testé |
 | 4 | Sécurité de la page : cookie de session, CSP stricte, limites du serveur HTTP, frein aux essais | fait, testé |
+| 6 | Timeline incrémentale (la page ne retélécharge plus tout le fil) | fait, testé |
 | 5 | Android : bord à bord, partage sans saturer la mémoire, messages d'erreur utiles, chaînes | fait, **non compilé** |
 
 ---
@@ -144,3 +145,17 @@ uvx --from 'fonttools[woff]' pyftsubset /tmp/b.ttf --unicodes="$U" --flavor=woff
 5. **Version** : `versionCode`/`versionName` n'ont pas été incrémentés, ça dépend de ton processus de publication (`android/publish.sh`).
 
 **Bon à savoir sur les sessions (lot 4) côté app** : la WebView garde les cookies (`CookieManager`), donc un pass reste connecté entre deux lancements, comme avant avec le `localStorage`. Un téléphone qui avait un pass enregistré par l'ancienne page n'a rien à ressaisir : la nouvelle page l'échange contre un cookie au premier lancement.
+
+## Lot 6 : timeline incrémentale
+
+**Avant** : pendant qu'un agent travaillait, la page retéléchargeait **tout** le journal du fil toutes les ~1,5 s, soit des centaines de Ko sur mobile pour un long fil.
+
+**Maintenant** : la page demande `GET /api/agent/<id>/timeline?after=<dernier id>`. Le serveur répond `{events, from, count}` : seulement la suite, plus l'endroit où elle commence et la longueur totale. La page ajoute la suite si `from` vaut ce qu'elle a déjà et si le total correspond. Sinon, le journal a changé sous elle (fusion, duplication) et elle redemande tout. Sans `after`, ou avec un id inconnu, le serveur renvoie tout le journal, comme avant. Un ancien client continue donc de marcher.
+
+| Où | Quoi |
+|---|---|
+| `gateway.rs` | `timeline_since()` + test `a_page_gets_only_what_came_since_its_last_event` |
+| `gateway.py` | `timeline_since()` + même test |
+| `app.js` | `refreshDetail()`. Il ignore aussi une réponse arrivée après qu'on a changé de fil (avant, elle pouvait s'afficher dans le mauvais fil). |
+
+Vérifié dans Chromium : les requêtes portent bien `after=`, et le fil construit au fil de l'eau est identique au fil rechargé de zéro.

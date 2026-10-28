@@ -149,6 +149,23 @@ async fn clone_across(
     }
 }
 
+/// A thread's journal for a page that already holds it up to event `after`: only what came
+/// since, with `from` (where it starts) and `count` (the whole length) so the page can tell
+/// a plain continuation from a journal that changed under it and ask for all of it again.
+/// An unknown or empty `after` answers the whole journal (`from` 0).
+pub fn timeline_since(log: Vec<Value>, after: &str) -> Value {
+    let count = log.len();
+    let from = if after.is_empty() {
+        0
+    } else {
+        log.iter()
+            .position(|e| e.get("id").and_then(Value::as_str) == Some(after))
+            .map_or(0, |i| i + 1)
+    };
+    let events: Vec<Value> = log.into_iter().skip(from).collect();
+    json!({"events": events, "from": from, "count": count})
+}
+
 /// Who is asking: the core's owner, or the holder of a pass (only its own threads).
 #[derive(Clone)]
 pub enum Access {
@@ -1010,7 +1027,7 @@ impl Gateway {
             }
             return match parts[4] {
                 "timeline" => {
-                    let events = self
+                    let log = self
                         .state
                         .lock()
                         .expect("not poisoned")
@@ -1018,7 +1035,8 @@ impl Gateway {
                         .get(&agent)
                         .cloned()
                         .unwrap_or_default();
-                    send_json(w, 200, &json!({"events": events})).await
+                    let after = r.query.get("after").map(String::as_str).unwrap_or("");
+                    send_json(w, 200, &timeline_since(log, after)).await
                 }
                 "files" => {
                     let reply = self
@@ -1706,6 +1724,27 @@ impl Gateway {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_page_gets_only_what_came_since_its_last_event() {
+        let log: Vec<Value> = ["a", "b", "c"].iter().map(|id| json!({"id": id})).collect();
+        let since = timeline_since(log.clone(), "b");
+        assert_eq!(since["events"], json!([{"id": "c"}]));
+        assert_eq!(
+            (since["from"].as_u64(), since["count"].as_u64()),
+            (Some(2), Some(3))
+        );
+        assert_eq!(timeline_since(log.clone(), "c")["events"], json!([]));
+        let whole = timeline_since(log.clone(), "gone");
+        assert_eq!(
+            (
+                whole["from"].as_u64(),
+                whole["events"].as_array().map(Vec::len)
+            ),
+            (Some(0), Some(3))
+        );
+        assert_eq!(timeline_since(log, "")["from"].as_u64(), Some(0));
+    }
 
     #[test]
     fn queries_are_decoded() {

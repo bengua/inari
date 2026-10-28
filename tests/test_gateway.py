@@ -208,3 +208,13 @@ async def test_agent_cards_get_their_facts_and_moves_are_reported_live(gw):
         {"request": "r", "agent": "a1", "source": "n1", "target": "n2", "state": "transferred"},
     )
     assert gateway.snapshot()["moves"]["a1"]["state"] == "transferred"
+
+
+def test_a_page_gets_only_what_came_since_its_last_event():
+    from inari_core.gateway import timeline_since
+
+    log = [{"id": "a"}, {"id": "b"}, {"id": "c"}]
+    assert timeline_since(log, "b") == {"events": [{"id": "c"}], "from": 2, "count": 3}
+    assert timeline_since(log, "c")["events"] == []
+    assert timeline_since(log, "gone") == {"events": log, "from": 0, "count": 3}
+    assert timeline_since(log, "")["from"] == 0

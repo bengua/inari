@@ -29,6 +29,10 @@ Newest first. An entry says what changed for someone using the thing.
   (subset to Latin, woff2, about 120 KB), so every browser shows the same type. The page is now
   `index.html`, `app.css`, `app.js` and `fonts/`, served under `/assets/` by both gateways.
 
+- **A thread asks only for what is new.** The page used to download a thread's whole journal every
+  second and a half while an agent worked; it now asks `timeline?after=<last event>` and appends,
+  and asks for the whole journal again only when it changed under it (a merge, a fork).
+
 - **A *New messages* button** appears when the agent writes while you have scrolled up; the thread
   no longer pulls you down.
 

@@ -46,6 +46,13 @@ def owner_hash(token: str) -> str:
     return hashlib.sha256(f"inari-owner|{token}".encode()).hexdigest()[:32]
 
 
+def timeline_since(log: list[dict[str, Any]], after: str) -> dict[str, Any]:
+    """The journal past event `after`, with where it starts and the whole length (as Rust)."""
+    ids = [e.get("id") for e in log]
+    start = ids.index(after) + 1 if after and after in ids else 0
+    return {"events": log[start:], "from": start, "count": len(log)}
+
+
 # The files of the page under /assets/, and their types (the same list as the Rust gateway's).
 ASSETS = {
     "app.css": "text/css; charset=utf-8",
@@ -395,7 +402,9 @@ class Gateway:
             events = (
                 self.timeline_reader(agent) if self.timeline_reader else self.log.get(agent, [])
             )
-            return await self._json(writer, 200, {"events": events})
+            return await self._json(
+                writer, 200, timeline_since(events, query.get("after", [""])[0])
+            )
         if method == "GET" and path.startswith("/api/agent/") and path.endswith("/files"):
             reply = await self._ask("agent.files.request", {"agent": path.split("/")[3]})
             return await self._json(writer, 200, reply or {"files": []})
