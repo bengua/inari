@@ -34,11 +34,11 @@ async fn raw(port: u16, head: &str, body: &str) -> (u16, String) {
 }
 
 fn config(d: &Path, id: &str, hub: &str, gateway: bool) -> NodeConfig {
-    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fake_acp.py");
+    let script = env!("CARGO_BIN_EXE_inari-core-rs");
     let mut cfg = json!({
         "node_id": id, "data_dir": d.join(id), "key_file": d.join("mesh.key"), "hub": hub,
         "heartbeat": 0.1, "expected_peers": ["worker"],
-        "harnesses": {"fake": {"command": ["python3", script], "env": {"FAKE_ACP_LOG": d.join("acp.log")}}},
+        "harnesses": {"fake": {"command": [script, "fake-agent"], "env": {"FAKE_ACP_LOG": d.join("acp.log")}}},
     });
     if gateway {
         cfg["gateway_listen"] = json!("127.0.0.1:0");

@@ -17,6 +17,8 @@ fn usage() -> ExitCode {
          bus-echo <name> <key-file> <expected-peer>\n  bus-say <name> <key-file> <host:port> <subject> <payload-json> <wait-subject>\n  \
          turn <root> <node> <agent> <text> [file-to-attach]... -- <acp-agent command...>\n  \
          node <config.json>\n  \
+         demo [--port N] [--host H] [--token T] [--mascot DIR] [--workdir DIR]\n  \
+         demo-agent | fake-agent   (an ACP agent on stdin/stdout: the demo's, the tests')\n  \
          join <hub-enroll host:port> <code> [--endpoint-port N] [--gateway-port N] [--service]"
     );
     ExitCode::from(2)
@@ -379,6 +381,7 @@ fn run(args: &[String]) -> capsule::Result<ExitCode> {
                 }
             })
         }
+        ["demo", rest @ ..] => demo(rest),
         ["pack", dir, archive] => {
             io::pack(Path::new(dir), Path::new(archive)).map(|_| ExitCode::SUCCESS)
         }
@@ -389,8 +392,71 @@ fn run(args: &[String]) -> capsule::Result<ExitCode> {
     }
 }
 
+/// `inari-core-rs demo`: three nodes in this process and the interface, until Ctrl+C.
+fn demo(a: &[&str]) -> capsule::Result<ExitCode> {
+    let mut o = inari_core::demo::DemoOptions {
+        host: "127.0.0.1".into(),
+        port: 8787,
+        token: "demo".into(),
+        workdir: None,
+        mascot_dir: None,
+        agent: vec![
+            std::env::current_exe()?.display().to_string(),
+            "demo-agent".into(),
+        ],
+    };
+    let mut it = a.iter();
+    while let Some(flag) = it.next() {
+        let Some(value) = it.next() else {
+            return Ok(usage());
+        };
+        match *flag {
+            "--port" => match value.parse() {
+                Ok(p) => o.port = p,
+                Err(_) => return Ok(usage()),
+            },
+            "--host" => o.host = value.to_string(),
+            "--token" => o.token = value.to_string(),
+            "--mascot" => o.mascot_dir = Some(PathBuf::from(value)),
+            "--workdir" => o.workdir = Some(PathBuf::from(value)),
+            _ => return Ok(usage()),
+        }
+    }
+    let (host, token) = (o.host.clone(), o.token.clone());
+    tokio::runtime::Runtime::new()?.block_on(async move {
+        match inari_core::demo::start(o).await {
+            Ok(d) => {
+                let port = d.nodes[0].gateway_port;
+                println!("inari-core demo: http://{host}:{port}/#token={token}  (Ctrl+C to stop; capsules in {})", d.workdir.display());
+                use std::io::Write;
+                let _ = std::io::stdout().flush();
+                std::future::pending::<()>().await;
+                Ok(ExitCode::SUCCESS)
+            }
+            Err(e) => {
+                eprintln!("cannot start the demo: {e}");
+                Ok(ExitCode::from(1))
+            }
+        }
+    })
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // the ACP agents speak on stdin/stdout: no runtime, nothing else printed
+    match args.first().map(String::as_str) {
+        Some("demo-agent") => {
+            return ExitCode::from(
+                inari_core::demo_agent::serve(inari_core::demo_agent::Mode::Demo) as u8,
+            )
+        }
+        Some("fake-agent") => {
+            return ExitCode::from(
+                inari_core::demo_agent::serve(inari_core::demo_agent::Mode::Fake) as u8,
+            )
+        }
+        _ => {}
+    }
     match run(&args) {
         Ok(code) => code,
         Err(e) => {

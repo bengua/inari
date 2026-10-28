@@ -5,7 +5,6 @@ use inari_core::gateway::Access;
 use inari_core::node::{Node, NodeConfig};
 use inari_core::usage::http;
 use serde_json::{json, Value};
-use std::path::Path;
 use std::time::Duration;
 
 async fn post(port: u16, auth: &str, path: &str, body: Value) -> (u16, Value) {
@@ -38,9 +37,8 @@ async fn clone_share_and_sleep() {
     for (n, v) in [("mesh.key", "m"), ("device.key", "d"), ("token", "owner")] {
         std::fs::write(d.join(n), v).unwrap();
     }
-    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fake_acp.py");
-    let h =
-        |log: &str| json!({"command": ["python3", script], "env": {"FAKE_ACP_LOG": d.join(log)}});
+    let script = env!("CARGO_BIN_EXE_inari-core-rs");
+    let h = |log: &str| json!({"command": [script, "fake-agent"], "env": {"FAKE_ACP_LOG": d.join(log)}});
     let cfg: NodeConfig = serde_json::from_value(json!({
         "node_id": "home", "data_dir": d.join("home"), "key_file": d.join("mesh.key"), "device_key_file": d.join("device.key"),
         "gateway_listen": "127.0.0.1:0", "gateway_token_file": d.join("token"), "heartbeat": 0.1,
@@ -258,9 +256,8 @@ async fn a_clone_goes_to_the_core_that_has_the_harness() {
     for (n, v) in [("mesh.key", "m"), ("device.key", "d"), ("token", "owner")] {
         std::fs::write(d.join(n), v).unwrap();
     }
-    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fake_acp.py");
-    let h =
-        |log: &str| json!({"command": ["python3", script], "env": {"FAKE_ACP_LOG": d.join(log)}});
+    let script = env!("CARGO_BIN_EXE_inari-core-rs");
+    let h = |log: &str| json!({"command": [script, "fake-agent"], "env": {"FAKE_ACP_LOG": d.join(log)}});
     let home: NodeConfig = serde_json::from_value(json!({
         "node_id": "home", "data_dir": d.join("home"), "key_file": d.join("mesh.key"),
         "gateway_listen": "127.0.0.1:0", "gateway_token_file": d.join("token"), "heartbeat": 0.1, "expected_peers": ["away"],
@@ -328,13 +325,13 @@ async fn a_model_chosen_with_the_thread_is_ready_for_its_first_turn() {
     for (n, v) in [("mesh.key", "m"), ("device.key", "d"), ("token", "owner")] {
         std::fs::write(d.join(n), v).unwrap();
     }
-    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fake_acp.py");
+    let script = env!("CARGO_BIN_EXE_inari-core-rs");
     let ready = d.join("ready.log");
     let cfg: NodeConfig = serde_json::from_value(json!({
         "node_id": "home", "data_dir": d.join("home"), "key_file": d.join("mesh.key"), "device_key_file": d.join("device.key"),
         "gateway_listen": "127.0.0.1:0", "gateway_token_file": d.join("token"), "heartbeat": 0.1,
         "model_labels": [["-c0", " · first card"]], "model_hidden": ["-cpu"],
-        "harnesses": {"local": {"command": ["python3", script], "env": {"FAKE_ACP_LOG": d.join("acp.log")},
+        "harnesses": {"local": {"command": [script, "fake-agent"], "env": {"FAKE_ACP_LOG": d.join("acp.log")},
                                 "prepare": ["/bin/sh", "-c", format!("echo \"$1\" >> {}", ready.display()), "sh", "{model}"]}},
     }))
     .unwrap();

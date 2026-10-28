@@ -19,9 +19,9 @@ struct Lab {
 }
 
 fn fake(log: &Path, sessions: &Path, images: bool) -> AcpHarness {
-    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fake_acp.py");
+    let script = env!("CARGO_BIN_EXE_inari-core-rs");
     let mut h = AcpHarness::new(
-        vec!["python3".into(), script.display().to_string()],
+        vec![script.to_string(), "fake-agent".into()],
         sessions.to_path_buf(),
     );
     h.extra_env

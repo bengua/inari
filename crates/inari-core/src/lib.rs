@@ -10,6 +10,8 @@ pub mod bus;
 pub mod buslink;
 pub mod canon;
 pub mod capsule;
+pub mod demo;
+pub mod demo_agent;
 pub mod enroll;
 pub mod gateway;
 pub mod host;

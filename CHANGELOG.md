@@ -9,6 +9,13 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Added
 
+- **`inari-core-rs demo`: the demo in Rust.** Three nodes in one process, the interface on
+  `:8787`, live turns and an approval question; `--mascot DIR` shows FoxBot. The agent it runs is
+  this binary too (`inari-core-rs demo-agent`): `write <file>: <text>`, `run: <command>` (a
+  read-only command runs at once, anything else asks you first, `sudo` never runs).
+- **`cargo test` needs no Python.** The scripted agent of the tests is `inari-core-rs fake-agent`,
+  a Rust port of `tests/fake_acp.py` with the same words and the same log.
+
 - **Richer replies.** The thread and the Markdown viewer share one renderer: headings, bulleted and
   numbered lists, quotes, tables, rules, links (http and https only, opened outside the page) and
   code blocks with their language and a *Copy* button.
