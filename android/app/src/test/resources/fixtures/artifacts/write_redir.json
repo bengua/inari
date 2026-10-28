@@ -1,0 +1,12 @@
+{
+  "sequence": 43,
+  "session_id": "cr_test",
+  "kind": "item_completed",
+  "timestamp_ms": 1710000001000,
+  "data": {
+    "method": "item/completed",
+    "tool_name": "echo hello > docs/readme.md",
+    "item_id": "item_2",
+    "status": "completed"
+  }
+}

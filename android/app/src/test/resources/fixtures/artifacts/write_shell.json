@@ -1,0 +1,12 @@
+{
+  "sequence": 42,
+  "session_id": "cr_test",
+  "kind": "item_completed",
+  "timestamp_ms": 1710000000000,
+  "data": {
+    "method": "item/completed",
+    "tool_name": "cat > src/main.kt <<'EOF'\nfun main() {}\nEOF",
+    "item_id": "item_1",
+    "status": "completed"
+  }
+}

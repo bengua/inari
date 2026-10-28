@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="kitchen_stocked">
+        <item quantity="one">%d produit rangé dans le garde-manger</item>
+        <item quantity="other">%d produits rangés dans le garde-manger</item>
+    </plurals>
+    <string name="update_available">Inari %s est disponible</string>
+    <string name="update_install">Mettre à jour</string>
+    <plurals name="widget_cart">
+        <item quantity="one">%1$d à acheter : %2$s</item>
+        <item quantity="other">%1$d à acheter : %2$s</item>
+    </plurals>
+    <string name="state_running">en cours</string>
+    <string name="state_starting">démarre</string>
+    <string name="state_idle">au repos</string>
+    <string name="state_paused">en pause</string>
+    <string name="state_pending">en attente</string>
+    <string name="state_interrupting">interruption</string>
+    <string name="state_closing">fermeture</string>
+    <string name="state_closed">fermée</string>
+    <!-- Le tiroir (0.26) : les fils et les lieux de la tanière. -->
+    <string name="settings_title">Réglages</string>
+    <!-- La flotte d\'une room : le chef et les agents que le journal mentionne. -->
+    <!-- Clés arrivées sans traduction : le français rattrape. -->
+    <string name="tab_inari">Inari</string>
+    <string name="inari_unreachable">Inari est injoignable.</string>
+    <string name="inari_retry">Réessayer</string>
+    <string name="inari_login_title">Connexion à Inari</string>
+    <string name="inari_login_user">Utilisateur</string>
+    <string name="inari_login_pw">Mot de passe</string>
+    <string name="inari_login_ok">Se connecter</string>
+    <string name="inari_login_cancel">Annuler</string>
+    <string name="inari_unlock">Déverrouiller</string>
+    <string name="inari_url">Adresse d’Inari</string>
+    <string name="inari_save">Enregistrer</string>
+</resources>

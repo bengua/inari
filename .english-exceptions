@@ -1,1 +1,2 @@
 src/inari_core/web/index.html # CSS font family names ("Plex Sans", sans-serif) read as French prose; the page is English
+android/app/src/main/res/values-fr/strings.xml # the French translation of the app strings: a locale, not prose

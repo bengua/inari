@@ -1,0 +1,33 @@
+[versions]
+agp = "8.7.3"
+kotlin = "2.1.0"
+coreKtx = "1.15.0"
+activityCompose = "1.9.3"
+lifecycle = "2.8.7"
+composeBom = "2025.06.01"
+junit = "4.13.2"
+okhttp = "4.12.0"
+biometric = "1.1.0"
+# biometric 1.1.0 brings fragment 1.2.x, whose FragmentActivity refuses the request
+# codes of the Activity Result API: the microphone permission crashed the app (03/10/2026).
+fragment = "1.8.5"
+
+[libraries]
+androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
+androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
+androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycle" }
+androidx-lifecycle-viewmodel-compose = { group = "androidx.lifecycle", name = "lifecycle-viewmodel-compose", version.ref = "lifecycle" }
+androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
+androidx-ui = { group = "androidx.compose.ui", name = "ui" }
+androidx-material3 = { group = "androidx.compose.material3", name = "material3" }
+androidx-material-icons = { group = "androidx.compose.material", name = "material-icons-core" }
+junit = { group = "junit", name = "junit", version.ref = "junit" }
+okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
+okhttp-mockwebserver = { group = "com.squareup.okhttp3", name = "mockwebserver", version.ref = "okhttp" }
+androidx-fragment = { group = "androidx.fragment", name = "fragment-ktx", version.ref = "fragment" }
+androidx-biometric = { group = "androidx.biometric", name = "biometric", version.ref = "biometric" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

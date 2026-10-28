@@ -1,0 +1,10 @@
+{
+  "sequence": 46,
+  "session_id": "cr_test",
+  "kind": "text_delta",
+  "timestamp_ms": 1710000004000,
+  "data": {
+    "method": "item/agentMessage/delta",
+    "delta": "hello"
+  }
+}

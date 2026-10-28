@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Where a photo taken for a web app's attachment is written: the app's cache, nothing shared. -->
+<paths>
+    <cache-path name="shots" path="shots/" />
+    <!-- Artifacts shared to other apps: copied to a transient cache directory. -->
+    <cache-path name="artifacts" path="artifacts/shared/" />
+</paths>

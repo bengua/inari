@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Open WebUI, the household's chat: a speech bubble. -->
+    <path android:fillColor="#F3EFE9" android:pathData="M32,30 L76,30 A7,7 0 0 1 83,37 L83,63 A7,7 0 0 1 76,70 L50,70 L37,81 L37,70 L32,70 A7,7 0 0 1 25,63 L25,37 A7,7 0 0 1 32,30 Z" />
+    <path android:fillColor="#E48A46" android:pathData="M42,50 m-4,0 a4,4 0 1 0 8,0 a4,4 0 1 0 -8,0 M54,50 m-4,0 a4,4 0 1 0 8,0 a4,4 0 1 0 -8,0 M66,50 m-4,0 a4,4 0 1 0 8,0 a4,4 0 1 0 -8,0" />
+</vector>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Grocy, the larder: a carrot. -->
+    <path android:fillColor="#5FB86B" android:pathData="M51,44 L42,26 L52,35 L54,22 L57,35 L66,26 L58,44 Z" />
+    <path android:fillColor="#E48A46" android:pathData="M42,44 L66,44 Q67,48 64,54 L56,82 Q54,87 52,82 L44,54 Q41,48 42,44 Z" />
+    <path android:strokeColor="#17161A" android:strokeWidth="2.5" android:strokeLineCap="round" android:pathData="M47,54 L53,54 M55,63 L61,63 M49,70 L54,70" />
+</vector>

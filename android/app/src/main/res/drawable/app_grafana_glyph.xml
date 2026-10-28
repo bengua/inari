@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Grafana, the measures: three rising bars over a baseline. -->
+    <path android:fillColor="#F2994A" android:pathData="M30,62 h11 v16 h-11 Z M48,48 h11 v30 h-11 Z M66,32 h11 v46 h-11 Z" />
+    <path android:strokeColor="#A49D97" android:strokeWidth="3" android:strokeLineCap="round" android:pathData="M26,82 L82,82" />
+</vector>
