@@ -20,8 +20,10 @@ Newest first. An entry says what changed for someone using the thing.
   lacks room wraps, it never hides a control.
 - **The mascot at the top of the conversation.** With a thread open and the sidebar folded, the
   mascot floats at the top centre of the conversation, just under the thread's bar, as large as in
-  the sidebar (it was 96 px against the top edge); the thread starts below it, and new messages
-  arrive at the bottom, clear of it. With the sidebar shown, it stays in the sidebar, full size.
+  the sidebar (it was 96 px against the top edge), in a band of its own: the thread scrolls below
+  that band, so no text ever passes behind the mascot, and new messages arrive at the bottom, clear
+  of it. With the sidebar shown, it stays in the sidebar, full size. (The see-through eyes that let
+  text show through it are fixed in FoxBot's frames, in `inari-apk`.)
 
 - **`inari-core-rs demo`: the demo in Rust.** Three nodes in one process, the interface on
   `:8787`, live turns and an approval question; `--mascot DIR` shows FoxBot. The agent it runs is

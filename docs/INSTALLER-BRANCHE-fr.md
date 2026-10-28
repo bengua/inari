@@ -69,7 +69,7 @@ git checkout claude/laughing-maxwell-sc9qz4
 git pull --ff-only origin claude/laughing-maxwell-sc9qz4
 git log --oneline -1
 ```
-Attendu : la dernière ligne commence par `7a84ebe` ou un identifiant plus récent de cette branche, avec un message
+Attendu : la dernière ligne est le dernier commit de la branche (le même identifiant que `git ls-remote origin claude/laughing-maxwell-sc9qz4`), avec un message
 en anglais. Si `checkout` ou `pull` échoue, arrête-toi.
 
 ## Étape 3 — Vérifier et construire
@@ -208,7 +208,9 @@ Ouvrir la webapp, puis :
 2. Volet de gauche : deux petites flèches ‹ › autour de FoxBot. Les cliquer change l'avatar, et le nom s'affiche
    un instant.
 3. Ouvrir un fil, puis replier le volet de gauche : FoxBot flotte en haut au centre de la discussion, à la taille
-   qu'il a dans le volet ; les nouveaux messages arrivent en bas, sans être masqués.
+   qu'il a dans le volet, dans une bande à lui ; le fil défile en dessous (aucun texte ne passe derrière lui) et
+   les nouveaux messages arrivent en bas, sans être masqués. Ses yeux sont pleins : on ne voit plus le texte à
+   travers (il faut avoir refait les étapes 4 et 5, qui recopient les images réparées).
 4. Les onglets Artefacts / Terminal / Visionneuse / Journal du volet de droite se cliquent.
 5. Glisser un fil : les tuiles « Le résumer », « L'endormir » et « Supprimer… » (rouge) apparaissent. « Supprimer »
    demande une confirmation.
