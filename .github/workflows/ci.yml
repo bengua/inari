@@ -1,0 +1,16 @@
+# The same checks one runs by hand before pushing: ./verify.sh (formatting, lints, tests, build).
+# The Forge this project is developed on has its own workflow in .forgejo/.
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: rustup component add clippy rustfmt
+      - run: ./verify.sh
