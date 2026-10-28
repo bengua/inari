@@ -20,6 +20,7 @@ pub mod node;
 pub mod passes;
 pub mod rpc;
 pub mod session;
+pub mod signature;
 pub mod teleport;
 pub mod updates;
 pub mod usage;

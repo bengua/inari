@@ -1,0 +1,10 @@
+{
+  "image": "base:1",
+  "workdir": "/work",
+  "mounts": [],
+  "env": {
+    "LANG": "C"
+  },
+  "secret_refs": [],
+  "resources": {}
+}

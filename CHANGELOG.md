@@ -13,6 +13,12 @@ Newest first. An entry says what changed for someone using the thing.
   `:8787`, live turns and an approval question; `--mascot DIR` shows FoxBot. The agent it runs is
   this binary too (`inari-core-rs demo-agent`): `write <file>: <text>`, `run: <command>` (a
   read-only command runs at once, anything else asks you first, `sudo` never runs).
+- **Capsule signatures in Rust.** `inari-core-rs keygen <name>`, `sign <capsule> --key <name.key>`
+  and `verify <capsule> --trusted <name.pub>`: the reference's format, byte for byte (the same key
+  writes the same signature).
+- **Capsules the Python reference wrote are frozen as test fixtures** (`tests/fixtures/python/`):
+  the Rust core is checked to read them hash for hash, report damage in the same words and verify
+  their signatures, so no existing capsule ever needs converting.
 - **`cargo test` needs no Python.** The scripted agent of the tests is `inari-core-rs fake-agent`,
   a Rust port of `tests/fake_acp.py` with the same words and the same log.
 

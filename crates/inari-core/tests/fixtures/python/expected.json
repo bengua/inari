@@ -1,0 +1,17 @@
+{
+  "thread": "thread-1",
+  "capsule": "2d6a3e1d-b7c4-4eb6-b6ac-8ef26b8f4c83",
+  "events": 5,
+  "hashes": [
+    "45d1751ec2a06c2a3fafc7f74fd98ce8ace9b63de49cc9d7f6a9be3e8c9861e1",
+    "3b3591ba1fe3fd9ef59676cbc4b5304e4f1111291a6352d53e1160ff1d9cac6d",
+    "fa7ff32adcdf3331c71232f98de480c75c1f5e679d96bbe303c4827baa30745c",
+    "24e94fce340e8325a2ca0d90a0b0388092ffd97e78e9a0d731181d9f6f71ec46",
+    "cdc81973db62dcbe9ad145b74c1155148b57ccbaa5b3b1530c8a38513b7c7832"
+  ],
+  "workspace": [
+    "a.txt",
+    "src/b.py"
+  ],
+  "key_id": "371d6c048c5680c8"
+}

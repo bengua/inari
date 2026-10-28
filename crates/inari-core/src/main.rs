@@ -8,7 +8,8 @@ use std::process::ExitCode;
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage: inari-core-rs <command>\n  verify <capsule-dir|archive>\n  inspect <capsule-dir|archive>\n  \
+        "usage: inari-core-rs <command>\n  verify <capsule-dir|archive> [--trusted <key.pub>]...\n  \
+         keygen <name>   (writes <name>.key, kept private, and <name>.pub)\n  sign <capsule-dir> --key <name.key>\n  inspect <capsule-dir|archive>\n  \
          create <dir> <thread-id> [holder]\n  append <dir> <author> <kind> <text>\n  \
          attach <dir> <path-in-workspace> <file>\n  pack <dir> <archive>\n  unpack <archive> <dir>\n  \
          serve-endpoint <root> <node> <key-file> <port>\n  adopt <root> <node> <capsule-dir>\n  \
@@ -168,9 +169,23 @@ fn run(args: &[String]) -> capsule::Result<ExitCode> {
         return turn(&a[1..]);
     }
     match a.as_slice() {
-        ["verify", path] => {
+        ["verify", path, rest @ ..] => {
+            // --trusted <public key file>, as often as needed: the capsule must be signed by one
+            let mut trusted = std::collections::BTreeSet::new();
+            let mut it = rest.iter();
+            while let Some(flag) = it.next() {
+                match (*flag, it.next()) {
+                    ("--trusted", Some(file)) => {
+                        trusted.insert(std::fs::read_to_string(file)?.trim().to_string());
+                    }
+                    _ => return Ok(usage()),
+                }
+            }
             let (root, tmp) = open(Path::new(path))?;
-            let problems = io::verify(&root);
+            let mut problems = io::verify(&root);
+            if !trusted.is_empty() {
+                problems.extend(inari_core::signature::verify_signature(&root, &trusted));
+            }
             if let Some(t) = tmp {
                 let _ = std::fs::remove_dir_all(t);
             }
@@ -382,6 +397,32 @@ fn run(args: &[String]) -> capsule::Result<ExitCode> {
             })
         }
         ["demo", rest @ ..] => demo(rest),
+        ["keygen", name] => {
+            let (private, public) = inari_core::signature::generate_keypair();
+            let key_file = PathBuf::from(format!("{name}.key"));
+            std::fs::write(&key_file, &private)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&key_file, std::fs::Permissions::from_mode(0o600))?;
+            }
+            std::fs::write(format!("{name}.pub"), &public)?;
+            println!("key id {}", inari_core::signature::key_id(&public));
+            Ok(ExitCode::SUCCESS)
+        }
+        ["sign", root, "--key", key] => {
+            let private = std::fs::read_to_string(key)?;
+            match inari_core::signature::sign_capsule(Path::new(root), private.trim()) {
+                Ok(id) => {
+                    println!("{id}");
+                    Ok(ExitCode::SUCCESS)
+                }
+                Err(e) => {
+                    eprintln!("cannot sign: {e}");
+                    Ok(ExitCode::from(1))
+                }
+            }
+        }
         ["pack", dir, archive] => {
             io::pack(Path::new(dir), Path::new(archive)).map(|_| ExitCode::SUCCESS)
         }
