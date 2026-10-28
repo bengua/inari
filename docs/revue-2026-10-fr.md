@@ -89,7 +89,7 @@ uvx --from 'fonttools[woff]' pyftsubset /tmp/b.ttf --unicodes="$U" --flavor=woff
 | `web/i18n.js` | `LANGS` (langues proposées), `DICT.fr` (environ 300 entrées), `LANG` (choix : réglage mémorisé `inari-lang`, sinon langue du navigateur), `t()`, `setLang()`, `translatePage()` |
 | `web/app.js` | toutes les chaînes visibles passent par `t()` (147 endroits modifiés) |
 | `web/index.html` | reste écrit en anglais ; `translatePage()` traduit au démarrage ses textes, `title`, `aria-label` et `placeholder` avec la même table |
-| `tests/test_i18n.py` | échoue si un `t("…")` de `app.js` ou un texte de `index.html` n'a pas de français, ou si une traduction perd une variable `{x}` |
+| `crates/inari-core/tests/i18n.rs` (Rust) | échoue si un `t("…")` de `app.js` ou un texte de `index.html` n'a pas de français, ou si une traduction perd une variable `{x}` |
 
 - **Changer de langue** : Réglages (l'engrenage) → Langue. La page se recharge, et le brouillon est conservé.
 - **Ajouter une langue** : ajouter une entrée dans `LANGS`, puis une table `DICT.xx` sur le modèle de `DICT.fr`. Le test vérifie seulement le français : pour une nouvelle langue, il faudra l'étendre.
@@ -179,6 +179,23 @@ Par ordre d'importance pour une version commerciale :
 5. **Tests d'interface** : les scénarios Playwright que j'ai utilisés (dans mon espace temporaire, perdus avec la session) gagneraient à entrer dans le dépôt, dans un `tests/ui/` lancé par `verify.sh` sur `inari-core demo`.
 6. **Juridique et marque** (§6) : licence MIT (n'importe qui peut revendre), titulaire différent selon les dépôts (Bengua / FreedzHost SASU), logos et personas de tiers, RGPD.
 7. **FoxBot** : les deux observations de la fin du lot 4 (animations de persona manquantes, lien symbolique `sprites_persona` refusé par le cœur Rust).
+
+## Règle : du Rust partout où c'est possible
+
+Consigne de Ben (28/10). D'après `docs/rust-port.md`, les cœurs tournent déjà sur le binaire Rust (étape 5). Le paquet Python n'est plus que la **référence testée** des formats et protocoles.
+
+**Appliqué dans cette revue** : la nouvelle logique serveur (sessions, frein aux essais, assets, timeline incrémentale) est écrite d'abord en Rust (`crates/inari-core/src/session.rs`, `gateway.rs`), avec ses tests Rust. Le test des traductions est en Rust (`crates/inari-core/tests/i18n.rs`) ; sa première version Python a été supprimée. La passerelle Python a seulement été tenue au même niveau, parce que `inari-core demo` (Python) sert la même page.
+
+**Ce qui reste en Python** (environ 5 500 lignes de code et 2 700 lignes de tests, contre 11 900 lignes de Rust) :
+
+| Quoi | Pourquoi c'est encore en Python | Proposition |
+|---|---|---|
+| `inari-core demo` (mesh simulé pour essayer l'interface) | n'existe pas en Rust | **la porter** (`inari-core-rs demo`) : on essaie alors l'interface sur le vrai serveur, et la passerelle Python n'a plus besoin de suivre la page |
+| `tests/fake_acp.py` (faux agent ACP) | 7 tests Rust lancent `python3` pour l'utiliser | en faire un petit binaire Rust de test : `cargo test` n'aurait plus besoin de Python |
+| `src/inari_core` (référence : capsule, téléportation, bus, passerelle, agent) | spécification d'origine | garder seulement le format capsule et le protocole de téléportation, avec `tests/test_rust_interop.py` ; retirer passerelle, agent et démo une fois la démo Rust en place |
+| Outils ponctuels (sous-ensemble des polices avec fonttools) | outil de développement, rien n'est livré | rien à changer |
+
+C'est à décider ensemble : la référence Python est une règle du projet (`docs/rust-port.md`).
 
 ## Si quelque chose casse après merge
 

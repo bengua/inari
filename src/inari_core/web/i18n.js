@@ -2,7 +2,7 @@
 /* The page's words. A key is the English text itself; a table gives another language. t(key, vars)
    fills {names} from vars and falls back to the English key, so a missing translation shows English,
    never a hole. Words built from server values (states, roles) are looked up the same way.
-   tests/test_i18n.py checks that every t("…") in app.js has its French. */
+   crates/inari-core/tests/i18n.rs checks that every t("…") in app.js has its French. */
 const LANGS = { en: "English", fr: "Français" };
 const DICT = {
 fr: /* FR-START */ {
