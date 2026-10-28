@@ -143,10 +143,12 @@ for line in sys.stdin:
                 },
             )
         if "perm" in last:
+            # "permstr": the request id is a string, as OpenFox's adapter sends it
+            req_id = "ofx-1" if "permstr" in last else 900
             send(
                 {
                     "jsonrpc": "2.0",
-                    "id": 900,
+                    "id": req_id,
                     "method": "session/request_permission",
                     "params": {
                         "sessionId": sid,
