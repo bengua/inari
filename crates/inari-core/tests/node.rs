@@ -100,7 +100,8 @@ async fn a_person_drives_two_rust_cores_through_the_gateway() {
     // the page carries its version, the snapshot names the one served: an older open page reloads
     let version = g.snapshot()["ui"]["page"].as_str().unwrap().to_string();
     assert_eq!(version.len(), 12);
-    assert!(String::from_utf8_lossy(&page).contains(&format!("const PAGE = \"{version}\"")));
+    assert!(String::from_utf8_lossy(&page)
+        .contains(&format!("<meta name=\"inari-page\" content=\"{version}\">")));
     let (status, _) = http(
         "GET",
         &format!("http://127.0.0.1:{port}/api/search?q=x"),

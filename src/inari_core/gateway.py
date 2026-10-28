@@ -29,6 +29,15 @@ from .mesh.telemetry import Telemetry, mascot_state
 from .usage import poll
 
 MAX_BODY = 64 * 1024
+# The files of the page under /assets/, and their types (the same list as the Rust gateway's).
+ASSETS = {
+    "app.css": "text/css; charset=utf-8",
+    "app.js": "text/javascript; charset=utf-8",
+    "fonts/ibm_plex_sans.woff2": "font/woff2",
+    "fonts/ibm_plex_mono_regular.woff2": "font/woff2",
+    "fonts/ibm_plex_mono_medium.woff2": "font/woff2",
+    "fonts/bricolage_grotesque.woff2": "font/woff2",
+}
 TimelineReader = Callable[[str], list[dict[str, Any]]]
 
 
@@ -295,6 +304,8 @@ class Gateway:
         if method == "GET" and path == "/":
             page = importlib.resources.files("inari_core").joinpath("web/index.html").read_bytes()
             return await self._send(writer, 200, "text/html; charset=utf-8", page)
+        if method == "GET" and path.startswith("/assets/"):
+            return await self._asset(writer, path[len("/assets/") :])
         if method == "GET" and path.startswith("/fox/") and self.mascot_dir is not None:
             return await self._static(writer, self.mascot_dir, path[len("/fox/") :] or "index.html")
         if not self._authorized(headers, query):
@@ -387,6 +398,22 @@ class Gateway:
             except (KeyError, ValueError):
                 return await self._json(writer, 400, {"error": "bad request"})
         await self._json(writer, 404, {"error": "not found"})
+
+    async def _asset(self, writer, rel: str) -> None:
+        """A file of the page (style, script, fonts): public like the page, never outside web/."""
+        if rel not in ASSETS:
+            return await self._json(writer, 404, {"error": "not found"})
+        body = importlib.resources.files("inari_core").joinpath("web", rel).read_bytes()
+        writer.write(
+            (
+                f"HTTP/1.1 200 OK\r\nContent-Type: {ASSETS[rel]}\r\n"
+                f"Content-Length: {len(body)}\r\n"
+                "Cache-Control: public, max-age=86400\r\nX-Content-Type-Options: nosniff\r\n"
+                "Connection: close\r\n\r\n"
+            ).encode()
+            + body
+        )
+        await writer.drain()
 
     async def _static(self, writer, root: Path, rel: str) -> None:
         """Serve a file under `root`, never outside it. Streamed: sprite sets are large."""

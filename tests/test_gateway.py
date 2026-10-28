@@ -49,6 +49,24 @@ async def test_the_page_is_public_but_data_needs_the_token(gw):
     assert (await http(gateway.port, "POST", "/api/teleport", {}, token="nope"))[0] == 401
 
 
+async def test_the_page_assets_are_public_and_all_listed(gw):
+    """Everything the page and its style load under /assets/ is served; nothing else is."""
+    import re
+
+    from inari_core.gateway import ASSETS
+
+    _, gateway = gw
+    _, page = await http(gateway.port, "GET", "/", token="")
+    _, css = await http(gateway.port, "GET", "/assets/app.css", token="")
+    wanted = set(re.findall(rb"/assets/([\w./-]+?)(?:\?|\"|\))", page + css))
+    assert {w.decode() for w in wanted} <= set(ASSETS) and b"app.js" in wanted
+    for name in ASSETS:
+        status, body = await http(gateway.port, "GET", "/assets/" + name, token="")
+        assert status == 200 and body, name
+    assert (await http(gateway.port, "GET", "/assets/../gateway.py", token=""))[0] == 404
+    assert (await http(gateway.port, "GET", "/assets/nope.js", token=""))[0] == 404
+
+
 async def test_state_streams_as_events(gw):
     bus, gateway = gw
     await bus.publish("mesh.nodes", {"nodes": [{"node_id": "n1", "role": "heavy"}]})

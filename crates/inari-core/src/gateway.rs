@@ -22,12 +22,53 @@ use tokio::sync::broadcast;
 
 const INDEX: &str = include_str!("../../../src/inari_core/web/index.html");
 
-/// The page's version: a hash of what this binary serves. A page that sees another
-/// version in the snapshot (the core was updated) reloads itself — a phone's app keeps
-/// its page open for days.
+/// What the page loads besides itself, under `/assets/`: its style, its script, its fonts.
+/// Public like the page (they hold no data), and cached: their URLs carry the page's version.
+const ASSETS: &[(&str, &str, &[u8])] = &[
+    (
+        "app.css",
+        "text/css; charset=utf-8",
+        include_bytes!("../../../src/inari_core/web/app.css"),
+    ),
+    (
+        "app.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../../src/inari_core/web/app.js"),
+    ),
+    (
+        "fonts/ibm_plex_sans.woff2",
+        "font/woff2",
+        include_bytes!("../../../src/inari_core/web/fonts/ibm_plex_sans.woff2"),
+    ),
+    (
+        "fonts/ibm_plex_mono_regular.woff2",
+        "font/woff2",
+        include_bytes!("../../../src/inari_core/web/fonts/ibm_plex_mono_regular.woff2"),
+    ),
+    (
+        "fonts/ibm_plex_mono_medium.woff2",
+        "font/woff2",
+        include_bytes!("../../../src/inari_core/web/fonts/ibm_plex_mono_medium.woff2"),
+    ),
+    (
+        "fonts/bricolage_grotesque.woff2",
+        "font/woff2",
+        include_bytes!("../../../src/inari_core/web/fonts/bricolage_grotesque.woff2"),
+    ),
+];
+
+/// The page's version: a hash of what this binary serves (the page and its assets). A page
+/// that sees another version in the snapshot (the core was updated) reloads itself — a
+/// phone's app keeps its page open for days.
 fn page_version() -> &'static str {
     static V: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    V.get_or_init(|| crate::canon::sha256_hex(INDEX.as_bytes())[..12].to_string())
+    V.get_or_init(|| {
+        let mut all = INDEX.as_bytes().to_vec();
+        for (_, _, body) in ASSETS {
+            all.extend_from_slice(body);
+        }
+        crate::canon::sha256_hex(&all)[..12].to_string()
+    })
 }
 const MAX_BODY: usize = 64 * 1024;
 /// One part of an upload, base64 included (the page sends 512 KiB of file per part).
@@ -257,6 +298,19 @@ async fn send(w: &mut TcpStream, status: u16, ctype: &str, body: &[u8]) -> std::
          X-Content-Type-Options: nosniff\r\nContent-Security-Policy: default-src 'self' 'unsafe-inline'; \
          img-src 'self' data:; connect-src 'self'\r\nConnection: close\r\n\r\n",
         reason(status),
+        body.len()
+    );
+    w.write_all(head.as_bytes()).await?;
+    w.write_all(body).await?;
+    w.flush().await
+}
+
+/// A file of the page: the same headers as [`send`], cached for a day (its URL carries the
+/// page's version, so an update is never hidden by the cache).
+async fn send_asset(w: &mut TcpStream, ctype: &str, body: &[u8]) -> std::io::Result<()> {
+    let head = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nCache-Control: public, max-age=86400\r\n\
+         X-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n",
         body.len()
     );
     w.write_all(head.as_bytes()).await?;
@@ -827,8 +881,15 @@ impl Gateway {
     async fn route(&self, r: Request, w: &mut TcpStream) -> std::io::Result<()> {
         let get = r.method == "GET";
         if get && r.path == "/" {
-            let page = INDEX.replacen("__INARI_PAGE__", page_version(), 1);
+            let page = INDEX.replace("__INARI_PAGE__", page_version());
             return send(w, 200, "text/html; charset=utf-8", page.as_bytes()).await;
+        }
+        if get && r.path.starts_with("/assets/") {
+            let rel = r.path.trim_start_matches("/assets/");
+            return match ASSETS.iter().find(|(name, _, _)| *name == rel) {
+                Some((_, ctype, body)) => send_asset(w, ctype, body).await,
+                None => send_json(w, 404, &json!({"error": "not found"})).await,
+            };
         }
         if get && r.path.starts_with("/fox/") {
             if let Some(dir) = &self.mascot_dir {

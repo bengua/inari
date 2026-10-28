@@ -27,7 +27,7 @@ inari-core = "inari_core.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-inari_core = ["web/*.html"]
+inari_core = ["web/*.html", "web/*.css", "web/*.js", "web/fonts/*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

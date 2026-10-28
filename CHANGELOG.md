@@ -17,6 +17,14 @@ Newest first. An entry says what changed for someone using the thing.
   on screen is, and that it is reconnecting; the stream reopens by itself. A refused token or pass
   brings the login back with the reason, and an error from the core is shown instead of dropped.
 
+- **Visible ways to do what gestures do.** Each thread shows an arrow to move it to another core,
+  each core a **+** to start a thread on it; a one-time tip explains dragging; **?** lists the
+  keyboard shortcuts, **/** searches, **Esc** closes a menu or a sheet.
+
+- **The page's own fonts.** IBM Plex Sans and Mono and Bricolage Grotesque are served by the core
+  (subset to Latin, woff2, about 120 KB), so every browser shows the same type. The page is now
+  `index.html`, `app.css`, `app.js` and `fonts/`, served under `/assets/` by both gateways.
+
 - **A *New messages* button** appears when the agent writes while you have scrolled up; the thread
   no longer pulls you down.
 

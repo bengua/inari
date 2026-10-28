@@ -113,3 +113,43 @@ async fn a_worker_serves_its_own_page_to_this_machine_only() {
     let with_token = format!("GET /api/search?q=&token=tok HTTP/1.1\r\nHost: evil.example:{port}");
     assert_eq!(raw(port, &with_token, "").await.0, 200);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_page_and_its_assets_are_served_with_their_version() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path();
+    std::fs::write(d.join("mesh.key"), "m").unwrap();
+    std::fs::write(d.join("token"), "tok").unwrap();
+    let hub = Node::start(config(d, "hub", "", true)).await.unwrap();
+    let port = hub.gateway_port;
+    let host = format!("Host: 127.0.0.1:{port}");
+
+    let (status, page) = raw(port, &format!("GET / HTTP/1.1\r\n{host}"), "").await;
+    assert_eq!(status, 200);
+    assert!(
+        !page.contains("__INARI_PAGE__"),
+        "every version mark is filled in"
+    );
+    let (status, css) = raw(port, &format!("GET /assets/app.css HTTP/1.1\r\n{host}"), "").await;
+    assert_eq!(status, 200);
+    // everything the page and its style ask for under /assets/ is there
+    for text in [&page, &css] {
+        for part in text.split("/assets/").skip(1) {
+            let name: String = part
+                .chars()
+                .take_while(|c| !matches!(c, '?' | '"' | ')'))
+                .collect();
+            let (status, body) =
+                raw(port, &format!("GET /assets/{name} HTTP/1.1\r\n{host}"), "").await;
+            assert_eq!(status, 200, "{name}");
+            assert!(!body.is_empty(), "{name}");
+        }
+    }
+    let (status, _) = raw(
+        port,
+        &format!("GET /assets/../Cargo.toml HTTP/1.1\r\n{host}"),
+        "",
+    )
+    .await;
+    assert_eq!(status, 404);
+}
