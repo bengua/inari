@@ -9,6 +9,10 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Added
 
+- **A context ring on every thread.** Agents report how full their context window is (Claude Code,
+  Gemini CLI, OpenFox): the page shows a ring and a percentage next to the model, with the numbers,
+  the session's cost when the agent gives one, and a *Compact* button when the agent has `/compact`.
+
 - **Stop, rename and pin.** A **Stop** button replaces Send while an agent works (it asks the
   agent to cancel and the thread says *Stopped*); double-click a thread's title, or pick
   *Rename…*, to rename it in place; *Pin to the top* keeps a thread first in its core's list,

@@ -768,6 +768,11 @@ impl AcpHarness {
                 text.push_str(&chunk);
                 t.phase("inference");
             }
+            Some("usage_update") => {
+                let n = |k: &str| u.get(k).and_then(Value::as_u64).unwrap_or(0);
+                let cost = u.pointer("/cost/amount").and_then(Value::as_f64);
+                t.runner.set_usage(&t.agent, n("used"), n("size"), cost);
+            }
             Some("tool_call") => {
                 self.flush(t, text, summary);
                 let call_id = u
@@ -938,6 +943,8 @@ pub struct Runner {
     pub phases: Mutex<HashMap<String, String>>,
     /// Threads whose running turn a person asked to stop.
     pub cancels: Mutex<std::collections::HashSet<String>>,
+    /// The last context use each agent reported.
+    pub usage: Mutex<HashMap<String, Value>>,
     locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
@@ -957,6 +964,7 @@ impl Runner {
             approver,
             phases: Mutex::default(),
             cancels: Mutex::default(),
+            usage: Mutex::default(),
             locks: Mutex::default(),
         })
     }
@@ -990,12 +998,41 @@ impl Runner {
             .lock()
             .expect("not poisoned")
             .insert(agent.into(), phase.into());
+        self.announce_state(agent, phase);
+    }
+
+    /// Tell the mesh the thread's phase, with how full its context is when the agent says.
+    fn announce_state(&self, agent: &str, phase: &str) {
         if let Some(p) = &self.publish {
-            p(
-                &format!("agent.{agent}.state"),
-                json!({"agent": agent, "node": self.host.node_id, "phase": phase}),
-            );
+            let mut m = json!({"agent": agent, "node": self.host.node_id, "phase": phase});
+            if let Some(u) = self.usage.lock().expect("not poisoned").get(agent) {
+                m["context"] = u.clone();
+            }
+            p(&format!("agent.{agent}.state"), m);
         }
+    }
+
+    /// The agent reported its context use (`used` of `size` tokens, and a cost when it has one).
+    pub fn set_usage(&self, agent: &str, used: u64, size: u64, cost: Option<f64>) {
+        if size == 0 {
+            return;
+        }
+        let mut u = json!({"used": used, "size": size});
+        if let Some(c) = cost {
+            u["cost"] = json!(c);
+        }
+        self.usage
+            .lock()
+            .expect("not poisoned")
+            .insert(agent.into(), u);
+        let phase = self
+            .phases
+            .lock()
+            .expect("not poisoned")
+            .get(agent)
+            .cloned()
+            .unwrap_or_else(|| "idle".into());
+        self.announce_state(agent, &phase);
     }
 
     async fn approve(&self, agent: &str, command: &str) -> bool {

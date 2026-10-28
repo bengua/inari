@@ -194,6 +194,7 @@ for line in sys.stdin:
                     "content": {"type": "text", "text": tail},
                 },
             )
+        update(sid, {"sessionUpdate": "usage_update", "used": 1200, "size": 8000, "cost": {"amount": 0.02, "currency": "USD"}})
         send({"jsonrpc": "2.0", "id": ident, "result": {"stopReason": "end_turn"}})
     elif m == "session/set_model":
         with LOG.open("a") as fh:

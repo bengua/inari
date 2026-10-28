@@ -466,3 +466,22 @@ async fn stop_ends_a_running_turn_and_says_so() {
     let out = l.runner.run(&l.agent, "hello", vec![]).await;
     assert_eq!(out.stopped, "done", "{out:?}");
 }
+
+#[tokio::test]
+async fn the_context_use_an_agent_reports_is_kept_and_told() {
+    let l = lab(false, None);
+    l.runner.run(&l.agent, "hi", vec![]).await;
+    let u = l
+        .runner
+        .usage
+        .lock()
+        .unwrap()
+        .get(&l.agent)
+        .cloned()
+        .unwrap();
+    assert_eq!(
+        (u["used"].as_u64(), u["size"].as_u64()),
+        (Some(1200), Some(8000))
+    );
+    assert_eq!(u["cost"], 0.02);
+}
