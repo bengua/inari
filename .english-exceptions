@@ -3,3 +3,4 @@ android/app/src/main/res/values-fr/strings.xml # the French translation of the a
 android/app/src/main/java/app/inari/client/Theme.kt # font family names (ibm_plex_sans) read as French prose
 docs/revue-2026-10-fr.md # the handoff of the October 2026 review, written in French for the owner on purpose
 crates/inari-core/web/i18n.js # the French table of the page: a locale, not prose
+docs/INSTALLER-BRANCHE-fr.md # step-by-step install of the test branch for Ben's local agent, in French for them
