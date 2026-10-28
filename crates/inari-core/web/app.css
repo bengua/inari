@@ -142,6 +142,9 @@ pre.code span.l::before { counter-increment:l; content:counter(l); position:abso
 .cb .lang { position:absolute; top:6px; left:10px; font:11px var(--mono); color:var(--faint); text-transform:lowercase; }
 .cb .cpy { position:absolute; top:4px; right:4px; min-height:26px; padding:2px 9px; font-size:12px; border-radius:8px; border:1px solid var(--hair); background:var(--panel-solid); color:var(--dim); cursor:pointer; opacity:0; transition:opacity .15s; }
 .cb:hover .cpy, .cb .cpy:focus-visible, .cb .cpy.done { opacity:1; } .cb .cpy.done { color:var(--ok); border-color:var(--ok); }
+/* While a thread is carried, FoxBot's frame lets the pointer through: a mouse over it would otherwise
+   talk to the frame's page, and the drop on the mascot would never reach this one. */
+body.carrying #fox iframe { pointer-events:none; }
 /* ---- visible ways to do what gestures do ---- */
 .row .rmove { display:none; place-items:center; width:26px; height:26px; flex:none; border:1px solid var(--hair); border-radius:8px; background:var(--panel-solid); color:var(--copper-text); cursor:pointer; padding:0; } .row .rmove .i { width:15px; height:15px; }
 .row:hover .rmove, .row:focus-within .rmove, .row.selected .rmove { display:inline-grid; }

@@ -170,6 +170,9 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Fixed
 
+- **A thread can be dropped on FoxBot with a mouse.** FoxBot's frame took the mouse as soon as
+  the pointer was over it, so the drop never reached the page; while a thread is carried the frame
+  now lets the pointer through, and takes its own clicks again after.
 - **A thread can be dropped on the mascot again on a phone.** When the list was long enough to
   scroll the page, the mascot scrolled out of view with its slot and could not be reached; while a
   thread is carried it now comes to the top of the screen, and goes back after. The tip about

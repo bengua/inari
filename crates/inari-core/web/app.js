@@ -553,9 +553,9 @@ function startDrag(e, el, id, from) { if (e.button > 0) return;
   drag.hold = setTimeout(() => { if (!drag || drag.active) return; drag.held = true; if (drag.touch && !drag.guest) { lift(); if (navigator.vibrate) navigator.vibrate(12); } }, drag.touch ? 380 : 650);
   window.onpointermove = onMove; window.onpointerup = onUp; window.onpointercancel = cancelDrag; }
 function lift() { drag.active = true; { const r = drag.el.getBoundingClientRect(); drag.origin = [r.left + r.width / 2, r.top + r.height / 2]; } drag.ghost = drag.el.cloneNode(true); drag.ghost.classList.add("ghost", "glass"); drag.ghost.style.left = drag.x + "px"; drag.ghost.style.top = drag.y + "px"; document.body.append(drag.ghost);
-  drag.el.style.opacity = ".35"; document.querySelectorAll(".core").forEach((n) => n.classList.add(n.dataset.node === drag.from ? "invalid" : "valid")); placeFox(); showDock(drag.id); }
+  drag.el.style.opacity = ".35"; document.querySelectorAll(".core").forEach((n) => n.classList.add(n.dataset.node === drag.from ? "invalid" : "valid")); document.body.classList.add("carrying"); placeFox(); showDock(drag.id); }
 function cancelDrag() { window.onpointermove = window.onpointerup = window.onpointercancel = null; if (!drag) return; clearTimeout(drag.hold);
-  if (drag.ghost) drag.ghost.remove(); drag.el.style.opacity = ""; $("dropdock").hidden = true; $("dragline").setAttribute("hidden", ""); hot(null); document.querySelectorAll(".core").forEach((n) => n.classList.remove("valid", "invalid")); drag = null; placeFox(); }
+  if (drag.ghost) drag.ghost.remove(); drag.el.style.opacity = ""; $("dropdock").hidden = true; $("dragline").setAttribute("hidden", ""); hot(null); document.querySelectorAll(".core").forEach((n) => n.classList.remove("valid", "invalid")); drag = null; document.body.classList.remove("carrying"); placeFox(); }
 // while a lifted thread is carried, the finger must not scroll the page
 document.addEventListener("touchmove", (e) => { if (drag && drag.active) e.preventDefault(); }, { passive: false });
 // a long press on a thread is ours: not the system's text selection or context menu on top of it
@@ -565,7 +565,7 @@ function onMove(e) { if (!drag) return; const far = Math.hypot(e.clientX - drag.
   drag.lx = e.clientX; drag.ly = e.clientY; drag.ghost.style.left = e.clientX + "px"; drag.ghost.style.top = e.clientY + "px"; const t = dropTarget(e.clientX, e.clientY, drag); hot(t); drawLine(e.clientX, e.clientY, t); }
 // after a long press or a carry, the browser's own tap at the finger's spot must not touch what just opened
 let swallowUntil = 0; addEventListener("click", (e) => { if (Date.now() < swallowUntil) { e.stopPropagation(); e.preventDefault(); } }, true);
-function onUp(e) { window.onpointermove = window.onpointerup = window.onpointercancel = null; if (!drag) return; clearTimeout(drag.hold); const d = drag; drag = null; setTimeout(placeFox); /* home again, once the drop below is read */
+function onUp(e) { window.onpointermove = window.onpointerup = window.onpointercancel = null; if (!drag) return; clearTimeout(drag.hold); const d = drag; drag = null; document.body.classList.remove("carrying"); setTimeout(placeFox); /* home again, once the drop below is read */
   if (d.held || d.active) swallowUntil = Date.now() + 500;
   // where the finger last was: a touch's end does not always carry a position
   const ux = d.lx ?? e.clientX, uy = d.ly ?? e.clientY, moved = Math.hypot(ux - d.x, uy - d.y) > 8;
