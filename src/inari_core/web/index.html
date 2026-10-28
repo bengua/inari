@@ -207,7 +207,7 @@ const FAMILIES = [["qwen","qwen|q3\\.|q2\\.|heretic|rvn|opus-27b","#6b4fbb","Q"]
 function family(model) { const m = String(model || "").toLowerCase(); for (const [id, re, c, g] of FAMILIES) if (new RegExp(re).test(m)) return { id, c, g }; return { id: "local", c: "#8a8494", g: "·" }; }
 // Each core may name its models (`model_labels`: [suffix, label] pairs), e.g. which GPU a slot loads on.
 function modelLabels() { return snap ? snap.nodes.flatMap((n) => (n.capabilities && n.capabilities.model_labels) || []) : []; }
-const shortModel = (m) => { let s = String(m || "").replace(/^turnstile\//, "").replace(/^[^/]+\//, ""); for (const [suf, label] of modelLabels()) if (suf && s.endsWith(suf)) { s = s.slice(0, -suf.length) + label; break; } return s || "default model"; };
+const shortModel = (m) => { let s = String(m || "").replace(/^[^/]+\//, ""); for (const [suf, label] of modelLabels()) if (suf && s.endsWith(suf)) { s = s.slice(0, -suf.length) + label; break; } return s || "default model"; };
 function badge(model, size) {
   const f = family(model), el = document.createElement("span"); el.className = "mb"; if (size) { el.style.width = el.style.height = size + "px"; }
   const hasLogo = snap && (snap.usage || []).some((u) => u.provider_id === f.id && u.logo);

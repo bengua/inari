@@ -1,0 +1,12 @@
+{
+  "sequence": 45,
+  "session_id": "cr_test",
+  "kind": "item_completed",
+  "timestamp_ms": 1710000003000,
+  "data": {
+    "method": "item/completed",
+    "tool_name": "write_file assets/logo.png base64:abc",
+    "item_id": "item_4",
+    "status": "completed"
+  }
+}

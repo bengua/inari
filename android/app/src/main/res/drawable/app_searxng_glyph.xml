@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- SearXNG, private search: a magnifying glass. -->
+    <path android:strokeColor="#5B9BF0" android:strokeWidth="7" android:fillColor="#00000000" android:pathData="M48,47 m-16,0 a16,16 0 1 0 32,0 a16,16 0 1 0 -32,0" />
+    <path android:strokeColor="#5B9BF0" android:strokeWidth="9" android:strokeLineCap="round" android:pathData="M60,59 L78,77" />
+</vector>

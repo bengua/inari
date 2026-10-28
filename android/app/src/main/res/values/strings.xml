@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Inari</string>
+    <string name="process_text_label">Inari</string>
+    <!-- What the phone hands to the orchestrator; %s is the shared link or text. -->
+    <plurals name="kitchen_stocked">
+        <item quantity="one">%d product put away in the larder</item>
+        <item quantity="other">%d products put away in the larder</item>
+    </plurals>
+    <string name="update_available">Inari %s is available</string>
+    <string name="update_install">Update</string>
+    <plurals name="widget_cart">
+        <item quantity="one">%1$d to buy: %2$s</item>
+        <item quantity="other">%1$d to buy: %2$s</item>
+    </plurals>
+    <!-- Shared state labels: one word, one colour, everywhere a state shows. -->
+    <string name="state_running">running</string>
+    <string name="state_starting">starting</string>
+    <string name="state_idle">idle</string>
+    <string name="state_paused">paused</string>
+    <string name="state_pending">waiting</string>
+    <string name="state_interrupting">interrupting</string>
+    <string name="state_closing">closing</string>
+    <string name="state_closed">closed</string>
+    <!-- The drawer (0.26): the den's threads and places. -->
+    <string name="settings_title">Settings</string>
+    <!-- The room's fleet: the lead and the agents the journal mentions. -->
+    <!-- Biometric consent. -->
+    <!-- Wake-on-LAN through the house API. -->
+    <!-- Artifacts (0.28): files produced by the room's core session. -->
+    <string name="tab_inari">Inari</string>
+    <string name="inari_unreachable">Inari is not reachable.</string>
+    <string name="inari_retry">Retry</string>
+    <string name="inari_login_title">Inari login</string>
+    <string name="inari_login_user">User</string>
+    <string name="inari_login_pw">Password</string>
+    <string name="inari_login_ok">Sign in</string>
+    <string name="inari_login_cancel">Cancel</string>
+    <string name="inari_unlock">Unlock</string>
+    <string name="inari_url">Inari address</string>
+    <string name="inari_save">Save</string>
+</resources>

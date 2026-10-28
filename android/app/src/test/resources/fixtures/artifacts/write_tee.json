@@ -1,0 +1,12 @@
+{
+  "sequence": 44,
+  "session_id": "cr_test",
+  "kind": "item_completed",
+  "timestamp_ms": 1710000002000,
+  "data": {
+    "method": "item/completed",
+    "tool_name": "generate | tee -a output.log",
+    "item_id": "item_3",
+    "status": "completed"
+  }
+}
