@@ -195,7 +195,8 @@ preuve que la nouvelle version tourne).
 curl -s -H "Authorization: Bearer $(cat "$TOKEN_FILE")" "http://$GW/api/personas" | head -c 300; echo
 ```
 Attendu : un JSON qui commence par `{"current":` ou `{"personas":` et qui cite des noms comme `"artiste"`,
-`"rebel"`, `"zen"`. Si la liste est vide (`"personas":[]`), l'étape 5 n'a pas pris : vérifie que `mascot_dir` vaut
+`"rebel"`, `"zen"`, mais **aucun** de `"cerebras"`, `"gemini"`, `"groq"`, `"mistral"` (personas en cours). Si l'un
+d'eux apparaît, `$FOXDIR/personas.json` manque ou est ancien : refais l'étape 5. Si la liste est vide (`"personas":[]`), l'étape 5 n'a pas pris : vérifie que `mascot_dir` vaut
 bien `$FOXDIR` et que le service a redémarré.
 
 ## Étape 8 — Les autres machines
@@ -221,7 +222,8 @@ sur ce qui tourne.
 Ouvrir la webapp, puis :
 1. La page se recharge seule. La première fois, elle peut redemander le jeton.
 2. Volet de gauche : deux petites flèches ‹ › autour de FoxBot. Les cliquer change l'avatar, et le nom s'affiche
-   un instant.
+   un instant. Seules les 9 personas publiées défilent (artiste, google, grok, merica, meta, militaire, openai,
+   rebel, zen), puis FoxBot ; jamais cerebras, gemini, groq, mistral… qui sont en cours.
 3. Ouvrir un fil, puis replier le volet de gauche : FoxBot flotte en haut au centre de la discussion, à la taille
    qu'il a dans le volet, dans une bande à lui ; le fil défile en dessous (aucun texte ne passe derrière lui) et
    les nouveaux messages arrivent en bas, sans être masqués. Ses yeux sont pleins : on ne voit plus le texte à
