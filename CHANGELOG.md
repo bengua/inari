@@ -9,6 +9,12 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Added
 
+- **Approvals appear in the thread, and an auto mode.** An agent's request to run something is a
+  card at the bottom of *its* thread (Deny, Allow once, Always allow here) instead of a line in
+  the cores' pane; requests from other threads stay in the pane. A chip on each thread switches
+  **auto mode** (the agent acts without asking; each action is journaled). It works for every
+  harness, applies only to the owner, and is ignored on a thread under a core pass.
+
 - **A context ring on every thread.** Agents report how full their context window is (Claude Code,
   Gemini CLI, OpenFox): the page shows a ring and a percentage next to the model, with the numbers,
   the session's cost when the agent gives one, and a *Compact* button when the agent has `/compact`.

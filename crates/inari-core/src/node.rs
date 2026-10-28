@@ -548,6 +548,7 @@ impl Node {
         m.insert("pass".into(), json!(label("pass")));
         m.insert("mode".into(), json!(label("mode")));
         m.insert("pinned".into(), json!(label("pinned") == "1"));
+        m.insert("auto".into(), json!(label("auto") == "1"));
         m.insert("archived".into(), json!(label("archived") == "1"));
         m
     }
@@ -884,7 +885,7 @@ impl Node {
             let agent = m.subject.split('.').nth(1).unwrap_or("").to_string();
             let key = s(&m.payload, "key");
             if let Some(r) = n.runner.as_ref().filter(|_| {
-                n.running(&agent) && ["pass", "archived", "pinned"].contains(&key.as_str())
+                n.running(&agent) && ["pass", "archived", "pinned", "auto"].contains(&key.as_str())
             }) {
                 let _ = r.label(&agent, &key, &s(&m.payload, "value"));
             }
