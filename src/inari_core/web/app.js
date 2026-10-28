@@ -19,10 +19,9 @@ const GLYPH = {idle:"·", listening:"◐", loading:"⇣", inference:"⟳", succe
 const STEPS = ["planned","frozen","offered","transferred","verified","ready","committing","committed"];
 const $ = (id) => document.getElementById(id), esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const store = { get: (k, d) => { try { return JSON.parse(localStorage.getItem("inari-" + k)) ?? d; } catch (e) { return d; } }, set: (k, v) => { try { localStorage.setItem("inari-" + k, JSON.stringify(v)); } catch (e) {} } };
-let token = new URLSearchParams(location.hash.slice(1)).get("token") || sessionStorage.getItem("inari-token") || "";
-// A core pass: kept on this device (the phone's app keeps it across launches); it never falls back to the owner's access.
-let pass = new URLSearchParams(location.hash.slice(1)).get("pass") || store.get("pass", "");
-const authQuery = () => (pass ? "pass=" + encodeURIComponent(pass) : token ? "token=" + encodeURIComponent(token) : "");
+/* Signing in exchanges the owner's token or a pass for a session cookie this script cannot read: from then on the
+   page keeps nothing secret and puts nothing secret in a URL. A link may carry one (#token=… or #pass=…), and older
+   pages kept them in the browser's storage: either is exchanged once, then forgotten. */
 const PAGE = (document.querySelector('meta[name="inari-page"]') || {}).content || ""; // the core writes the version of this page there
 let stream = null, lastSnapAt = 0, offlineTick = null, pendingDraft = null;
 let snap = null, selected = null, tab = "artifacts", events = [], files = null, viewing = null, forkAt = null, drag = null, termHist = [], termPos = 0, pendingModel = "", pendingCore = "", attachments = [];
@@ -38,7 +37,7 @@ const shortModel = (m) => { let s = String(m || "").replace(/^[^/]+\//, ""); for
 function badge(model, size) {
   const f = family(model), el = document.createElement("span"); el.className = "mb"; if (size) { el.style.width = el.style.height = size + "px"; }
   const hasLogo = snap && (snap.usage || []).some((u) => u.provider_id === f.id && u.logo);
-  if (hasLogo) el.innerHTML = `<img alt="" src="/api/logo/${f.id}?${authQuery()}">`; else { el.style.background = f.c; el.textContent = f.g; }
+  if (hasLogo) el.innerHTML = `<img alt="" src="/api/logo/${encodeURIComponent(f.id)}">`; else { el.style.background = f.c; el.textContent = f.g; }
   el.title = f.id; return el;
 }
 function usageFor(model) { const f = family(model).id; return snap && (snap.usage || []).find((u) => u.provider_id === f || (f === "openai" && u.provider_id === "codex")); }
@@ -53,29 +52,40 @@ function harnessCommands(node, h) { const n = snap.nodes.find((x) => x.node_id =
 function nodeModels(node) { const n = snap.nodes.find((x) => x.node_id === node), hide = (n && n.capabilities && n.capabilities.model_hidden) || []; return ((n && n.capabilities && n.capabilities.models) || []).filter((m) => !hide.some((suf) => suf && m.endsWith(suf))); }
 
 // Every call answers an object: the reply, or {error} after telling the person what went wrong.
-async function api(path, body) { const headers = { "Content-Type": "application/json" }; if (pass) headers["X-Inari-Pass"] = pass; else if (token) headers.Authorization = "Bearer " + token;
+async function api(path, body) { const headers = { "Content-Type": "application/json" };
   let r; try { r = await fetch(path, { method: body ? "POST" : "GET", headers, body: body ? JSON.stringify(body) : undefined }); } catch (e) { toast(t("The core cannot be reached. Check the connection and try again.")); return { error: "offline" }; }
   const data = await r.json().catch(() => ({}));
-  if (r.status === 401) showLogin(pass ? t("This pass is no longer valid.") : t("The core refused this access token. Enter it again."));
+  if (r.status === 401) showLogin(t("Your session has ended. Sign in again."));
   else if (!r.ok) toast(data.error ? t("The core says: {error}", { error: data.error }) : t("The core answered with an error ({status}).", { status: r.status }));
   return r.ok ? data : { ...data, error: data.error || String(r.status) }; }
-function showLogin(why) { if (stream) { stream.close(); stream = null; } sessionStorage.removeItem("inari-token"); if (pass) store.set("pass", ""); token = ""; pass = "";
+function showLogin(why) { if (stream) { stream.close(); stream = null; }
   $("loginWhy").textContent = why || ""; $("app").hidden = true; $("offline").hidden = true; $("login").hidden = false; $("tokenInput").value = ""; $("tokenInput").focus(); }
 function toast(t) { const e = $("toast"); e.textContent = t; e.style.display = "block"; clearTimeout(toast.h); toast.h = setTimeout(() => (e.style.display = "none"), 4200); }
 function log(text, tone) { feed.unshift({ t: new Date(), text, tone: tone || "" }); feed.length = Math.min(feed.length, 30); }
 function theme(v) { if (v === "auto") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", v); store.set("theme", v); }
 theme(store.get("theme", "auto"));
-// Behind a gate that adds the access itself (the phone's way in), the page needs no token:
-// it asks once without one and only shows the login when the server says no.
+// Behind a gate that adds the access itself (the phone's way in), or on the core's own machine, the page needs no
+// sign-in: it asks who it is first and only shows the login when the core does not know it.
 async function connect() {
-  if (pass) { const ok = await fetch("/api/whoami", { headers: { "X-Inari-Pass": pass } }).then((r) => r.ok).catch(() => false);
-    if (!ok) { store.set("pass", ""); pass = ""; $("loginWhy").textContent = t("This pass is no longer valid."); $("login").hidden = false; return; } store.set("pass", pass); }
-  else if (!token) { const ok = await fetch("/api/search?q=").then((r) => r.ok).catch(() => false); if (!ok) { $("login").hidden = false; return; } }
-  else sessionStorage.setItem("inari-token", token);
-  history.replaceState(null, "", location.pathname); $("login").hidden = true; $("app").hidden = false; layout();
-  openStream(); restoreDraft();
+  const hash = new URLSearchParams(location.hash.slice(1)), linked = hash.get("pass") || hash.get("token"), kept = legacySecret();
+  if (location.hash) history.replaceState(null, "", location.pathname);
+  if (linked) { const r = await signIn(linked); if (!r.ok) { showLogin(r.why); return; } } // a link that fails says why
+  else if (kept) await signIn(kept); // a stale secret from an older page is simply dropped
+  forgetLegacy();
+  const who = await fetch("/api/whoami").then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  if (!who) { $("login").hidden = false; $("tokenInput").focus(); return; }
+  $("login").hidden = true; $("app").hidden = false; layout(); openStream(); restoreDraft();
 }
-function openStream() { const q = authQuery(), es = (stream = new EventSource(q ? "/events?" + q : "/events"));
+function legacySecret() { try { return JSON.parse(localStorage.getItem("inari-pass")) || sessionStorage.getItem("inari-token") || ""; } catch (e) { return ""; } }
+function forgetLegacy() { try { localStorage.removeItem("inari-pass"); sessionStorage.removeItem("inari-token"); } catch (e) {} }
+async function signIn(secret) {
+  const r = await fetch("/api/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ secret }) }).catch(() => null);
+  if (!r) return { ok: false, why: t("The core cannot be reached. Check the connection and try again.") };
+  if (r.status === 429) { const d = await r.json().catch(() => ({})); return { ok: false, why: t("Too many attempts. Try again in {s} s.", { s: d.retry_after || 60 }) }; }
+  return r.ok ? { ok: true } : { ok: false, why: t("This token or pass is not known by this core.") };
+}
+const signOut = () => fetch("/api/logout", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).catch(() => null).then(() => location.reload());
+function openStream() { const es = (stream = new EventSource("/events"));
   es.onmessage = (e) => { snap = JSON.parse(e.data); lastSnapAt = Date.now(); online(true); render(); };
   es.onopen = () => online(true);
   es.onerror = () => { online(false); if (es.readyState === EventSource.CLOSED && stream === es) setTimeout(async () => { if (stream !== es) return; await api("/api/whoami"); if (stream === es) openStream(); /* a refused access has shown the login instead */ }, 3000); };
@@ -88,11 +98,10 @@ function online(ok) { const bar = $("offline"); $("app").style.opacity = ok ? "1
 /* A draft survives the page reloading itself for a new version. */
 function saveDraft() { try { sessionStorage.setItem("inari-draft", JSON.stringify({ agent: selected, text: $("msg").value })); } catch (e) {} }
 function restoreDraft() { try { pendingDraft = JSON.parse(sessionStorage.getItem("inari-draft")); sessionStorage.removeItem("inari-draft"); } catch (e) { pendingDraft = null; } if (pendingDraft && pendingDraft.text) $("msg").value = pendingDraft.text; }
-// One field for both: a pass if the core knows it as one, the owner's token otherwise.
+// One field for both: the core knows whether it is a pass or the owner's token.
 $("tokenInput").onkeydown = (e) => { if (e.key === "Enter") $("tokenGo").click(); };
-$("tokenGo").onclick = async () => { const v = $("tokenInput").value.trim(); if (!v) return;
-  const asPass = await fetch("/api/whoami", { headers: { "X-Inari-Pass": v } }).then((r) => r.ok).catch(() => false);
-  if (asPass) { pass = v; token = ""; } else { token = v; pass = ""; } connect(); };
+$("tokenGo").onclick = async () => { const v = $("tokenInput").value.trim(); if (!v) return; $("tokenGo").disabled = true;
+  const r = await signIn(v); $("tokenGo").disabled = false; if (!r.ok) { $("loginWhy").textContent = r.why; return; } $("tokenInput").value = ""; $("loginWhy").textContent = ""; connect(); };
 
 /* ---------- layout: sidebar, artifacts pane (fold / expand / resize) ---------- */
 function layout() {
@@ -196,7 +205,7 @@ function renderFeed() { $("feed").innerHTML = feed.length ? feed.slice(0, 6).map
 function renderPassBanner() { const p = snap.ui && snap.ui.pass, b = $("passBanner"); document.body.classList.toggle("guest", !!p); b.hidden = !p; if (!p) return;
   const owner = esc(snap.ui.owner || t("the owner of this core"));
   b.innerHTML = p.role === "supervision" ? t("<b>Supervised</b> — {owner} can read these threads and answers the agents' requests.", { owner }) : t("<b>Shared</b> — {owner} sees these threads and can take part.", { owner });
-  const out = document.createElement("button"); out.className = "btn small"; out.textContent = t("Leave this pass"); out.onclick = () => { store.set("pass", ""); location.hash = ""; location.reload(); }; b.append(out); }
+  const out = document.createElement("button"); out.className = "btn small"; out.textContent = t("Leave this pass"); out.onclick = signOut; b.append(out); }
 function renderApprovals() {
   const sig = selected + "|" + snap.approvals.map((r) => r.request_id).join(","); if (sig === renderApprovals.sig) return; renderApprovals.sig = sig;
   const box = $("approvals"), here = $("askbox"); box.textContent = ""; here.textContent = ""; const guest = snap.ui && snap.ui.pass;
@@ -257,7 +266,7 @@ $("usageBtn").onclick = () => { store.set("usageOpen", !store.get("usageOpen", f
 $("pill").onclick = () => openPop($("pill"), updatesPanel);
 $("gear").onclick = () => openPop($("gear"), (pop) => { pop.insertAdjacentHTML("beforeend", `<h3>${esc(t("Appearance"))}</h3>`); const seg = document.createElement("div"); seg.className = "seg"; for (const th of ["auto", "light", "dark"]) { const b = document.createElement("button"); b.className = "btn small" + (store.get("theme", "auto") === th ? " on" : ""); b.textContent = t(th); b.onclick = () => { theme(th); pop.classList.remove("open"); }; seg.append(b); } pop.append(seg);
   pop.insertAdjacentHTML("beforeend", `<h3 style="margin-top:12px">${esc(t("Language"))}</h3>`); const langs = document.createElement("div"); langs.className = "seg"; for (const [code, name] of Object.entries(LANGS)) { const b = document.createElement("button"); b.className = "btn small" + (LANG === code ? " on" : ""); b.textContent = name; b.lang = code; b.onclick = () => { if (code === LANG) return; setLang(code); saveDraft(); location.reload(); }; langs.append(b); } pop.append(langs);
-  pop.insertAdjacentHTML("beforeend", `<h3 style="margin-top:12px">${esc(t("Session"))}</h3>`); const out = document.createElement("button"); out.className = "btn small"; out.textContent = t("Forget the access token"); out.onclick = () => { sessionStorage.removeItem("inari-token"); location.reload(); }; pop.append(out); });
+  pop.insertAdjacentHTML("beforeend", `<h3 style="margin-top:12px">${esc(t("Session"))}</h3>`); const out = document.createElement("button"); out.className = "btn small"; out.textContent = t("Sign out"); out.onclick = signOut; pop.append(out); });
 
 /* ---------- the mascot: FoxBot when its folder is served, else the orb ---------- */
 let foxFrame = null, foxReady = false, foxLast = "";

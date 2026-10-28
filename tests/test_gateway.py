@@ -67,6 +67,40 @@ async def test_the_page_assets_are_public_and_all_listed(gw):
     assert (await http(gateway.port, "GET", "/assets/nope.js", token=""))[0] == 404
 
 
+async def test_a_page_signs_in_once_and_holds_a_cookie_not_the_token(gw):
+    _, gateway = gw
+
+    async def raw(method, path, body=b"", cookie=""):
+        reader, writer = await asyncio.open_connection("127.0.0.1", gateway.port)
+        extra = f"Cookie: {cookie}\r\n" if cookie else ""
+        writer.write(
+            f"{method} {path} HTTP/1.1\r\nHost: x\r\n{extra}Content-Type: application/json\r\n"
+            f"Content-Length: {len(body)}\r\n\r\n".encode()
+            + body
+        )
+        await writer.drain()
+        out = await reader.read()
+        writer.close()
+        head, _, payload = out.partition(b"\r\n\r\n")
+        return int(head.split()[1]), head.decode(), payload
+
+    status, head, _ = await raw("GET", "/")
+    assert "script-src 'self';" in head and "frame-ancestors 'none'" in head
+    assert (await raw("POST", "/api/session", b'{"secret": "nope"}'))[0] == 401
+    status, head, me = await raw("POST", "/api/session", b'{"secret": "t"}')
+    assert status == 200 and json.loads(me)["role"] == "owner"
+    assert "HttpOnly" in head and "SameSite=Strict" in head
+    cookie = next(ln for ln in head.split("\r\n") if ln.startswith("Set-Cookie:"))
+    cookie = cookie.split(":", 1)[1].strip().split(";")[0]
+    assert "=t;" not in cookie + ";" and cookie.startswith("inari_session=v1.o.")
+    assert (await raw("GET", "/api/whoami", cookie=cookie))[0] == 200
+    assert (
+        await raw("GET", "/api/whoami", cookie=cookie[:-1] + ("1" if cookie[-1] == "0" else "0"))
+    )[0] == 401
+    status, head, _ = await raw("POST", "/api/logout", b"{}")
+    assert status == 200 and "Max-Age=0" in head
+
+
 async def test_state_streams_as_events(gw):
     bus, gateway = gw
     await bus.publish("mesh.nodes", {"nodes": [{"node_id": "n1", "role": "heavy"}]})

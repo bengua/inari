@@ -79,6 +79,10 @@ const MAX_BODY: usize = 64 * 1024;
 /// One part of an upload, base64 included (the page sends 512 KiB of file per part).
 const MAX_PART_BODY: usize = 1024 * 1024;
 const MAX_UPLOAD: u64 = 25 * 1024 * 1024;
+/// Connections served at once (each open page holds one for its event stream).
+const MAX_CONNECTIONS: usize = 512;
+/// A request must arrive whole within this time, an upload part included.
+const REQUEST_DEADLINE: Duration = Duration::from_secs(60);
 
 #[derive(Default)]
 struct State {
@@ -197,6 +201,7 @@ pub struct Gateway {
     state: Mutex<State>,
     clients: broadcast::Sender<()>,
     pub usage_interval: Duration,
+    sessions: crate::session::Sessions,
 }
 
 fn s(p: &Value, k: &str) -> String {
@@ -295,13 +300,41 @@ struct Request {
     body: Vec<u8>,
     /// The connection comes from this machine.
     loopback: bool,
+    /// The address on the other end (the gate's, behind one): sign-in attempts are counted by it.
+    peer: Option<std::net::IpAddr>,
 }
 
+impl Request {
+    /// Reached over HTTPS: the gate in front says so. A session cookie is then `Secure`.
+    fn https(&self) -> bool {
+        self.headers
+            .get("x-forwarded-proto")
+            .is_some_and(|p| p.eq_ignore_ascii_case("https"))
+    }
+}
+
+/// What a page may load and where it may talk: its own origin only, no inline script, no
+/// framing by another site. Inline styles stay allowed (the page sets a few attributes).
+const CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
+    img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; frame-src 'self'; \
+    frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'";
+
 async fn send(w: &mut TcpStream, status: u16, ctype: &str, body: &[u8]) -> std::io::Result<()> {
+    send_with(w, status, ctype, body, "").await
+}
+
+/// [`send`] with extra header lines (each ending in CRLF), such as a `Set-Cookie`.
+async fn send_with(
+    w: &mut TcpStream,
+    status: u16,
+    ctype: &str,
+    body: &[u8],
+    extra: &str,
+) -> std::io::Result<()> {
     let head = format!(
         "HTTP/1.1 {status} {}\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nCache-Control: no-store\r\n\
-         X-Content-Type-Options: nosniff\r\nContent-Security-Policy: default-src 'self' 'unsafe-inline'; \
-         img-src 'self' data:; connect-src 'self'\r\nConnection: close\r\n\r\n",
+         X-Content-Type-Options: nosniff\r\nContent-Security-Policy: {CSP}\r\nReferrer-Policy: no-referrer\r\n\
+         {extra}Connection: close\r\n\r\n",
         reason(status),
         body.len()
     );
@@ -361,6 +394,7 @@ impl Gateway {
             state: Mutex::default(),
             clients,
             usage_interval: Duration::from_secs(60),
+            sessions: crate::session::Sessions::open(data_dir),
         });
         g.subscribe();
         g
@@ -698,13 +732,21 @@ impl Gateway {
         let listener = TcpListener::bind((host, port)).await?;
         let bound = listener.local_addr()?.port();
         let me = Arc::clone(self);
+        let slots = Arc::new(tokio::sync::Semaphore::new(MAX_CONNECTIONS));
         tokio::spawn(async move {
             // One failed accept (out of file descriptors, a reset) must not stop the page for good.
             loop {
                 match listener.accept().await {
                     Ok((stream, _)) => {
+                        // past the limit, a new connection is closed at once rather than queued
+                        let Ok(slot) = Arc::clone(&slots).try_acquire_owned() else {
+                            continue;
+                        };
                         let me = Arc::clone(&me);
-                        tokio::spawn(async move { me.serve(stream).await });
+                        tokio::spawn(async move {
+                            me.serve(stream).await;
+                            drop(slot);
+                        });
                     }
                     Err(e) => {
                         eprintln!("gateway: accept failed: {e}");
@@ -778,6 +820,8 @@ impl Gateway {
         owner.then_some(Access::Owner)
     }
 
+    /// Who the request comes from, in this order: a pass it presents (a guest or nothing), the
+    /// owner's token it presents, its session cookie, then a page this machine opened itself.
     fn access(&self, r: &Request) -> Option<Access> {
         let pass = r
             .headers
@@ -785,13 +829,45 @@ impl Gateway {
             .or_else(|| r.query.get("pass"))
             .map(String::as_str)
             .filter(|t| !t.is_empty());
-        self.access_of(pass, pass.is_none() && self.authorized(r))
+        if pass.is_some() {
+            return self.access_of(pass, false);
+        }
+        if self.token_given(r) {
+            return Some(Access::Owner);
+        }
+        let session = r
+            .headers
+            .get("cookie")
+            .and_then(|c| crate::session::from_header(c))
+            .and_then(|c| self.session_access(c));
+        if session.is_some() {
+            return session;
+        }
+        self.local_page(r).then_some(Access::Owner)
     }
 
-    fn authorized(&self, r: &Request) -> bool {
-        if self.local_page(r) {
-            return true;
+    /// What a session cookie opens: the owner's access while the token it was opened with is
+    /// still the token; a pass's while that pass is still valid (revoking it ends the session).
+    fn session_access(&self, cookie: &str) -> Option<Access> {
+        use crate::session::Kind;
+        let (kind, hash) = self.sessions.read(cookie)?;
+        match kind {
+            Kind::Owner => (!self.token.is_empty()
+                && hash == crate::session::owner_hash(&self.token))
+            .then_some(Access::Owner),
+            Kind::Pass => {
+                let st = self.state.lock().expect("not poisoned");
+                st.passes
+                    .iter()
+                    .find(|p| p["token_sha"] == hash.as_str() && crate::passes::valid(p))
+                    .cloned()
+                    .map(Access::Guest)
+            }
         }
+    }
+
+    /// The owner's token, given in the `Authorization` header (or, for old clients, `?token=`).
+    fn token_given(&self, r: &Request) -> bool {
         let header = r
             .headers
             .get("authorization")
@@ -860,19 +936,21 @@ impl Gateway {
             body.extend_from_slice(&chunk[..n]);
         }
         body.truncate(size);
-        let loopback = stream.peer_addr().is_ok_and(|a| a.ip().is_loopback());
+        let peer = stream.peer_addr().ok().map(|a| a.ip());
         Some(Ok(Request {
             method,
             path,
             query,
             headers,
             body,
-            loopback,
+            loopback: peer.is_some_and(|ip| ip.is_loopback()),
+            peer,
         }))
     }
 
     async fn serve(self: Arc<Self>, mut stream: TcpStream) {
-        let r = match Self::read_request(&mut stream).await {
+        let read = tokio::time::timeout(REQUEST_DEADLINE, Self::read_request(&mut stream));
+        let r = match read.await.ok().flatten() {
             None => return,
             Some(Err(status)) => {
                 let _ = send(&mut stream, status, "text/plain", reason(status).as_bytes()).await;
@@ -903,6 +981,13 @@ impl Gateway {
                     .serve_static(w, dir, if rel.is_empty() { "index.html" } else { rel })
                     .await;
             }
+        }
+        if r.method == "POST" && r.path == "/api/session" {
+            return self.sign_in(&r, w).await;
+        }
+        if r.method == "POST" && r.path == "/api/logout" {
+            let end = crate::session::set_cookie(None, r.https());
+            return send_with(w, 200, "application/json", b"{}", &end).await;
         }
         let Some(access) = self.access(&r) else {
             return send_json(w, 401, &json!({"error": "unauthorized"})).await;
@@ -1000,6 +1085,69 @@ impl Gateway {
             }
         }
         send_json(w, 404, &json!({"error": "not found"})).await
+    }
+
+    /// `POST /api/session {"secret": …}`: the owner's token or a pass, exchanged for a session
+    /// cookie. Answers like `/api/whoami`. Wrong secrets make the address wait (429).
+    async fn sign_in(&self, r: &Request, w: &mut TcpStream) -> std::io::Result<()> {
+        use crate::session::{owner_hash, set_cookie, Kind};
+        if !r
+            .headers
+            .get("content-type")
+            .is_some_and(|c| c.starts_with("application/json"))
+        {
+            return send_json(w, 400, &json!({"error": "JSON only"})).await;
+        }
+        let wait = self.sessions.wait(r.peer);
+        if !wait.is_zero() {
+            let body = json!({"error": "too many attempts", "retry_after": wait.as_secs() + 1});
+            return send_json(w, 429, &body).await;
+        }
+        let secret = serde_json::from_slice::<Value>(&r.body)
+            .ok()
+            .and_then(|v| {
+                v.get("secret")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .map(String::from)
+            })
+            .unwrap_or_default();
+        let pass = (!secret.is_empty())
+            .then(|| self.access_of(Some(&secret), false))
+            .flatten();
+        let given = secret.as_bytes();
+        let owner = !self.token.is_empty()
+            && given.len() == self.token.len()
+            && given
+                .iter()
+                .zip(self.token.as_bytes())
+                .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+                == 0;
+        let (cookie, me) = match (&pass, owner) {
+            (Some(Access::Guest(p)), _) => (
+                self.sessions
+                    .issue(Kind::Pass, &crate::passes::token_hash(&secret)),
+                json!({"role": p["role"], "pass": p["id"], "name": p["name"]}),
+            ),
+            (_, true) => (
+                self.sessions.issue(Kind::Owner, &owner_hash(&self.token)),
+                json!({"role": "owner"}),
+            ),
+            _ => {
+                self.sessions.attempt(r.peer, false);
+                return send_json(w, 401, &json!({"error": "unknown token or pass"})).await;
+            }
+        };
+        self.sessions.attempt(r.peer, true);
+        let body = serde_json::to_vec(&me).expect("serializes");
+        send_with(
+            w,
+            200,
+            "application/json",
+            &body,
+            &set_cookie(Some(&cookie), r.https()),
+        )
+        .await
     }
 
     /// A thread is the access's own: always for the owner; for a pass, named after it or

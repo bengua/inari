@@ -117,6 +117,20 @@ Newest first. An entry says what changed for someone using the thing.
   (`inari-core-rs serve-endpoint | adopt | teleport | status`). Python and Rust nodes teleport
   agents to each other over TCP, in both directions.
 
+### Security
+
+- **Sessions instead of a token in the page.** The page signs in once and holds an `HttpOnly`,
+  `SameSite=Strict` cookie signed by the core; the token no longer goes into URLs (`/events?token=`,
+  logo addresses) nor into the browser's storage. A revoked pass or a new owner token ends the
+  sessions they opened. Links with `#token=` or `#pass=`, and secrets older pages left in storage,
+  are exchanged once and forgotten. *Settings → Sign out* ends the session.
+- **A strict content policy.** No inline script may run (`script-src 'self'`), the page cannot be
+  framed by another site, and no referrer leaves it.
+- **Wrong secrets wait.** After five wrong tokens or passes from one address, each attempt waits
+  longer, up to five minutes.
+- **The gateway bounds its connections** (512 at once) and the time a request may take to arrive
+  (60 s), so a client trickling bytes no longer holds a connection for hours.
+
 ### Fixed
 
 - **An open tool call stays open.** The thread was rebuilt every second and a half while an agent

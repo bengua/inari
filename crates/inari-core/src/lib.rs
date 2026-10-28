@@ -17,6 +17,7 @@ pub mod mesh;
 pub mod node;
 pub mod passes;
 pub mod rpc;
+pub mod session;
 pub mod teleport;
 pub mod updates;
 pub mod usage;

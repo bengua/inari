@@ -8,7 +8,7 @@ Look: graphite and copper in dark, warm paper in light (following the system or 
 journal as a vertical tree, the live orb driven by `mascot_state`, signed
 approvals, a terminal that runs a command in the agent's workspace (journaled, so the agent knows), a viewer for text, code, Markdown, JSON, images and sandboxed HTML, a target sheet for touch (long-press, or `T` on the keyboard), and
 reduced-motion support. Not yet built: fork and merge gestures, search, the
-biometric gate (the gateway holds the approval key; browsers use a bearer token),
+biometric gate (the gateway holds the approval key; a page signs in once for a session cookie, see docs/security.md),
 and an installable shell. The sections below remain the contract.
 
 ## Principles

@@ -155,6 +155,6 @@ dl.keys { display:grid; grid-template-columns:auto 1fr; gap:8px 14px; margin:0 0
 #dock { position:relative; } #jump { position:absolute; left:50%; top:-46px; transform:translateX(-50%); z-index:5; border-radius:999px; box-shadow:var(--shadow); background:var(--panel-solid); }
 :focus-visible { outline:2px solid var(--copper); outline-offset:2px; }
 /* a laptop screen: the threads get the room before the mascot and the pending questions */
-@media (max-height:900px) and (min-width:1101px) { #foxSlot { height:min(150px, 18vh); } #approvals { max-height:32vh; overflow:auto; } #feed { max-height:64px; } }
+@media (max-height:900px) and (min-width:1101px) { #foxSlot { height:min(200px, 24vh); } #approvals { max-height:32vh; overflow:auto; } #feed { max-height:64px; } }
 /* fingers need room: 44 px targets on touch screens */
 @media (pointer:coarse) { .row.selected .rmove { width:36px; height:36px; } .chead .cnew { width:36px; height:36px; opacity:1; } .btn.icon { width:44px; min-height:44px; } .btn.small { min-height:40px; } .shead .btn { width:40px; height:40px; } .tab { min-height:44px; } .chip { min-height:36px; } .cb .cpy { opacity:1; } }

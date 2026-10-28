@@ -22,7 +22,7 @@
 | 1 | Fil incrémental, Markdown, erreurs visibles, hors ligne, contrastes, a11y, accept loop | fait, testé |
 | 2 | Page découpée en fichiers, polices servies, alternatives visibles aux gestes cachés | fait, testé |
 | 3 | Interface web FR/EN | fait, testé |
-| 4 | Sécurité de la page : cookie de session, JS séparé, CSP stricte, limites du serveur HTTP | à faire |
+| 4 | Sécurité de la page : cookie de session, CSP stricte, limites du serveur HTTP, frein aux essais | fait, testé |
 | 5 | Android : partage par morceaux, bord à bord, thème, chaînes traduites | à faire |
 
 ---
@@ -89,3 +89,36 @@ uvx --from 'fonttools[woff]' pyftsubset /tmp/b.ttf --unicodes="$U" --flavor=woff
 - **Ajouter un texte** : écrire `t("Texte anglais")` dans `app.js` et ajouter la ligne dans `DICT.fr`. Le test le rappelle s'il manque.
 - **Non traduit, volontairement** : ce que le serveur envoie tel quel (erreurs d'un agent, messages d'un moteur, noms de modèles) et le contenu des fils.
 - **Vocabulaire choisi** : thread → fil, core → cœur, harness → moteur, artifacts → artefacts, fork → dupliquer, pass → pass.
+
+## Lot 4 : sécurité de la page
+
+**Avant** : le jeton du propriétaire circulait dans les URL (`/events?token=…`, adresses des logos). Il restait dans le `sessionStorage`, et le pass dans le `localStorage`. La CSP autorisait les scripts inline : une seule injection HTML suffisait pour voler le jeton.
+
+**Maintenant** :
+
+| Sujet | Comment | Où |
+|---|---|---|
+| Connexion | `POST /api/session {"secret": …}` reçoit le jeton du propriétaire ou un pass (le cœur sait lequel) et répond par un cookie `inari_session` en `HttpOnly` et `SameSite=Strict`, plus `Secure` si la gate annonce HTTPS via `X-Forwarded-Proto`. Le script de la page ne voit jamais ce cookie. | `crates/inari-core/src/session.rs` (nouveau), `gateway.rs` (`sign_in`, `session_access`, `access`) |
+| Format du cookie | `v1.<o\|p>.<hash>.<expiration>.<hmac>` : signé, rien n'est stocké côté serveur. La clé est dans `<data_dir>/session.key` (créée au premier lancement, en 0600), donc les sessions survivent à un redémarrage. Durée : 30 jours. | `session.rs` |
+| Révocation | La session d'un pass est revérifiée à chaque requête : un pass révoqué coupe l'accès immédiatement. Une session propriétaire contient le hash du jeton : changer le jeton déconnecte toutes les sessions propriétaire. | `session_access` |
+| Ordre d'accès | pass présenté en en-tête → jeton présenté → cookie → page ouverte sur la machine elle-même (inchangé). La gate qui ajoute l'en-tête `Authorization` continue de marcher telle quelle. | `access` |
+| Anciennes pages et liens | Les liens `#token=…` et `#pass=…`, ainsi que les secrets qu'une ancienne page avait laissés dans le stockage, sont échangés une fois puis effacés. **Un enfant qui avait un pass sur son téléphone n'a rien à ressaisir.** | `connect`, `legacySecret` dans `app.js` |
+| Déconnexion | Réglages → Se déconnecter (ou « Quitter ce pass ») appelle `POST /api/logout`. | `signOut` |
+| Essais en rafale | 5 mauvais secrets par adresse, puis attente croissante jusqu'à 5 min (`429` avec `retry_after`). Derrière une gate, toutes les requêtes ont la même adresse : le frein est alors global. | `Sessions::wait` / `attempt` |
+| CSP | `script-src 'self'` (plus aucun script inline possible), `frame-ancestors 'none'`, `base-uri 'none'`, `object-src 'none'`, `Referrer-Policy: no-referrer`. Les attributs `style=""` restent permis. | constante `CSP` (Rust et Python) |
+| Serveur HTTP | 512 connexions au plus (au-delà, fermeture immédiate) ; une requête doit arriver entière en 60 s (fin du slowloris). | `MAX_CONNECTIONS`, `REQUEST_DEADLINE` |
+| Python (référence et démo) | Même CSP, sessions propriétaire seulement (la référence n'a pas de pass), avec une clé aléatoire par processus. | `src/inari_core/gateway.py` |
+
+**Compatibilité** : l'en-tête `Authorization: Bearer` marche toujours pour les scripts et outils. `?token=` est encore accepté pour les vieux clients, mais à éviter. À supprimer quand plus rien ne l'utilise.
+
+**Tests ajoutés** :
+- `crates/inari-core/src/session.rs` : 4 tests unitaires (signature, falsification, expiration, frein, lecture du cookie) ;
+- `crates/inari-core/tests/sessions.rs` : de bout en bout, de la CSP présente aux sessions propriétaire et pass, en passant par le cookie falsifié, la révocation, la déconnexion et le 429 ;
+- `tests/test_gateway.py::test_a_page_signs_in_once_and_holds_a_cookie_not_the_token`.
+
+**Vérifié à la main** dans Chromium, sur la démo et sur un vrai nœud Rust avec FoxBot : connexion par lien, par formulaire et par secret hérité ; cookie illisible depuis le JS ; plus aucun secret dans les URL ; déconnexion ; mauvais secret. FoxBot s'affiche dans son iframe malgré la CSP stricte.
+
+### Deux observations sur FoxBot (rien de modifié)
+
+1. **Animations de persona manquantes** : avec la persona `rebel`, `fox/sprites_persona/rebel/{cligne,rit,tourne}/` n'existe pas dans `inari-apk/fox-sprites-persona/`, ce qui donne des 404 (la mascotte se rabat sur une autre pose).
+2. **Lien symbolique `sprites_persona`** : `sprite.js` dit que ce dossier est un lien symbolique vers `fox-sprites-persona`. Or `serve_static` (Rust) canonicalise le chemin et **refuse tout fichier dont le chemin réel sort de `mascot_dir`** : un lien symbolique qui pointe ailleurs donne 404. Si ton déploiement repose sur ce lien, les personas ne s'affichent pas avec le cœur Rust. Deux solutions : copier ou monter les sprites dans `mascot_dir`, ou assouplir `serve_static` (refuser les `..` dans le chemin demandé au lieu de comparer les chemins canoniques). C'est à toi de choisir, car ça touche à la protection contre la traversée de répertoires.
