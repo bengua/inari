@@ -12,6 +12,9 @@ const PATHS = {
   move: '<path d="M5 12h14M13 6l6 6-6 6"/>', fork: '<circle cx="6" cy="5" r="2"/><circle cx="18" cy="5" r="2"/><circle cx="12" cy="19" r="2"/><path d="M6 7v2a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3V7M12 12v5"/>',
   download: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>', spinner: '<path d="M12 3a9 9 0 1 0 9 9"/>',
   pause: '<path d="M9 5v14M15 5v14"/>', trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
+  copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/>',
+  share: '<circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="m8.2 10.8 7.6-4.6M8.2 13.2l7.6 4.6"/>',
+  quote: '<path d="M6 8h4v4c0 3-1.5 4.5-4 5.5M14 8h4v4c0 3-1.5 4.5-4 5.5"/>',
   merge: '<circle cx="6" cy="19" r="2"/><circle cx="6" cy="5" r="2"/><circle cx="18" cy="12" r="2"/><path d="M6 7v10M6 7a7 7 0 0 0 10 5"/>',
 };
 const icon = (n) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${PATHS[n] || ""}</svg>`;
@@ -26,6 +29,8 @@ const store = { get: (k, d) => { try { return JSON.parse(localStorage.getItem("i
 const PAGE = (document.querySelector('meta[name="inari-page"]') || {}).content || ""; // the core writes the version of this page there
 let stream = null, lastSnapAt = 0, offlineTick = null, pendingDraft = null;
 let snap = null, selected = null, tab = "artifacts", events = [], files = null, viewing = null, forkAt = null, drag = null, termHist = [], termPos = 0, pendingModel = "", pendingCore = "", attachments = [];
+// messages sent while the agent works, per thread: shown at once, "waiting", until the agent reads them (drawChat)
+const queued = {};
 const loadHist = {}, shut = store.get("shut", {}), feed = [], seen = new Set(); let firstSnap = true, tlStamp = 0, tlBusy = false, lastFiles = "";
 
 /* ---------- families, badges, quotas ---------- */
@@ -172,7 +177,10 @@ function render() {
   if (!drag && !coreHold) renderCores(agents);
   if (snap.ui && snap.ui.mascot && personas === null) { personas = []; loadPersonas(); } renderPersonaNav();
   renderFeed(); renderApprovals(); renderTop(); renderPill(); renderUsageCard(); mascot(); drawOrbParams(snap.mascot);
-  if (selected && Date.now() - tlStamp > 1500) refreshDetail(); else if (!selected) { drawChat(); drawComposer(); if (!$("bbody").firstChild) drawBench(); }
+  // the open thread reloads at most every 1.5 s; news within that time is fetched when it ends, never dropped (the
+  // last piece of an answer used to wait for the next snapshot, however late that came)
+  if (selected) { const wait = 1500 - (Date.now() - tlStamp); clearTimeout(render.tl); if (wait <= 0) refreshDetail(); else render.tl = setTimeout(refreshDetail, wait); }
+  else { drawChat(); drawComposer(); if (!$("bbody").firstChild) drawBench(); }
 }
 const inFlight = (mv) => mv && !["committed", "rolled_back"].includes(mv.state);
 function row(id, a, mv) {
@@ -397,17 +405,18 @@ $("composer").onsubmit = async (e) => { e.preventDefault(); let text = $("msg").
       // the model travels with the thread's creation: set before its first turn reads it
       for (let i = 0; i < 40 && !(snap.agents[id]); i++) await new Promise((r) => setTimeout(r, 150)); pendingHarness = ""; pendingModel = ""; await select(id); }
     const sent = []; for (const f of attachments) if (await sendFile(id, f)) sent.push(f.name); attachments = [];
-    $("msg").value = ""; await api("/api/message", { agent: id, text: text.trim(), attachments: sent }); tlStamp = 0; setTimeout(() => { $("thread").scrollTop = $("thread").scrollHeight; }, 60);
+    $("msg").value = ""; const w = snap.agents[id]; if (w && id === selected && ["listening", "loading", "inference"].includes(w.phase)) (queued[id] = queued[id] || []).push({ text: text.trim(), after: events.length });
+    await api("/api/message", { agent: id, text: text.trim(), attachments: sent }); drawStop(); drawChat(); tlStamp = 0; setTimeout(() => { $("thread").scrollTop = $("thread").scrollHeight; }, 60);
   } finally { $("sendBtn").disabled = false; } };
 $("msg").onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("composer").requestSubmit(); } };
 
 /* ---------- conversation ---------- */
 async function select(id) { selected = id; forkAt = null; viewing = null; files = null; events = []; tlStamp = 0; lastFiles = ""; renderTop(); drawChat(); drawBench(); await refreshDetail(); if (snap) renderCores(Object.entries(snap.agents)); $("msg").focus(); }
-async function refreshDetail() { if (!selected || tlBusy) return; tlBusy = true; tlStamp = Date.now(); try { const id = selected, base = `/api/agent/${encodeURIComponent(id)}/timeline`, last = events.length ? events[events.length - 1].id : "";
+async function refreshDetail() { if (!selected) return; if (tlBusy) { refreshDetail.again = true; return; } tlBusy = true; refreshDetail.again = false; tlStamp = Date.now(); try { const id = selected, base = `/api/agent/${encodeURIComponent(id)}/timeline`, last = events.length ? events[events.length - 1].id : "";
     let tl = await api(last ? `${base}?after=${encodeURIComponent(last)}` : base); if (id !== selected) return;
     // a plain continuation is appended; a journal that changed under the page (a merge, a fork) is asked for whole
     if (last && !(tl.from === events.length && events.length + (tl.events || []).length === tl.count)) tl = await api(base);
-    if (id !== selected || tl.error) return; events = tl.from ? events.concat(tl.events || []) : tl.events || []; const a = snap.agents[selected] || {}, sig = a.files + ":" + a.events; if (!files || sig !== lastFiles) { files = (await api(`/api/agent/${encodeURIComponent(selected)}/files`)).files || []; lastFiles = sig; } drawChat(); drawBench(true); } finally { tlBusy = false; } }
+    if (id !== selected || tl.error) return; events = tl.from ? events.concat(tl.events || []) : tl.events || []; const a = snap.agents[selected] || {}, sig = a.files + ":" + a.events; if (!files || sig !== lastFiles) { files = (await api(`/api/agent/${encodeURIComponent(selected)}/files`)).files || []; lastFiles = sig; } drawChat(); drawBench(true); } finally { tlBusy = false; if (refreshDetail.again) refreshDetail(); } } // news that came during a reload is fetched right after it
 /* Markdown, the subset models write: headings, lists, quotes, tables, rules, links, code. Everything is
    escaped first; only http(s) links become anchors. One renderer for the chat and the viewer. */
 const LINK = 'target="_blank" rel="noopener noreferrer"';
@@ -438,8 +447,9 @@ function md(text) { return String(text).replace(/\r\n?/g, "\n").trim().split("``
   const lang = (p.match(/^([\w+#.-]*)\n/) || [])[1] || "", code = p.replace(/^[\w+#.-]*\n/, "").replace(/\n$/, "");
   return `<div class="cb">${lang ? `<span class="lang">${esc(lang)}</span>` : ""}<pre><code>${esc(code)}</code></pre><button type="button" class="cpy" aria-label="${esc(t("Copy the code"))}">${esc(t("Copy"))}</button></div>`; }).join(""); }
 /* Copy buttons on code blocks, wherever they are rendered. */
-document.addEventListener("click", async (e) => { const b = e.target.closest(".cb .cpy"); if (!b) return; const text = b.parentElement.querySelector("code").textContent;
-  try { await navigator.clipboard.writeText(text); } catch (err) { const ta = document.createElement("textarea"); ta.value = text; document.body.append(ta); ta.select(); document.execCommand("copy"); ta.remove(); }
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); } catch (err) { const ta = document.createElement("textarea"); ta.value = text; document.body.append(ta); ta.select(); document.execCommand("copy"); ta.remove(); } }
+document.addEventListener("click", async (e) => { const b = e.target.closest(".cb .cpy"); if (!b) return; await copyText(b.parentElement.querySelector("code").textContent);
   b.textContent = t("Copied"); b.classList.add("done"); setTimeout(() => { b.textContent = t("Copy"); b.classList.remove("done"); }, 1400); });
 /* The thread is rebuilt off-screen, then only what changed is swapped in: an open tool call stays open,
    a selection stays selected, and a screen reader hears only the new messages. */
@@ -459,7 +469,7 @@ function drawChat() {
   let lastNote = "";
   const note = (html) => { if (html === lastNote) return; lastNote = html; box.insertAdjacentHTML("beforeend", `<div class="note">${html}</div>`); };
   for (let i = 0; i < events.length; i++) { const e = events[i];
-    if (e.kind === "user_message" || e.kind === "assistant_message") { lastNote = ""; const d = document.createElement("div"); d.className = "msg " + (e.kind === "user_message" ? "user" : "assistant"); d.dataset.event = d.dataset.k = e.id; d.innerHTML = md(e.text); box.append(d); }
+    if (e.kind === "user_message" || e.kind === "assistant_message") { lastNote = ""; const d = document.createElement("div"); d.className = "msg " + (e.kind === "user_message" ? "user" : "assistant"); d.dataset.event = d.dataset.k = e.id; d.innerHTML = msgTools(e.id) + md(e.text) + msgBar(); box.append(d); }
     else if (e.kind === "tool_call") { lastNote = ""; const r = events[i + 1] && events[i + 1].kind === "tool_result" ? events[++i] : null, err = r && /^(denied|\w+Error)/.test(r.text);
       const d = document.createElement("details"); d.className = "tool" + (err ? " err" : ""); d.dataset.k = e.id; d.dataset.s = r ? r.id : ""; const shell = /^(\$ |bash|execute|shell|run)/.test(e.text);
       d.innerHTML = `<summary>${icon(shell ? "terminal" : "tool")}<span class="tn"></span><span class="ts">${esc(t(r ? (err ? "failed" : "done") : "running…"))}</span><span class="cv">${icon("chevron")}</span></summary><pre></pre>`;
@@ -469,6 +479,10 @@ function drawChat() {
     else if (e.kind === "decision") note(esc(e.text));
     else if (e.kind === "checkpoint") { const [why, ...rest] = e.text.split(": "); const map = { teleport: "Moved between cores", provider_error: "The model failed", harness_error: "The agent stopped", harness_timeout: "The agent took too long", model_refused: "Model not available", mode_changed: "Mode", stopped: "Stopped", auto_approved: "Allowed automatically", mode_refused: "Mode not available" }; note(esc(t(map[why] || "Checkpoint")) + (rest.length && why !== "teleport" ? ` — ${esc(rest.join(": ").slice(0, 120))}` : "")); } }
   if (["listening", "loading", "inference"].includes(a.phase)) box.insertAdjacentHTML("beforeend", `<div class="msg assistant typing" aria-label="${esc(t("The agent is working"))}"><i></i><i></i><i></i></div>`);
+  // a message sent during a turn waits for it to end; the agent read it once the journal has it as a user message,
+  // after what the page held when it was sent (matched by its text: the message before it may only arrive now)
+  let q = queued[selected] || []; if (q.length) { q = queued[selected] = q.filter((m) => !events.slice(m.after).some((e) => e.kind === "user_message" && (e.text || "").trim() === m.text));
+    q.forEach((m, i) => { const d = document.createElement("div"); d.className = "msg user queued"; d.dataset.k = `q${m.after}-${i}`; d.innerHTML = md(m.text) + `<div class="qnote">${esc(t("Waiting: the agent reads it when this step ends"))}</div>`; box.append(d); }); }
   if (fresh) { shown.setAttribute("aria-live", "off"); setTimeout(() => shown.setAttribute("aria-live", "polite"), 600); } /* a thread just opened is not read aloud whole */
   reconcile(shown, box); if (atEnd || fresh) { th.scrollTop = th.scrollHeight; $("jump").hidden = true; } else if (shown.children.length > before) $("jump").hidden = false;
 }
@@ -568,8 +582,8 @@ async function teleport(agent, source, target) { const r = await api("/api/telep
 /* ---------- gestures: complex things anchored in simple moves ----------
    Drag a thread onto a core: it moves there. Onto another thread: they merge. Onto the dock that appears:
    clone it to another model, share it with a person, put it to sleep. Onto the mascot: summarise or sleep.
-   On a phone: swipe a thread left to move it, right for its artifacts; long-press a message to start again
-   from it; drop a file on a core to begin a thread with it. */
+   On a phone: swipe a thread left to move it, right for its artifacts; a message's buttons copy, quote, share it or
+   start again from it; drop a file on a core to begin a thread with it. */
 function startDrag(e, el, id, from) { if (e.button > 0) return;
   drag = { id, from, x: e.clientX, y: e.clientY, active: false, el, ghost: null, hold: null, touch: e.pointerType === "touch", guest: !!(snap.ui && snap.ui.pass), held: false };
   // touch: a short press lifts the thread (then it is dragged like with a mouse); mouse: the press is the drag
@@ -611,7 +625,10 @@ function renameThread(id) { select(id).then(() => { const t = $("ptitle"); t.con
   t.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); done(true); } else if (e.key === "Escape") done(false); }; t.onblur = () => done(true); }); }
 $("ptitle").ondblclick = () => { if (selected) renameThread(selected); };
 /* Stop replaces Send while the thread works and the box is empty. */
-function drawStop() { const a = selected && snap && snap.agents[selected], busy = !!a && ["listening", "loading", "inference"].includes(a.phase), empty = !$("msg").value.trim() && !attachments.length; $("stopBtn").hidden = !(busy && empty); $("sendBtn").hidden = busy && empty; }
+function drawStop() { const a = selected && snap && snap.agents[selected], busy = !!a && ["listening", "loading", "inference"].includes(a.phase), empty = !$("msg").value.trim() && !attachments.length; $("stopBtn").hidden = !busy; $("sendBtn").hidden = busy && empty;
+  // while the agent works: Stop stays, and a message typed meanwhile can be sent; it is read when the step ends
+  const send = $("sendBtn"), say = busy ? t("Send: the agent reads it when this step ends") : t("Send"); send.title = say; send.setAttribute("aria-label", say);
+  if (a) $("msg").placeholder = busy ? t("Add a message: the agent reads it when this step ends…") : t("Message the agent…"); }
 $("stopBtn").onclick = () => { if (selected) { api("/api/cancel", { agent: selected }); toast(t("Stopping…")); } };
 $("msg").addEventListener("input", drawStop); $("msg").addEventListener("input", () => requestAnimationFrame(placeFox));
 function actionSheet(id) { const a = snap.agents[id]; if (!a) return; const node = snap.nodes.find((n) => n.node_id === a.node) || {};
@@ -683,11 +700,23 @@ $("cores").addEventListener("drop", async (e) => { const c = e.target.closest(".
   const made = await api("/api/agent", { thread_id: name, node: c.dataset.node, title: files[0].name }), id = made.thread_id || name;
   if (!(await until(() => snap.agents[id], 15000))) return toast(t("The thread did not start")); await select(id);
   for (const f of files) attachments.push({ name: f.name, file: f }); drawComposer(); $("msg").focus(); toast(t("Say what to do with it")); });
-/* A long press on a message: start again from there (a fork up to it). */
-$("msgs").addEventListener("pointerdown", (e) => { const m = e.target.closest(".msg[data-event]"); if (!m || (snap.ui && snap.ui.pass)) return;
-  const done = () => { clearTimeout(hold); removeEventListener("pointerup", done); removeEventListener("pointermove", far); }, far = (ev) => { if (Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) > 10) done(); };
-  const hold = setTimeout(() => { done(); forkAt = m.dataset.event; sheet(t("Start again from here?"), [[t("Fork from this message"), forkNow]], t("A new thread with the journal up to this message; this one stays as it is.")); }, 600);
-  addEventListener("pointerup", done); addEventListener("pointermove", far); });
+/* A message's own buttons: copy it or quote it in the reply (top), copy, share or start again from it (bottom).
+   They replace the long press, which on a phone also started the system's text selection and its copy bar. */
+const msgTools = () => `<span class="mtools"><button type="button" class="ma" data-act="copy" title="${esc(t("Copy"))}" aria-label="${esc(t("Copy the message"))}">${icon("copy")}</button><button type="button" class="ma" data-act="quote" title="${esc(t("Quote in my reply"))}" aria-label="${esc(t("Quote in my reply"))}">${icon("quote")}</button></span>`;
+const msgBar = () => `<div class="mbar">${[["copy", "Copy", ""], ["share", "Share", ""], ["fork", "Start again from here", " own"]].map(([act, label, cls]) =>
+  `<button type="button" class="ma${cls}" data-act="${act}" title="${esc(t(label))}" aria-label="${esc(t(label))}">${icon(act)}<span>${esc(t(label))}</span></button>`).join("")}</div>`;
+/* Share: the system's share sheet where the browser has one; in the Android app (a WebView, which has none) the
+   app opens Android's own (an inari-share: address); elsewhere the text is copied to paste where it should go. */
+async function shareText(text) {
+  if (navigator.share) { try { await navigator.share({ text }); } catch (err) { /* closed without sharing */ } return; }
+  if (/; wv\)/.test(navigator.userAgent)) { const a = document.createElement("a"); a.href = "inari-share:" + encodeURIComponent(text); a.click(); return; }
+  await copyText(text); toast(t("Copied: paste it where you want to share it")); }
+$("msgs").addEventListener("click", async (e) => { const b = e.target.closest(".msg .ma"); if (!b) return; const m = b.closest(".msg[data-event]"), ev = events.find((x) => x.id === m.dataset.event); if (!ev) return;
+  const act = b.dataset.act;
+  if (act === "copy") { await copyText(ev.text); toast(t("Copied")); }
+  else if (act === "share") shareText(ev.text);
+  else if (act === "quote") { const box = $("msg"), q = ev.text.trim().split("\n").map((l) => "> " + l).join("\n") + "\n\n"; box.value = box.value ? box.value.replace(/\s*$/, "\n\n") + q : q; box.focus(); box.setSelectionRange(box.value.length, box.value.length); box.dispatchEvent(new Event("input")); }
+  else if (act === "fork" && !(snap.ui && snap.ui.pass)) { forkAt = m.dataset.event; sheet(t("Start again from here?"), [[t("Fork from this message"), forkNow]], t("A new thread with the journal up to this message; this one stays as it is.")); } });
 addEventListener("resize", () => snap && drawTethers());
 /* Keyboard: Escape closes what is open, / searches, ? lists the shortcuts (outside text fields). */
 document.addEventListener("keydown", (e) => {

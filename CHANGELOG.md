@@ -19,6 +19,23 @@ Newest first. An entry says what changed for someone using the thing.
   workbench tabs aligned with them; the thread's *Actions* is its icon; in a narrow column the
   state leaves out its core and the model name is shortened (whole on hover). A bar that still
   lacks room wraps, it never hides a control.
+- **Fast models no longer slow Inari down.** Each piece of a streamed answer announced the thread's
+  phase again: it crossed the mesh and sent every open page a whole new snapshot, dozens of times a
+  second (400 pieces made 402 announcements). A thread now announces a new phase at once and the
+  same one at most once a second (`Runner::announce_state`, tested). The page no longer drops the
+  last news of a turn: a snapshot within the 1.5 s between two reloads of the thread schedules one
+  at the end of that time, and news during a reload is fetched right after it.
+
+- **A message's buttons.** Each message has Copy and Quote in my reply in its top corner, and Copy,
+  Share and Start again from here under its text (icons only on a phone). Share opens the system's
+  share sheet; in the Android app, Android's (the page asks for an `inari-share:` address, which the
+  app turns into a share intent). The long press on a message is gone: on a phone it also started
+  the system's text selection and its copy bar.
+
+- **Send while the agent works.** During a turn, Stop and Send sit side by side. A message sent then
+  shows at once as waiting, and takes its place in the thread when the agent reads it, when the
+  step ends (the core already queued it; the page did not show it).
+
 - **The mascot at the top of the conversation.** With a thread open and the sidebar folded, the
   mascot floats at the top centre of the conversation, just under the thread's bar, as large as in
   the sidebar (it was 96 px against the top edge), in a band of its own: the thread scrolls below

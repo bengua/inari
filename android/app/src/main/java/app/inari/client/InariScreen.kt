@@ -81,6 +81,18 @@ object InariHost {
         return a.host.equals(b.host, ignoreCase = true) && port(a) == port(b)
     }
 
+    /**
+     * The text the page asks to share ("inari-share:" then the text, percent-encoded): a WebView has
+     * no share sheet of its own, so the page asks the app for Android's. Null for any other address.
+     */
+    fun sharedText(url: String): String? {
+        if (!url.startsWith(SHARE)) return null
+        return runCatching { java.net.URLDecoder.decode(url.removePrefix(SHARE), "UTF-8") }
+            .getOrNull()?.takeIf { it.isNotBlank() }
+    }
+
+    private const val SHARE = "inari-share:"
+
     /** What to tell the person when the page does not load: a step they can take, by cause. */
     fun hint(why: String): Int = when {
         why == "certificate" -> R.string.inari_hint_certificate
@@ -209,6 +221,16 @@ fun InariScreen(onMenu: () -> Unit, shared: Handoff? = null, sharedTaken: () -> 
                     webViewClient = object : WebViewClient() {
                         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                             if (InariHost.sameOrigin(settings.inariUrl, request.url.toString())) return false
+                            InariHost.sharedText(request.url.toString())?.let { text ->
+                                runCatching {
+                                    val send = android.content.Intent(android.content.Intent.ACTION_SEND)
+                                        .setType("text/plain")
+                                        .putExtra(android.content.Intent.EXTRA_TEXT, text)
+                                    ctx.startActivity(android.content.Intent.createChooser(send, null)
+                                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                                }
+                                return true
+                            }
                             runCatching {
                                 ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, request.url)
                                     .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))

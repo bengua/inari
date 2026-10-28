@@ -252,3 +252,8 @@ Correctifs poussés depuis la première installation :
 ## Si quelque chose casse après merge
 
 Chaque lot est un commit indépendant : `git revert <sha>` annule un lot sans toucher aux autres. Seuls les lots 2 et 3 dépendent l'un de l'autre (le 3 ajoute `i18n.js` à la liste créée par le 2). Revenir sur le lot 4 rend à la page son ancien mode de connexion par jeton.
+- (commits suivants, 28/10) :
+  - **Lenteurs avec les modèles rapides** : chaque morceau de réponse republiait l'état du fil sur le maillage, et chaque page recevait tout l'état à chaque fois (400 morceaux = 402 annonces). Un fil n'annonce plus que les changements d'état, et au plus une fois par seconde le même état (`agent.rs`, `announce_state`, testé). La page ne laisse plus la fin d'une réponse invisible : une nouvelle arrivée pendant le délai de 1,5 s entre deux rechargements du fil est rechargée à la fin de ce délai.
+  - **Boutons des messages** : en haut, Copier et Citer dans ma réponse ; en bas, Copier, Partager, Recommencer d'ici (icônes seules sur téléphone). Dans l'APK, Partager ouvre le menu Partager d'Android (`InariScreen.kt`, adresse `inari-share:`). L'appui long sur un message est supprimé : il lançait aussi la sélection de texte d'Android et sa barre copier/coller.
+  - **Envoyer pendant que l'agent travaille** : Stop et Envoyer côte à côte ; le message s'affiche « en attente » et l'agent le lit à la fin de l'étape en cours.
+
