@@ -53,6 +53,18 @@ are all configuration, and every default is empty.
   its permission requests to the phone, cancels it when a teleport freezes the agent, and,
   on a machine whose agent has no memory of the thread, opens a session primed with the
   journal so far.
+- **OpenFox, natively.** `"openfox": {"kind": "openfox"}` drives the machine's own OpenFox
+  through its REST API and WebSocket, the ones its web interface uses, with no bridge process
+  (`src/openfox.rs`). One WebSocket per thread, kept between turns; a dropped one is opened
+  again and a quiet session asked how it is, so the end of a turn is never missed; a message
+  sent during a turn goes to OpenFox's own queue, which takes it at its next step. Its settings
+  (address, the agent a new thread starts with, a turn's limit), its sign-in and its default
+  model are set from the interface (Settings → OpenFox) and kept in
+  `<data_dir>/openfox/<harness>/` (`settings.json`, `token` in mode 600, `sessions.json`). A node
+  that never set them reads `openfox-acp`'s (`~/.config/openfox-acp/{url,token}`, or
+  `$OPENFOX_ACP_DIR`). OpenFox must be served over `http://` on the core's own machine: it works
+  on the thread's files, which the core lays out locally. `prepare` and `update` work as for
+  any harness. Providers are read without their API keys.
 - **Getting a model ready.** A harness may name a command run before each turn of a thread
   whose model was chosen, with `{model}` replaced by the model id:
   `"prepare": ["load-model", "{model}"], "prepare_timeout": 600`. It is how a local model is
@@ -137,7 +149,7 @@ A harness may say where it comes from:
 ```json
 "claude": {"command": ["<path to claude-agent-acp>"],
            "update": {"npm": "@zed-industries/claude-agent-acp", "prefix": "<npm global prefix>"}},
-"openfox": {"command": ["<path to openfox-acp>"],
+"openfox": {"kind": "openfox",
             "update": {"npm": "openfox", "restart": ["systemctl", "--user", "restart", "openfox.service"]}}
 ```
 

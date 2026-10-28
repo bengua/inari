@@ -19,6 +19,17 @@ Newest first. An entry says what changed for someone using the thing.
   workbench tabs aligned with them; the thread's *Actions* is its icon; in a narrow column the
   state leaves out its core and the model name is shortened (whole on hover). A bar that still
   lacks room wraps, it never hides a control.
+- **OpenFox, driven natively.** A harness `{"kind": "openfox"}` speaks to the machine's own
+  OpenFox through its REST API and WebSocket instead of the Python `openfox-acp` bridge started
+  for each message: one WebSocket per thread kept between turns, reconnection, an end of turn
+  found by asking when OpenFox's own signal is lost (the bridge waited for the turn's limit), and
+  a message sent during a turn handed to OpenFox's own queue, which takes it at its next step.
+  OpenFox's messages are read into types; providers without their API keys. Settings → OpenFox
+  sets, per core, its address, the agent a new thread starts with, a turn's limit, the sign-in
+  (OpenFox's password, exchanged for a token kept in mode 600, never the password) and OpenFox's
+  default model, listed from OpenFox itself. `docs/openfox-dans-inari-fr.md` maps what Inari's
+  interface already carries of OpenFox's and what comes next.
+
 - **The answer shows as the model writes it.** The core kept a model's text until the answer
   ended (or a tool was called) and only then showed it whole. It now sends the answer so far to the
   pages as it comes (`draft.<agent>` on the bus, at most every 120 ms, outside `agent.>` so a late

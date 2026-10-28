@@ -569,6 +569,60 @@ impl Node {
         m
     }
 
+    /// How each OpenFox this node drives natively is (by harness name): its settings, whether it
+    /// answers and is signed in, its providers and models (never their keys).
+    async fn openfox_status(&self) -> Map<String, Value> {
+        let mut out = Map::new();
+        if let Some(r) = &self.runner {
+            for (name, h) in &r.harnesses {
+                if let Some(fox) = h.openfox() {
+                    out.insert(name.clone(), fox.status().await);
+                }
+            }
+        }
+        out
+    }
+
+    /// An OpenFox setting changed from the interface: done here, the result said on the bus.
+    async fn openfox_action(&self, action: &str, p: &Value) {
+        let harness = s(p, "harness");
+        let fox = self
+            .runner
+            .as_ref()
+            .and_then(|r| r.harnesses.get(&harness))
+            .and_then(|h| h.openfox());
+        let result = match (fox, action) {
+            (None, _) => Err(format!("no OpenFox harness {harness:?} on this core")),
+            (Some(f), "set") => {
+                let mut next = f.settings();
+                if let Some(u) = p.get("url").and_then(Value::as_str) {
+                    next.url = u.trim().trim_end_matches('/').to_string();
+                }
+                if let Some(m) = p.get("mode").and_then(Value::as_str) {
+                    next.mode = m.to_string();
+                }
+                if let Some(t) = p.get("turn_timeout").and_then(Value::as_u64) {
+                    next.turn_timeout = t;
+                }
+                f.set_settings(next)
+            }
+            (Some(f), "login") => f.login(&s(p, "password")).await,
+            (Some(f), "activate") => f.activate(&s(p, "provider"), &s(p, "model")).await,
+            (Some(_), "check") => Ok(()),
+            (Some(_), other) => Err(format!("unknown OpenFox action {other:?}")),
+        };
+        self.refresh
+            .store(true, std::sync::atomic::Ordering::Relaxed); // the next heartbeat says how it is now
+        let (ok, error) = match result {
+            Ok(()) => (true, String::new()),
+            Err(e) => (false, e),
+        };
+        self.bus.publish(
+            &format!("node.{}.openfox.result", self.cfg.node_id),
+            json!({"node": self.cfg.node_id, "harness": harness, "action": action, "ok": ok, "error": error}),
+        );
+    }
+
     /// What each harness announces: models, modes, slash commands (one map each, by harness).
     async fn harness_probes(&self) -> (Map<String, Value>, Map<String, Value>, Map<String, Value>) {
         let scratch = self.cfg.data_dir.join("scratch");
@@ -627,6 +681,7 @@ impl Node {
             );
         }
         let mut models_at: Option<std::time::Instant> = None;
+        let mut openfox_at: Option<std::time::Instant> = None;
         let mut last_packets = packets();
         let mut first = true;
         let period = Duration::from_secs_f64(cfg.heartbeat.max(0.05));
@@ -653,6 +708,15 @@ impl Node {
                 info.capabilities
                     .insert("harness_commands".into(), Value::Object(commands));
                 models_at = Some(std::time::Instant::now());
+            }
+            if forced || openfox_at.is_none_or(|t| t.elapsed() > Duration::from_secs(60)) {
+                // how each natively driven OpenFox is, for its settings in the interface
+                let status = self.openfox_status().await;
+                if !status.is_empty() {
+                    info.capabilities
+                        .insert("openfox".into(), Value::Object(status));
+                }
+                openfox_at = Some(std::time::Instant::now());
             }
             let updates = self.updates.lock().expect("not poisoned").clone();
             if !updates.is_empty() {
@@ -1035,6 +1099,14 @@ impl Node {
             }
         });
         let me = self.cfg.node_id.clone();
+        for action in ["set", "login", "activate", "check"] {
+            self.on(
+                &format!("node.{me}.openfox.{action}"),
+                move |n, m| async move {
+                    n.openfox_action(action, &m.payload).await;
+                },
+            );
+        }
         self.on(&format!("node.{me}.update"), |n, m| async move {
             let harness = s(&m.payload, "harness");
             tokio::spawn(async move { n.update_harness(&harness).await }); // npm can take minutes

@@ -143,3 +143,23 @@ fn french_keeps_every_placeholder() {
         );
     }
 }
+
+#[test]
+fn no_text_is_translated_twice() {
+    let js = web("i18n.js");
+    let body = js
+        .split_once("/* FR-START */")
+        .and_then(|(_, rest)| rest.split_once("/* FR-END */"))
+        .expect("the French table is marked")
+        .0;
+    let mut seen = BTreeSet::new();
+    let twice: Vec<String> = body
+        .lines()
+        .filter_map(|l| literals(l).into_iter().next())
+        .filter(|k| !seen.insert(k.clone()))
+        .collect();
+    assert!(
+        twice.is_empty(),
+        "translated twice (the last one wins, silently): {twice:?}"
+    );
+}

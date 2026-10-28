@@ -199,6 +199,43 @@ Attendu : un JSON qui commence par `{"current":` ou `{"personas":` et qui cite d
 d'eux apparaît, `$FOXDIR/personas.json` manque ou est ancien : refais l'étape 5. Si la liste est vide (`"personas":[]`), l'étape 5 n'a pas pris : vérifie que `mascot_dir` vaut
 bien `$FOXDIR` et que le service a redémarré.
 
+## Étape 7 bis — Passer OpenFox en natif (sans `openfox-acp`)
+
+À faire sur chaque machine où tourne OpenFox **et** dont la configuration a un harnais OpenFox. Inari parle alors
+directement à OpenFox. Le pont `openfox-acp` (Python) n'est plus lancé, mais reste installé tant que Ben n'a pas
+validé : le retour en arrière est immédiat.
+
+```bash
+grep -n "openfox-acp" "$CONF"
+```
+Attendu : une ligne du genre `"openfox": {"command": ["/…/openfox-acp"], …}`. Note le nom du harnais (ici `openfox`).
+S'il n'y a aucune ligne, cette machine n'a pas de harnais OpenFox : passe à l'étape 8.
+
+```bash
+cp "$CONF" "$CONF.prev-openfox"
+if command -v jq >/dev/null; then
+  jq '(.harnesses // {}) |= with_entries(if ((.value.command // []) | tostring | test("openfox-acp")) then .value |= (del(.command) + {kind: "openfox"}) else . end)' "$CONF" > "$CONF.new" && mv "$CONF.new" "$CONF"
+fi
+grep -n '"kind": *"openfox"' "$CONF"
+```
+Attendu : une ligne avec `"kind": "openfox"`. Sans `jq`, ou si la commande n'affiche rien : ouvre `$CONF` et, dans
+le harnais OpenFox, remplace `"command": [ … openfox-acp … ]` par `"kind": "openfox"`. Garde la section
+`"update"` si elle existe, et vérifie que le fichier reste du JSON valide (une virgule entre deux champs).
+
+```bash
+systemctl --user restart inari-core.service
+sleep 5
+systemctl --user is-active inari-core.service
+journalctl --user -u inari-core.service -n 20 --no-pager | grep -i "openfox" || echo "aucune erreur OpenFox"
+```
+Attendu : `active`, puis `aucune erreur OpenFox`. Une ligne `openfox: … HTTP 401` veut dire que le jeton manque :
+Ben se connecte depuis l'interface (étape 10, point 10). Toute autre erreur `openfox:` : envoie-la à Ben.
+
+**Retour en arrière** (seulement si quelque chose ne va pas) :
+```bash
+cp "$CONF.prev-openfox" "$CONF" && systemctl --user restart inari-core.service
+```
+
 ## Étape 8 — Les autres machines
 
 Refais les étapes 1, 2, 3 et 6 sur **chaque** autre machine où tourne `inari-core.service`. Fais aussi les étapes 4
@@ -240,6 +277,10 @@ Ouvrir la webapp, puis :
    envoyé s'affiche « en attente », et l'agent le lit à la fin de son tour (sans être interrompu). Seul un harnais
    avec `"steer": true` dans la config s'arrête plus tôt, à la fin de l'outil en cours. Ne l'ajoute pas toi-même.
 9. Une réponse d'un modèle cloud s'écrit à l'écran au fil de l'eau, sans saccade de la page.
+10. Réglages (l'engrenage) → OpenFox → « Réglages de <cœur> » : « Connecté à OpenFox · N fournisseurs ». Si
+    OpenFox demande son mot de passe, le taper et « Se connecter ». La liste « Modèle par défaut d'OpenFox » montre
+    les modèles d'OpenFox lui-même. Un fil OpenFox répond au fil de l'eau ; un message envoyé pendant qu'il
+    travaille est pris par OpenFox à sa prochaine étape, sans rien annuler.
 
 ## Étape 11 — Le compte rendu à envoyer à Ben
 
@@ -247,7 +288,8 @@ Envoie un message court avec :
 - pour chaque machine : son nom, `active` ou non, et la ligne `node … up` du journal ;
 - le résultat des commandes de l'étape 7 ;
 - toute étape où tu t'es arrêté, avec la sortie complète ;
-- la confirmation que les fichiers `.prev` existent (`ls -l "$BIN.prev" "$CONF.prev"`).
+- la confirmation que les fichiers `.prev` existent (`ls -l "$BIN.prev" "$CONF.prev"`) ;
+- pour l'étape 7 bis : le nom du harnais passé en natif, et la sortie du `journalctl`.
 
 **Ne pas faire** : installer l'APK Android (il n'est pas compilé et pas nécessaire pour ce test), fusionner la
 branche, supprimer les `.prev`.

@@ -103,6 +103,8 @@ struct State {
     passes: Vec<Value>,
     /// Each thread's answer so far, while its model writes it (`draft.<agent>`).
     drafts: HashMap<String, String>,
+    /// The last OpenFox setting changed from the interface, by "node/harness": done or why not.
+    openfox_results: BTreeMap<String, Value>,
 }
 
 /// A clone onto a harness the thread's core lacks: fork it there, teleport the copy to a
@@ -509,6 +511,15 @@ impl Gateway {
                 .retain(|n| n.get("node_id").and_then(Value::as_str) != Some(node.as_str()));
         });
         self.on("teleport.result", |_, st, m| st.results.push(m.payload));
+        self.on("node.*.openfox.result", |_, st, m| {
+            let key = format!("{}/{}", s(&m.payload, "node"), s(&m.payload, "harness"));
+            let mut r = m.payload;
+            r["at"] = json!(std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0));
+            st.openfox_results.insert(key, r);
+        });
         self.on("mesh.passes", |_, st, m| {
             st.passes = m
                 .payload
@@ -614,6 +625,7 @@ impl Gateway {
             "ui": ui,
             "approvals": st.approvals.values().cloned().collect::<Vec<_>>(),
             "update_jobs": st.update_jobs,
+            "openfox_results": st.openfox_results,
         })
     }
 
@@ -711,7 +723,7 @@ impl Gateway {
                                            "harness_modes": modes, "harness_commands": commands});
             }
         }
-        for k in ["moves", "update_jobs"] {
+        for k in ["moves", "update_jobs", "openfox_results"] {
             snap[k] = json!({});
         }
         snap["results"] = json!([]);
@@ -1676,6 +1688,24 @@ impl Gateway {
                     &format!("node.{}.update", s(d, "node")),
                     json!({"harness": s(d, "harness")}),
                 );
+                ok
+            }
+            "/api/openfox" => {
+                // an OpenFox setting from the interface: its address, agent, limit; sign-in; the
+                // active provider; a check. The node does it and says how it went.
+                let action = s(d, "action");
+                if !need(&["node", "harness", "action"])
+                    || !["set", "login", "activate", "check"].contains(&action.as_str())
+                {
+                    return bad;
+                }
+                let mut p = d.clone();
+                if let Some(o) = p.as_object_mut() {
+                    o.remove("node");
+                    o.remove("action");
+                }
+                self.bus
+                    .publish(&format!("node.{}.openfox.{action}", s(d, "node")), p);
                 ok
             }
             "/api/update/check" => {

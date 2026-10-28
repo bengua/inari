@@ -291,7 +291,43 @@ $("usageBtn").onclick = () => { store.set("usageOpen", !store.get("usageOpen", f
 $("pill").onclick = () => openPop($("pill"), updatesPanel);
 $("gear").onclick = () => openPop($("gear"), (pop) => { pop.insertAdjacentHTML("beforeend", `<h3>${esc(t("Appearance"))}</h3>`); const seg = document.createElement("div"); seg.className = "seg"; for (const th of ["auto", "light", "dark"]) { const b = document.createElement("button"); b.className = "btn small" + (store.get("theme", "auto") === th ? " on" : ""); b.textContent = t(th); b.onclick = () => { theme(th); pop.classList.remove("open"); }; seg.append(b); } pop.append(seg);
   pop.insertAdjacentHTML("beforeend", `<h3 style="margin-top:12px">${esc(t("Language"))}</h3>`); const langs = document.createElement("div"); langs.className = "seg"; for (const [code, name] of Object.entries(LANGS)) { const b = document.createElement("button"); b.className = "btn small" + (LANG === code ? " on" : ""); b.textContent = name; b.lang = code; b.onclick = () => { if (code === LANG) return; setLang(code); saveDraft(); location.reload(); }; langs.append(b); } pop.append(langs);
+  // OpenFox, on each core that drives it natively: its settings live here, not in a file
+  const foxes = (snap ? snap.nodes : []).flatMap((n) => Object.keys((n.capabilities || {}).openfox || {}).map((h) => [n.node_id, h]));
+  if (foxes.length) { pop.insertAdjacentHTML("beforeend", `<h3 style="margin-top:12px">OpenFox</h3>`); const box = document.createElement("div"); box.className = "seg";
+    for (const [node, h] of foxes) { const b = document.createElement("button"); b.className = "btn small"; b.textContent = foxes.length > 1 ? `${node} · ${h}` : t("Settings of {name}", { name: node }); b.onclick = () => { pop.classList.remove("open"); openfoxSheet(node, h); }; box.append(b); } pop.append(box); }
   pop.insertAdjacentHTML("beforeend", `<h3 style="margin-top:12px">${esc(t("Session"))}</h3>`); const out = document.createElement("button"); out.className = "btn small"; out.textContent = t("Sign out"); out.onclick = signOut; pop.append(out); });
+
+/* ---------- OpenFox's settings on a core (the core keeps them; nothing is written by hand) ---------- */
+function openfoxSheet(node, harness, said) {
+  const n = snap.nodes.find((x) => x.node_id === node), st = ((n && n.capabilities && n.capabilities.openfox) || {})[harness] || {};
+  const form = document.createElement("div"); form.className = "passform foxform";
+  const line = (cls, text) => { const p = document.createElement("p"); p.className = cls; p.textContent = text; form.append(p); return p; };
+  if (st.reachable === false) line("bad", t("OpenFox does not answer: {why}", { why: st.problem || "" }));
+  else if (st.password && !st.signed_in) line("warn", t("OpenFox asks for its password: sign in below."));
+  else line("good", t("Connected to OpenFox · {n} providers", { n: (st.providers || []).length }));
+  if (said) line(said.ok ? "good" : "bad", said.ok ? t("Done.") : said.error);
+  const field = (label, el) => { const l = document.createElement("label"); l.className = "col"; const sp = document.createElement("span"); sp.textContent = label; l.append(sp, el); form.append(l); return el; };
+  const url = field(t("OpenFox's address"), Object.assign(document.createElement("input"), { type: "text", value: st.url || "", placeholder: "http://127.0.0.1:10369", spellcheck: false }));
+  const mode = field(t("Agent a new thread starts with"), document.createElement("select"));
+  for (const m of st.modes || []) mode.append(new Option(`${m.name} — ${m.description}`, m.id, false, m.id === st.mode));
+  const limit = field(t("Longest turn"), document.createElement("select")), mins = [5, 15, 30, 60, 120, 240, 480];
+  if (st.turn_timeout && !mins.includes(st.turn_timeout / 60)) mins.push(Math.round(st.turn_timeout / 60));
+  for (const m of mins.sort((a, b) => a - b)) limit.append(new Option(m < 60 ? t("{n} min", { n: m }) : t("{n} h", { n: m / 60 }), m * 60, false, m * 60 === st.turn_timeout));
+  const act = async (action, extra) => { const at = Math.floor(Date.now() / 1000), key = `${node}/${harness}`;
+    const r = await api("/api/openfox", { node, harness, action, ...extra }); if (r.error) return toast(t(r.error));
+    toast(t("Sent to {name}…", { name: node }));
+    if (await until(() => ((snap.openfox_results || {})[key] || {}).at >= at, 20000)) setTimeout(() => openfoxSheet(node, harness, snap.openfox_results[key]), 2500); else toast(t("{name} did not answer", { name: node })); };
+  const save = document.createElement("button"); save.className = "btn small go"; save.type = "button"; save.textContent = t("Save"); form.append(save);
+  save.onclick = () => act("set", { url: url.value.trim(), mode: mode.value, turn_timeout: Number(limit.value) });
+  if (st.password) { const pw = field(st.signed_in ? t("Signed in. Sign in again (OpenFox's password)") : t("OpenFox's password"), Object.assign(document.createElement("input"), { type: "password", autocomplete: "current-password" }));
+    const go = document.createElement("button"); go.className = "btn small"; go.type = "button"; go.textContent = t("Sign in"); form.append(go);
+    go.onclick = () => { if (pw.value) act("login", { password: pw.value }); pw.value = ""; }; }
+  if ((st.providers || []).length) { const pick = field(t("OpenFox's default model"), document.createElement("select"));
+    for (const p of st.providers) { const g = document.createElement("optgroup"); g.label = `${p.name || p.id}${p.local ? " · " + t("local") : ""}${p.id === st.active_provider ? " · " + t("active") : ""}`;
+      (p.models || []).forEach((m, i) => g.append(new Option(m, `${p.id}\n${m}`, false, p.id === st.active_provider && i === 0))); pick.append(g); }
+    const use = document.createElement("button"); use.className = "btn small"; use.type = "button"; use.textContent = t("Make it OpenFox's default"); form.append(use);
+    use.onclick = () => { const [provider, model] = pick.value.split("\n"); act("activate", { provider, model }); }; }
+  sheet(t("OpenFox on {name}", { name: node }), [[t("Check"), () => act("check", {})]], t("These settings are kept by the core. Models and providers come from OpenFox itself."), form); }
 
 /* ---------- the mascot: FoxBot when its folder is served, else the orb ---------- */
 let foxFrame = null, foxReady = false, foxLast = "";
