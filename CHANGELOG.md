@@ -183,6 +183,9 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Fixed
 
+- **The workbench tabs can be clicked.** The handle that resizes the workbench took the panes'
+  340 px minimum width and lay over the tabs (Artifacts, Terminal, Viewer, Journal); it is 8 px
+  again, and still resizes.
 - **The mascot's actions are tiles while a thread is carried**, beside the others: *Summarise it*,
   *Put it to sleep*, and a red *Delete…* that asks before deleting (as the menu does). They work
   whether or not the mascot can be reached.
