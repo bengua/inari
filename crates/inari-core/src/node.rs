@@ -43,6 +43,9 @@ pub struct HarnessSpec {
     /// Environment of pass threads (`{pass}` = pass id), replacing the owner's: see AcpHarness.
     #[serde(default)]
     pub pass_env: BTreeMap<String, String>,
+    /// Read a message sent during a turn at the next tool boundary (see AcpHarness::steer).
+    #[serde(default)]
+    pub steer: bool,
     /// Where the harness comes from, to offer and install its updates.
     #[serde(default)]
     pub update: Option<UpdateSpec>,
@@ -408,6 +411,7 @@ impl Node {
                     h.extra_env = spec.env.clone();
                     h.prepare = spec.prepare.clone();
                     h.pass_env = spec.pass_env.clone();
+                    h.steer = spec.steer;
                     h.prepare_timeout = Duration::from_secs_f64(spec.prepare_timeout.max(1.0));
                     (name.clone(), h)
                 })

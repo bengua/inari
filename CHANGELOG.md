@@ -43,10 +43,11 @@ Newest first. An entry says what changed for someone using the thing.
   the system's text selection and its copy bar.
 
 - **Send while the agent works.** During a turn, Stop and Send sit side by side. A message sent then
-  shows at once as waiting, and takes its place in the thread when the agent reads it. ACP takes one
-  prompt at a time, so at the next step boundary (a tool finished, none running) the core stops the
-  step, keeping what it did, and the message goes to the same session right after; the thread notes
-  the pause. An answer being written without tools is never cut: the message waits for its end.
+  shows at once as waiting, and takes its place in the thread when the agent reads it: when its turn
+  ends, as ACP has it, so an agent's own way of working (OpenFox's) is never interrupted. A harness
+  with `"steer": true` reads it sooner: at the next tool boundary the core stops the step, keeping
+  what it did, and sends the message to the same session; the thread notes the pause. An answer
+  written without tools is never cut.
 
 - **The mascot at the top of the conversation.** With a thread open and the sidebar folded, the
   mascot floats at the top centre of the conversation, just under the thread's bar, as large as in

@@ -225,6 +225,10 @@ pub struct AcpHarness {
     /// pass id): a HOME of its own, so the agent reads none of the owner's instructions,
     /// tools or credentials. Empty: pass threads share the owner's environment.
     pub pass_env: BTreeMap<String, String>,
+    /// Stop the agent's step at the next tool boundary to read a message sent during its turn
+    /// (session/cancel, then the message). Off: the message waits for the turn to end, as ACP
+    /// has it, and the agent's own way of working (OpenFox's, say) is never interrupted.
+    pub steer: bool,
     models_set: Mutex<HashMap<String, String>>,
     modes_set: Mutex<HashMap<String, String>>,
 }
@@ -287,6 +291,7 @@ impl AcpHarness {
             prepare: Vec::new(),
             prepare_timeout: Duration::from_secs(600),
             pass_env: BTreeMap::new(),
+            steer: false,
             models_set: Mutex::default(),
             modes_set: Mutex::default(),
         }
@@ -741,11 +746,11 @@ impl AcpHarness {
                         let _ = rpc.send(&json!({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": sid}})).await;
                         cancelled = true;
                         summary.stopped = "frozen".into();
-                    } else if t.runner.waited_on(&t.agent) {
-                        // The person sent a message during the turn. ACP takes one prompt at a time, so at
-                        // the next step boundary (a step finished since, none running) this one stops,
-                        // keeping what it did, and the message goes to the same session right after.
-                        // An answer being written without tools is not cut: the message waits for its end.
+                    } else if self.steer && t.runner.waited_on(&t.agent) {
+                        // The person sent a message during the turn, and this harness lets it in (steer).
+                        // ACP takes one prompt at a time, so at the next step boundary (a step finished
+                        // since, none running) this one stops, keeping what it did, and the message goes
+                        // to the same session right after. An answer written without tools is not cut.
                         let from = *steer_from.get_or_insert(finished);
                         if finished > from && open_calls.is_empty() {
                             let _ = rpc.send(&json!({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": sid}})).await;

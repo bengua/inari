@@ -612,7 +612,19 @@ async fn a_streamed_answer_does_not_flood_the_mesh_with_its_phase() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_message_sent_during_a_turn_is_read_at_the_next_step() {
-    let l = lab(false, None);
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("acp.log");
+    let host = Arc::new(CapsuleHost::new("n1", &dir.path().join("node")).unwrap());
+    let mut harness = fake(&log, &dir.path().join("sessions.json"), false);
+    harness.steer = true; // this harness lets a message in at the next step
+    let runner = Runner::new(host, vec![("fake".into(), harness)], None, None);
+    let agent = runner.create("t1", "", "a title").unwrap();
+    let l = Lab {
+        _dir: dir,
+        log,
+        runner,
+        agent,
+    };
     let (runner, agent) = (Arc::clone(&l.runner), l.agent.clone());
     let started = std::time::Instant::now();
     let first =
@@ -679,4 +691,25 @@ async fn an_answer_without_steps_is_not_cut_for_a_message() {
         "{}",
         second.final_text
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn without_steer_the_agent_finishes_its_turn_before_the_message() {
+    let l = lab(false, None); // steer is off unless the harness asks for it (OpenFox's own way of working)
+    let (runner, agent) = (Arc::clone(&l.runner), l.agent.clone());
+    let first =
+        tokio::spawn(async move { runner.run(&agent, "please do the steps", vec![]).await });
+    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+    let second = l.runner.run(&l.agent, "change of plan", vec![]).await;
+    let first = first.await.unwrap();
+    assert_eq!(first.stopped, "done");
+    assert_eq!(first.final_text, "all six steps done");
+    assert!(
+        second.final_text.contains("change of plan"),
+        "{}",
+        second.final_text
+    );
+    assert!(!journal(&l)
+        .iter()
+        .any(|(k, d)| k == "checkpoint" && d["reason"] == "steered"));
 }

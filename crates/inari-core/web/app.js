@@ -497,7 +497,7 @@ function drawChat() {
   // a message sent during a turn waits for it to end; the agent read it once the journal has it as a user message,
   // after what the page held when it was sent (matched by its text: the message before it may only arrive now)
   let q = queued[selected] || []; if (q.length) { q = queued[selected] = q.filter((m) => !events.slice(m.after).some((e) => e.kind === "user_message" && (e.text || "").trim() === m.text));
-    q.forEach((m, i) => { const d = document.createElement("div"); d.className = "msg user queued"; d.dataset.k = `q${m.after}-${i}`; d.innerHTML = md(m.text) + `<div class="qnote">${esc(t("Waiting: the agent reads it when this step ends"))}</div>`; box.append(d); }); }
+    q.forEach((m, i) => { const d = document.createElement("div"); d.className = "msg user queued"; d.dataset.k = `q${m.after}-${i}`; d.innerHTML = md(m.text) + `<div class="qnote">${esc(t("Waiting: the agent reads it when it is ready"))}</div>`; box.append(d); }); }
   if (fresh) { shown.setAttribute("aria-live", "off"); setTimeout(() => shown.setAttribute("aria-live", "polite"), 600); } /* a thread just opened is not read aloud whole */
   reconcile(shown, box); if (atEnd || fresh) { th.scrollTop = th.scrollHeight; $("jump").hidden = true; } else if (shown.children.length > before) $("jump").hidden = false;
 }
@@ -642,8 +642,8 @@ $("ptitle").ondblclick = () => { if (selected) renameThread(selected); };
 /* Stop replaces Send while the thread works and the box is empty. */
 function drawStop() { const a = selected && snap && snap.agents[selected], busy = !!a && ["listening", "loading", "inference"].includes(a.phase), empty = !$("msg").value.trim() && !attachments.length; $("stopBtn").hidden = !busy; $("sendBtn").hidden = busy && empty;
   // while the agent works: Stop stays, and a message typed meanwhile can be sent; it is read when the step ends
-  const send = $("sendBtn"), say = busy ? t("Send: the agent reads it when this step ends") : t("Send"); send.title = say; send.setAttribute("aria-label", say);
-  if (a) $("msg").placeholder = busy ? t("Add a message: the agent reads it when this step ends…") : t("Message the agent…"); }
+  const send = $("sendBtn"), say = busy ? t("Send: the agent reads it when it is ready") : t("Send"); send.title = say; send.setAttribute("aria-label", say);
+  if (a) $("msg").placeholder = busy ? t("Add a message: the agent reads it when it is ready…") : t("Message the agent…"); }
 $("stopBtn").onclick = () => { if (selected) { api("/api/cancel", { agent: selected }); toast(t("Stopping…")); } };
 $("msg").addEventListener("input", drawStop); $("msg").addEventListener("input", () => requestAnimationFrame(placeFox));
 function actionSheet(id) { const a = snap.agents[id]; if (!a) return; const node = snap.nodes.find((n) => n.node_id === a.node) || {};

@@ -73,6 +73,11 @@ are all configuration, and every default is empty.
 - **Sandbox.** `"sandbox": "subprocess"` (default) or `"container"` with `"engine"`.
 - **Network.** The transport authenticates and signs frames but does not encrypt: bind to
   a private interface (WireGuard, Tailscale) or tunnel it.
+  A message sent while a turn runs waits for the turn to end, as ACP has it (one prompt at a time);
+  the agent's own way of working is never interrupted. A harness with `"steer": true` lets the
+  message in sooner: at the next tool boundary the core cancels the step (the agent keeps what it
+  did) and sends the message to the same session, journaling a `steered` checkpoint. Off by
+  default; worth it for an agent that takes a cancel well (Claude Code through claude-agent-acp).
 
 ## Interface options (hub with a gateway)
 

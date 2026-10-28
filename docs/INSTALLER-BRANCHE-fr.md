@@ -237,8 +237,8 @@ Ouvrir la webapp, puis :
    nouveau fil ; l'ancien reste tel quel. Un appui long sur
    un message ne lance plus la sélection de texte d'Android.
 8. Pendant que l'agent répond : Stop reste affiché ; taper un message fait apparaître Envoyer à côté. Le message
-   envoyé s'affiche « en attente » ; si l'agent enchaîne des outils, il s'arrête à la fin de l'outil en cours
-   (« Mis en pause… » dans le fil) et lit le message aussitôt.
+   envoyé s'affiche « en attente », et l'agent le lit à la fin de son tour (sans être interrompu). Seul un harnais
+   avec `"steer": true` dans la config s'arrête plus tôt, à la fin de l'outil en cours. Ne l'ajoute pas toi-même.
 9. Une réponse d'un modèle cloud s'écrit à l'écran au fil de l'eau, sans saccade de la page.
 
 ## Étape 11 — Le compte rendu à envoyer à Ben
