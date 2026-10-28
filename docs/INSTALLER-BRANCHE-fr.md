@@ -232,11 +232,13 @@ Ouvrir la webapp, puis :
 5. Glisser un fil : les tuiles « Le résumer », « L'endormir » et « Supprimer… » (rouge) apparaissent. « Supprimer »
    demande une confirmation.
 6. Réglages (l'engrenage) → Langue : bascule entre français et anglais.
-7. Sous chaque message : Copier, Partager, Recommencer d'ici ; en haut à droite : Copier et Citer. Un appui long sur
+7. Sous chaque message : Copier, Partager, Modifier (tes messages) ou Réessayer (ses réponses), Recommencer d'ici ;
+   en haut à droite : Copier et Citer (et Sélectionner le texte sur téléphone). Modifier et Réessayer ouvrent un
+   nouveau fil ; l'ancien reste tel quel. Un appui long sur
    un message ne lance plus la sélection de texte d'Android.
 8. Pendant que l'agent répond : Stop reste affiché ; taper un message fait apparaître Envoyer à côté. Le message
    envoyé s'affiche « en attente », puis l'agent le lit à la fin de son étape.
-9. Une réponse longue d'un modèle cloud s'affiche dès qu'elle est finie, sans retard ni saccade de la page.
+9. Une réponse d'un modèle cloud s'écrit à l'écran au fil de l'eau, sans saccade de la page.
 
 ## Étape 11 — Le compte rendu à envoyer à Ben
 

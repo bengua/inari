@@ -34,7 +34,10 @@ Newest first. An entry says what changed for someone using the thing.
   at the end of that time, and news during a reload is fetched right after it.
 
 - **A message's buttons.** Each message has Copy and Quote in my reply in its top corner, and Copy,
-  Share and Start again from here under its text (icons only on a phone). Share opens the system's
+  Share, Edit (your messages) or Retry (its answers), and Start again from here under its text (icons
+  only on a phone). A journal is never rewritten: Edit and Retry start a new thread from just before
+  the message (a fork; the thread stays as it is), with the message ready to change, or sent again.
+  On a touch screen, Select text lets the finger select part of a message. Share opens the system's
   share sheet; in the Android app, Android's (the page asks for an `inari-share:` address, which the
   app turns into a share intent). The long press on a message is gone: on a phone it also started
   the system's text selection and its copy bar.

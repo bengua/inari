@@ -15,6 +15,7 @@ const PATHS = {
   copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/>',
   share: '<circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="m8.2 10.8 7.6-4.6M8.2 13.2l7.6 4.6"/>',
   quote: '<path d="M6 8h4v4c0 3-1.5 4.5-4 5.5M14 8h4v4c0 3-1.5 4.5-4 5.5"/>',
+  retry: '<path d="M3 12a9 9 0 1 0 2.6-6.4L3 8"/><path d="M3 3v5h5"/>', select: '<path d="M4 7V5a1 1 0 0 1 1-1h2M17 4h2a1 1 0 0 1 1 1v2M20 17v2a1 1 0 0 1-1 1h-2M7 20H5a1 1 0 0 1-1-1v-2M9 9h6M9 12h6M9 15h4"/>',
   merge: '<circle cx="6" cy="19" r="2"/><circle cx="6" cy="5" r="2"/><circle cx="18" cy="12" r="2"/><path d="M6 7v10M6 7a7 7 0 0 0 10 5"/>',
 };
 const icon = (n) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${PATHS[n] || ""}</svg>`;
@@ -478,7 +479,7 @@ function drawChat() {
   let lastNote = "";
   const note = (html) => { if (html === lastNote) return; lastNote = html; box.insertAdjacentHTML("beforeend", `<div class="note">${html}</div>`); };
   for (let i = 0; i < events.length; i++) { const e = events[i];
-    if (e.kind === "user_message" || e.kind === "assistant_message") { lastNote = ""; const d = document.createElement("div"); d.className = "msg " + (e.kind === "user_message" ? "user" : "assistant"); d.dataset.event = d.dataset.k = e.id; d.innerHTML = msgTools(e.id) + md(e.text) + msgBar(); box.append(d); }
+    if (e.kind === "user_message" || e.kind === "assistant_message") { lastNote = ""; const d = document.createElement("div"); d.className = "msg " + (e.kind === "user_message" ? "user" : "assistant"); d.dataset.event = d.dataset.k = e.id; d.innerHTML = msgTools() + md(e.text) + msgBar(e.kind); box.append(d); }
     else if (e.kind === "tool_call") { lastNote = ""; const r = events[i + 1] && events[i + 1].kind === "tool_result" ? events[++i] : null, err = r && /^(denied|\w+Error)/.test(r.text);
       const d = document.createElement("details"); d.className = "tool" + (err ? " err" : ""); d.dataset.k = e.id; d.dataset.s = r ? r.id : ""; const shell = /^(\$ |bash|execute|shell|run)/.test(e.text);
       d.innerHTML = `<summary>${icon(shell ? "terminal" : "tool")}<span class="tn"></span><span class="ts">${esc(t(r ? (err ? "failed" : "done") : "running…"))}</span><span class="cv">${icon("chevron")}</span></summary><pre></pre>`;
@@ -716,9 +717,23 @@ $("cores").addEventListener("drop", async (e) => { const c = e.target.closest(".
   for (const f of files) attachments.push({ name: f.name, file: f }); drawComposer(); $("msg").focus(); toast(t("Say what to do with it")); });
 /* A message's own buttons: copy it or quote it in the reply (top), copy, share or start again from it (bottom).
    They replace the long press, which on a phone also started the system's text selection and its copy bar. */
-const msgTools = () => `<span class="mtools"><button type="button" class="ma" data-act="copy" title="${esc(t("Copy"))}" aria-label="${esc(t("Copy the message"))}">${icon("copy")}</button><button type="button" class="ma" data-act="quote" title="${esc(t("Quote in my reply"))}" aria-label="${esc(t("Quote in my reply"))}">${icon("quote")}</button></span>`;
-const msgBar = () => `<div class="mbar">${[["copy", "Copy", ""], ["share", "Share", ""], ["fork", "Start again from here", " own"]].map(([act, label, cls]) =>
-  `<button type="button" class="ma${cls}" data-act="${act}" title="${esc(t(label))}" aria-label="${esc(t(label))}">${icon(act)}<span>${esc(t(label))}</span></button>`).join("")}</div>`;
+// on a touch screen, "Select" lets the finger select part of the message (the message alone does not, see app.css)
+const msgTools = () => `<span class="mtools"><button type="button" class="ma sel" data-act="select" title="${esc(t("Select text"))}" aria-label="${esc(t("Select text"))}">${icon("select")}</button><button type="button" class="ma" data-act="copy" title="${esc(t("Copy"))}" aria-label="${esc(t("Copy the message"))}">${icon("copy")}</button><button type="button" class="ma" data-act="quote" title="${esc(t("Quote in my reply"))}" aria-label="${esc(t("Quote in my reply"))}">${icon("quote")}</button></span>`;
+const msgBar = (kind) => `<div class="mbar">${[["copy", "copy", "Copy", ""], ["share", "share", "Share", ""], kind === "user_message" ? ["edit", "edit", "Edit", " own"] : ["retry", "retry", "Retry", " own"], ["fork", "fork", "Start again from here", " own"]].map(([act, ic, label, cls]) =>
+  `<button type="button" class="ma${cls}" data-act="${act}" title="${esc(t(label))}" aria-label="${esc(t(label))}">${icon(ic)}<span>${esc(t(label))}</span></button>`).join("")}</div>`;
+/* Edit one of your messages, or retry an answer. A thread's journal is never rewritten, so a new thread starts from just
+   before that message (a fork: this one stays as it is), with the message ready to change, or sent again at once. */
+async function redo(eventId, send) {
+  let u = events.findIndex((e) => e.id === eventId); while (u >= 0 && events[u].kind !== "user_message") u--; if (u < 0) return;
+  const text = events[u].text || "", from = selected, id = (from.slice(0, 40) + "-v" + Math.random().toString(36).slice(2, 6));
+  if (u === 0) { // nothing before it to keep: a new thread on the same core
+    const a = snap.agents[from] || {}; selected = null; events = []; pendingCore = a.node || pendingCore; composing = true; renderTop(); drawChat(); drawComposer(); drawBench();
+    $("msg").value = text; if (send) $("composer").requestSubmit(); else { $("msg").focus(); drawStop(); } return; }
+  await api("/api/fork", { agent: from, new_thread: id, upto: events[u - 1].id });
+  toast(t(send ? "Trying again in a new thread; this one stays as it is" : "Change it in a new thread; this one stays as it is"));
+  if (!(await until(() => snap.agents[id], 15000))) return toast(t("The thread did not start"));
+  await select(id);
+  if (send) { await api("/api/message", { agent: id, text }); tlStamp = 0; } else { $("msg").value = text; $("msg").focus(); drawStop(); } }
 /* Share: the system's share sheet where the browser has one; in the Android app (a WebView, which has none) the
    app opens Android's own (an inari-share: address); elsewhere the text is copied to paste where it should go. */
 async function shareText(text) {
@@ -730,6 +745,8 @@ $("msgs").addEventListener("click", async (e) => { const b = e.target.closest(".
   if (act === "copy") { await copyText(ev.text); toast(t("Copied")); }
   else if (act === "share") shareText(ev.text);
   else if (act === "quote") { const box = $("msg"), q = ev.text.trim().split("\n").map((l) => "> " + l).join("\n") + "\n\n"; box.value = box.value ? box.value.replace(/\s*$/, "\n\n") + q : q; box.focus(); box.setSelectionRange(box.value.length, box.value.length); box.dispatchEvent(new Event("input")); }
+  else if (act === "select") { const on = !m.classList.contains("selecting"); document.querySelectorAll(".msg.selecting").forEach((x) => x.classList.remove("selecting")); if (on) { m.classList.add("selecting"); toast(t("Select with your finger; tap Select again to stop")); } }
+  else if ((act === "edit" || act === "retry") && !(snap.ui && snap.ui.pass)) redo(m.dataset.event, act === "retry");
   else if (act === "fork" && !(snap.ui && snap.ui.pass)) { forkAt = m.dataset.event; sheet(t("Start again from here?"), [[t("Fork from this message"), forkNow]], t("A new thread with the journal up to this message; this one stays as it is.")); } });
 addEventListener("resize", () => snap && drawTethers());
 /* Keyboard: Escape closes what is open, / searches, ? lists the shortcuts (outside text fields). */
