@@ -3,6 +3,12 @@
 > Écrit en français pour Ben, qui relit sans l'agent. Il est listé dans `.english-exceptions`.
 > Branche : `claude/laughing-maxwell-sc9qz4`. Aucune PR n'est ouverte : à toi de la créer après relecture.
 
+## En bref
+
+Six commits sur `claude/laughing-maxwell-sc9qz4`, chacun vérifié (`./verify.sh` : rustfmt, clippy, tests Rust, ruff, 139 tests Python) et essayé dans un vrai navigateur (Chromium), sur la démo Python et sur un vrai nœud Rust avec FoxBot. Seul le lot 5 (Android) n'a pas pu être compilé ici.
+
+Aucune PR n'est ouverte. Pour la créer après relecture : `main` ← `claude/laughing-maxwell-sc9qz4`.
+
 ## Comment relire
 
 1. `git log --oneline main..claude/laughing-maxwell-sc9qz4` : un commit par lot, chacun avec un message qui explique le pourquoi.
@@ -23,8 +29,8 @@
 | 2 | Page découpée en fichiers, polices servies, alternatives visibles aux gestes cachés | fait, testé |
 | 3 | Interface web FR/EN | fait, testé |
 | 4 | Sécurité de la page : cookie de session, CSP stricte, limites du serveur HTTP, frein aux essais | fait, testé |
-| 6 | Timeline incrémentale (la page ne retélécharge plus tout le fil) | fait, testé |
 | 5 | Android : bord à bord, partage sans saturer la mémoire, messages d'erreur utiles, chaînes | fait, **non compilé** |
+| 6 | Timeline incrémentale (la page ne retélécharge plus tout le fil) | fait, testé |
 
 ---
 
@@ -159,3 +165,21 @@ uvx --from 'fonttools[woff]' pyftsubset /tmp/b.ttf --unicodes="$U" --flavor=woff
 | `app.js` | `refreshDetail()`. Il ignore aussi une réponse arrivée après qu'on a changé de fil (avant, elle pouvait s'afficher dans le mauvais fil). |
 
 Vérifié dans Chromium : les requêtes portent bien `after=`, et le fil construit au fil de l'eau est identique au fil rechargé de zéro.
+
+---
+
+## Ce qui reste (du rapport de revue, pas traité ici)
+
+Par ordre d'importance pour une version commerciale :
+
+1. **Propriété des fils par métadonnée, et non par préfixe de nom** (rapport §3.2). Aujourd'hui, un fil appartient au pass `abc123` si son nom commence par `abc123-`, avec un id de pass de 6 caractères hex. C'est un risque réel pour la promesse « contrôle parental ». Le chantier touche le format des capsules et les deux implémentations : à décider avec toi.
+2. **Installation et premier lancement** (§1) : installeur, assistant de démarrage, appairage du téléphone par QR code, TLS intégré. C'est le plus gros écart avec un produit grand public.
+3. **Android** : R8, thème Material 3 et écran de démarrage, envoi natif par morceaux, saveur Play Store (voir le lot 5).
+4. **Code** : état typé (`serde` au lieu de `serde_json::Value`), découpage de `gateway.rs` (encore ~1 700 lignes), `tracing` pour les journaux, fin de la double implémentation Python/Rust (§5).
+5. **Tests d'interface** : les scénarios Playwright que j'ai utilisés (dans mon espace temporaire, perdus avec la session) gagneraient à entrer dans le dépôt, dans un `tests/ui/` lancé par `verify.sh` sur `inari-core demo`.
+6. **Juridique et marque** (§6) : licence MIT (n'importe qui peut revendre), titulaire différent selon les dépôts (Bengua / FreedzHost SASU), logos et personas de tiers, RGPD.
+7. **FoxBot** : les deux observations de la fin du lot 4 (animations de persona manquantes, lien symbolique `sprites_persona` refusé par le cœur Rust).
+
+## Si quelque chose casse après merge
+
+Chaque lot est un commit indépendant : `git revert <sha>` annule un lot sans toucher aux autres. Seuls les lots 2 et 3 dépendent l'un de l'autre (le 3 ajoute `i18n.js` à la liste créée par le 2). Revenir sur le lot 4 rend à la page son ancien mode de connexion par jeton.
