@@ -609,3 +609,74 @@ async fn a_streamed_answer_does_not_flood_the_mesh_with_its_phase() {
         "the answer is journaled: the draft ends"
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_sent_during_a_turn_is_read_at_the_next_step() {
+    let l = lab(false, None);
+    let (runner, agent) = (Arc::clone(&l.runner), l.agent.clone());
+    let started = std::time::Instant::now();
+    let first =
+        tokio::spawn(async move { runner.run(&agent, "please do the steps", vec![]).await });
+    tokio::time::sleep(std::time::Duration::from_millis(400)).await; // step 0 is running
+    let second = l.runner.run(&l.agent, "change of plan", vec![]).await;
+    let first = first.await.unwrap();
+    assert_eq!(
+        first.stopped,
+        "steered",
+        "{} / {} / {:?}",
+        first.error,
+        first.final_text,
+        started.elapsed()
+    );
+    assert!(
+        first.final_text.starts_with("stopped after step"),
+        "{}",
+        first.final_text
+    );
+    assert!(
+        !first.final_text.contains("step 5"),
+        "it did not run to the end: {}",
+        first.final_text
+    );
+    assert!(
+        second.final_text.contains("change of plan"),
+        "{}",
+        second.final_text
+    );
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(4),
+        "{:?}",
+        started.elapsed()
+    );
+    let kinds: Vec<(String, Value)> = journal(&l);
+    let steered = kinds
+        .iter()
+        .position(|(k, d)| k == "checkpoint" && d["reason"] == "steered")
+        .expect("the stop is in the journal");
+    let read = kinds
+        .iter()
+        .position(|(k, d)| k == "user_message" && d["text"] == "change of plan")
+        .expect("the message is in the journal");
+    assert!(steered < read, "stopped, then read: {kinds:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_answer_without_steps_is_not_cut_for_a_message() {
+    let l = lab(false, None);
+    let (runner, agent) = (Arc::clone(&l.runner), l.agent.clone());
+    let first = tokio::spawn(async move { runner.run(&agent, "please stream", vec![]).await });
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await; // the first turn holds the thread
+    let second = l.runner.run(&l.agent, "next one", vec![]).await;
+    let first = first.await.unwrap();
+    assert_eq!(first.stopped, "done");
+    assert!(
+        first.final_text.ends_with("w399"),
+        "the whole answer: {}",
+        first.final_text
+    );
+    assert!(
+        second.final_text.contains("next one"),
+        "{}",
+        second.final_text
+    );
+}

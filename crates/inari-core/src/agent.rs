@@ -40,7 +40,7 @@ pub type Approver =
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct RunSummary {
-    pub stopped: String, // done | frozen | error
+    pub stopped: String, // done | frozen | error | cancelled | steered (stopped for a message sent meanwhile)
     pub final_text: String,
     pub error: String,
 }
@@ -680,11 +680,20 @@ impl AcpHarness {
         let mut tick = tokio::time::interval(Duration::from_millis(500));
         let mut cancelled = false;
         let mut grace = 0u32;
+        // steps the agent finished (tool results), and how many it had when a message came meanwhile
+        let (mut finished, mut steer_from) = (0usize, None::<usize>);
         loop {
             tokio::select! {
                 biased;
                 Some(msg) = incoming.recv() => match msg {
-                    Incoming::Update(u) => self.on_update(t, &u, &mut text, &mut open_calls, &mut summary),
+                    Incoming::Update(u) => {
+                        if u.get("sessionUpdate").and_then(Value::as_str) == Some("tool_call_update")
+                            && matches!(u.get("status").and_then(Value::as_str), Some("completed" | "failed"))
+                        {
+                            finished += 1;
+                        }
+                        self.on_update(t, &u, &mut text, &mut open_calls, &mut summary)
+                    }
                     Incoming::Request(id, method, params) => {
                         let reply = if method == "session/request_permission" {
                             let title = params.pointer("/toolCall/title").and_then(Value::as_str).unwrap_or("an action").to_string();
@@ -732,6 +741,17 @@ impl AcpHarness {
                         let _ = rpc.send(&json!({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": sid}})).await;
                         cancelled = true;
                         summary.stopped = "frozen".into();
+                    } else if t.runner.waited_on(&t.agent) {
+                        // The person sent a message during the turn. ACP takes one prompt at a time, so at
+                        // the next step boundary (a step finished since, none running) this one stops,
+                        // keeping what it did, and the message goes to the same session right after.
+                        // An answer being written without tools is not cut: the message waits for its end.
+                        let from = *steer_from.get_or_insert(finished);
+                        if finished > from && open_calls.is_empty() {
+                            let _ = rpc.send(&json!({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": sid}})).await;
+                            cancelled = true;
+                            summary.stopped = "steered".into();
+                        }
                     }
                 }
             }
@@ -959,6 +979,8 @@ pub struct Runner {
     announced: Mutex<HashMap<String, (String, Instant)>>,
     /// When each agent's answer so far last went out (draft).
     drafted: Mutex<HashMap<String, Instant>>,
+    /// How many messages wait for each agent's running turn to end (run).
+    waiting: Mutex<HashMap<String, usize>>,
     /// Threads whose running turn a person asked to stop.
     pub cancels: Mutex<std::collections::HashSet<String>>,
     /// The last context use each agent reported.
@@ -983,6 +1005,7 @@ impl Runner {
             phases: Mutex::default(),
             announced: Mutex::default(),
             drafted: Mutex::default(),
+            waiting: Mutex::default(),
             cancels: Mutex::default(),
             usage: Mutex::default(),
             locks: Mutex::default(),
@@ -1007,6 +1030,15 @@ impl Runner {
                 json!({"agent": agent, "id": e.id, "kind": e.kind.as_str(), "text": text}),
             );
         }
+    }
+
+    /// Whether a message waits for this agent's running turn to end.
+    fn waited_on(&self, agent: &str) -> bool {
+        self.waiting
+            .lock()
+            .expect("not poisoned")
+            .get(agent)
+            .is_some_and(|n| *n > 0)
     }
 
     /// The answer so far, for the pages to show as the model writes it (`draft.<agent>`). It is
@@ -1349,7 +1381,16 @@ impl Runner {
         attachments: Vec<Attached>,
     ) -> RunSummary {
         let lock = self.lock(agent);
+        *self
+            .waiting
+            .lock()
+            .expect("not poisoned")
+            .entry(agent.into())
+            .or_default() += 1;
         let _guard = lock.lock().await;
+        if let Some(n) = self.waiting.lock().expect("not poisoned").get_mut(agent) {
+            *n = n.saturating_sub(1);
+        }
         if self.host.status(agent) != "running" {
             return RunSummary {
                 stopped: "frozen".into(),
@@ -1431,6 +1472,8 @@ impl Runner {
         let was_stopped = self.cancels.lock().expect("not poisoned").remove(agent);
         if was_stopped || summary.stopped == "cancelled" {
             let _ = self.journal(agent, EventKind::Checkpoint, json!({"reason": "stopped"}));
+        } else if summary.stopped == "steered" {
+            let _ = self.journal(agent, EventKind::Checkpoint, json!({"reason": "steered"}));
         }
         if let Err(e) = io::update_snapshot(&path, &workdir) {
             eprintln!("snapshot of {agent} failed: {e}");

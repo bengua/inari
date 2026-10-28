@@ -57,6 +57,7 @@ fr: /* FR-START */ {
  "Context": "Contexte",
  "Copied": "Copié",
  "Share": "Partager",
+ "Paused at the end of a step to read your message": "Mis en pause à la fin d'une étape pour lire ton message",
  "Edit": "Modifier",
  "Retry": "Réessayer",
  "Select text": "Sélectionner le texte",

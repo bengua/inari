@@ -29,6 +29,8 @@ struct Agent {
     log: Option<PathBuf>,
     sessions: Vec<String>,
     tools: u32,
+    /// The client cancelled the prompt being answered (it ends with stopReason "cancelled").
+    cancelled: bool,
     out: std::io::Stdout,
 }
 
@@ -159,9 +161,12 @@ impl Agent {
                 }
                 let cost = json!({"amount": 0.02, "currency": "USD"});
                 self.update(&sid, json!({"sessionUpdate": "usage_update", "used": 1200, "size": 8000, "cost": cost}));
-                self.send(
-                    json!({"jsonrpc": "2.0", "id": id, "result": {"stopReason": "end_turn"}}),
-                );
+                let stop = if std::mem::take(&mut self.cancelled) {
+                    "cancelled"
+                } else {
+                    "end_turn"
+                };
+                self.send(json!({"jsonrpc": "2.0", "id": id, "result": {"stopReason": stop}}));
             }
             _ => {} // session/cancel and anything else: nothing to answer
         }
@@ -237,6 +242,27 @@ impl Agent {
                 sid,
                 &format!("permission result: {}", chosen.as_deref().unwrap_or("None")),
             );
+            return true;
+        }
+        // "steps": six tool calls in a row; after each, a look at what the client sent meanwhile (a
+        // ping it answers): a cancel stops the work there, as a real agent does
+        if last.contains("steps") {
+            for i in 0..6 {
+                let call = format!("s{i}");
+                self.update(sid, json!({"sessionUpdate": "tool_call", "toolCallId": call, "title": format!("step {i}"), "kind": "execute"}));
+                std::thread::sleep(Duration::from_millis(200));
+                self.update(sid, json!({"sessionUpdate": "tool_call_update", "toolCallId": call, "status": "completed",
+                    "content": [{"type": "content", "content": {"type": "text", "text": format!("step {i} done")}}]}));
+                std::thread::sleep(Duration::from_millis(600));
+                self.send(json!({"jsonrpc": "2.0", "id": format!("ping{i}"), "method": "fake/ping", "params": {}}));
+                let mut line = String::new();
+                if input.read_line(&mut line).is_err() || line.contains("session/cancel") {
+                    self.say(sid, &format!("stopped after step {i}"));
+                    self.cancelled = true;
+                    return true;
+                }
+            }
+            self.say(sid, "all six steps done");
             return true;
         }
         // "stream": an answer in 400 small pieces, as a fast model streams it
@@ -418,6 +444,7 @@ pub fn serve(mode: Mode) -> i32 {
             .filter(|_| mode == Mode::Fake),
         sessions: Vec::new(),
         tools: 0,
+        cancelled: false,
         out: std::io::stdout(),
     };
     let stdin = std::io::stdin();
