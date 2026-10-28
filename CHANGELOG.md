@@ -117,6 +117,16 @@ Newest first. An entry says what changed for someone using the thing.
   (`inari-core-rs serve-endpoint | adopt | teleport | status`). Python and Rust nodes teleport
   agents to each other over TCP, in both directions.
 
+### Android
+
+- **The navigation bar no longer covers the composer** on Android 15, where apps are drawn edge to
+  edge: the view stands clear of it, and the page is told only the height the keyboard adds.
+- **A share cannot exhaust the phone's memory.** A shared file's size is read before the file; a
+  file over the limit is never read, and one whose size is unknown is read only up to the limit.
+- **A page that does not load says what to check** (the private network, the core, the
+  certificate, the address), the technical reason kept small below; the unlock prompt is
+  translated. Leftover strings from another app are gone.
+
 ### Security
 
 - **Sessions instead of a token in the page.** The page signs in once and holds an `HttpOnly`,

@@ -23,7 +23,7 @@
 | 2 | Page découpée en fichiers, polices servies, alternatives visibles aux gestes cachés | fait, testé |
 | 3 | Interface web FR/EN | fait, testé |
 | 4 | Sécurité de la page : cookie de session, CSP stricte, limites du serveur HTTP, frein aux essais | fait, testé |
-| 5 | Android : partage par morceaux, bord à bord, thème, chaînes traduites | à faire |
+| 5 | Android : bord à bord, partage sans saturer la mémoire, messages d'erreur utiles, chaînes | fait, **non compilé** |
 
 ---
 
@@ -122,3 +122,25 @@ uvx --from 'fonttools[woff]' pyftsubset /tmp/b.ttf --unicodes="$U" --flavor=woff
 
 1. **Animations de persona manquantes** : avec la persona `rebel`, `fox/sprites_persona/rebel/{cligne,rit,tourne}/` n'existe pas dans `inari-apk/fox-sprites-persona/`, ce qui donne des 404 (la mascotte se rabat sur une autre pose).
 2. **Lien symbolique `sprites_persona`** : `sprite.js` dit que ce dossier est un lien symbolique vers `fox-sprites-persona`. Or `serve_static` (Rust) canonicalise le chemin et **refuse tout fichier dont le chemin réel sort de `mascot_dir`** : un lien symbolique qui pointe ailleurs donne 404. Si ton déploiement repose sur ce lien, les personas ne s'affichent pas avec le cœur Rust. Deux solutions : copier ou monter les sprites dans `mascot_dir`, ou assouplir `serve_static` (refuser les `..` dans le chemin demandé au lieu de comparer les chemins canoniques). C'est à toi de choisir, car ça touche à la protection contre la traversée de répertoires.
+
+## Lot 5 : client Android (`android/` de ce dépôt)
+
+> ⚠️ **Non compilé.** Le SDK Android n'est pas téléchargeable depuis cet environnement : `dl.google.com` est bloqué par le proxy, et l'exécution d'un ktlint téléchargé a été refusée par sécurité. J'ai relu le diff ligne à ligne, mais **lance `android/build.sh` avant de publier**. Les tests JVM (`InariHostTest`) contiennent un nouveau cas qui tournera avec.
+
+| Problème | Correction | Où |
+|---|---|---|
+| Sur Android 15 (cible 35), l'affichage bord à bord est forcé : la barre de navigation gestuelle pouvait recouvrir la zone de saisie | `navigationBarsPadding()` sur la vue. La page ne reçoit plus que la hauteur que le clavier ajoute au-dessus de la barre (`ime - navigationBars`), sinon le décalage était compté deux fois. | `InariScreen.kt` |
+| Partager une grosse vidéo pouvait faire planter l'app (`readBytes()` lisait tout avant de vérifier la taille) | La taille (`OpenableColumns.SIZE`) est lue d'abord ; au-delà de 20 Mo, rien n'est lu. Si la taille est inconnue, on lit au plus 20 Mo + 1 octet (`readNBytesCompat`, car `readNBytes` exige l'API 33). | `sharePayload` |
+| L'écran d'erreur affichait `https://…: net::ERR_NAME_NOT_RESOLVED` | Une phrase actionnable selon la cause (réseau privé, cœur arrêté, certificat, autre), en EN et FR, avec le détail technique en petit dessous | `InariHost.hint`, `strings.xml` |
+| Invite biométrique en anglais en dur | `R.string.app_name` / `inari_unlock_subtitle` | `Lock.kt` |
+| Chaînes héritées de SwarmFox (garde-manger, liste de courses) | Supprimées (elles n'étaient plus utilisées) | `strings.xml` (EN et FR) |
+
+### Ce que je n'ai pas fait à l'aveugle (à faire avec un build sous la main)
+
+1. **R8 / minification** (`isMinifyEnabled = true`, `isShrinkResources = true` dans `android/app/build.gradle.kts`) : APK plus léger et code moins lisible. Il faut tester, car la réflexion et le WebView peuvent demander des règles `proguard-rules.pro`.
+2. **Thème Material 3 et écran de démarrage** : remplacer `@android:style/Theme.Material.NoActionBar` (manifeste) par un thème `Theme.Material3.DayNight.NoActionBar`, et ajouter `androidx.core:core-splashscreen` aux couleurs graphite et cuivre. Il faut une nouvelle dépendance et une vérification visuelle.
+3. **Envoi natif par morceaux** : aujourd'hui, un fichier partagé passe encore à la page en base64 via `evaluateJavascript` (jusqu'à 20 Mo, soit environ 27 Mo de texte). L'idéal est que l'app envoie elle-même le fichier à `/api/upload` par parties, avec le cookie de session de la WebView (`CookieManager`), puis ne passe à la page que le nom du fichier.
+4. **Deux saveurs** (`play` sans `REQUEST_INSTALL_PACKAGES`, `direct` avec mise à jour automatique) si tu vises le Play Store.
+5. **Version** : `versionCode`/`versionName` n'ont pas été incrémentés, ça dépend de ton processus de publication (`android/publish.sh`).
+
+**Bon à savoir sur les sessions (lot 4) côté app** : la WebView garde les cookies (`CookieManager`), donc un pass reste connecté entre deux lancements, comme avant avec le `localStorage`. Un téléphone qui avait un pass enregistré par l'ancienne page n'a rien à ressaisir : la nouvelle page l'échange contre un cookie au premier lancement.

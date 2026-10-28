@@ -25,8 +25,8 @@ object Lock {
                 override fun onAuthenticationError(code: Int, msg: CharSequence) = onFail(msg.toString())
             })
         prompt.authenticate(BiometricPrompt.PromptInfo.Builder()
-            .setTitle("Inari")
-            .setSubtitle("Unlock Inari")
+            .setTitle(activity.getString(R.string.app_name))
+            .setSubtitle(activity.getString(R.string.inari_unlock_subtitle))
             .setAllowedAuthenticators(allowed)
             .build())
     }
