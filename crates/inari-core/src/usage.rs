@@ -1,5 +1,4 @@
-//! Quotas and usage of the model providers, in one shape, as the Python reference
-//! (`inari_core.usage`): sources are adapters, the gateway polls them and puts the
+//! Quotas and usage of the model providers, in one shape: sources are adapters, the gateway polls them and puts the
 //! result in its snapshot. A local model has no quota: it is listed as unlimited.
 
 use serde_json::{json, Map, Value};

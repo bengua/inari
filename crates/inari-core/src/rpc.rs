@@ -1,6 +1,6 @@
 //! An `Endpoint` served and called over TCP, one connection per call, with the
-//! reference's method names, arguments and replies — so Rust and Python nodes can
-//! teleport agents to each other.
+//! method names, arguments and replies the retired Python nodes used, so a fleet moved
+//! from one to the other without a flag day.
 
 use crate::host::CapsuleHost;
 use crate::teleport::{CallError, CallResult, Endpoint};

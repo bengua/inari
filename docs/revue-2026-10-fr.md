@@ -1,6 +1,8 @@
 # Revue et corrections d'octobre 2026 : document de passation
 
 > Écrit en français pour Ben, qui relit sans l'agent. Il est listé dans `.english-exceptions`.
+>
+> **Depuis le lot 7, Inari est Rust only** : le paquet Python, ses tests et `uv` ont quitté le dépôt. Les lots 1 à 6 parlent encore de la passerelle Python (`gateway.py`, `tests/test_*.py`) : ces fichiers n'existent plus, mais leur équivalent Rust est resté. Pour la démo, la page est maintenant dans `crates/inari-core/web/`.
 > Branche : `claude/laughing-maxwell-sc9qz4`. Aucune PR n'est ouverte : à toi de la créer après relecture.
 
 ## En bref
@@ -12,13 +14,13 @@ Aucune PR n'est ouverte. Pour la créer après relecture : `main` ← `claude/la
 ## Comment relire
 
 1. `git log --oneline main..claude/laughing-maxwell-sc9qz4` : un commit par lot, chacun avec un message qui explique le pourquoi.
-2. Lancer la démo, qui sert la même page que le cœur Rust :
+2. Lancer la démo (Rust) :
    ```sh
-   uv sync --all-extras
-   uv run inari-core demo --port 8787 --token demo
+   cargo build --release
+   target/release/inari-core-rs demo            # ajouter --mascot <dossier de FoxBot> pour voir FoxBot
    ```
    puis ouvrir http://127.0.0.1:8787/#token=demo.
-3. `./verify.sh` : formatage, clippy, tests Rust, ruff, pytest.
+3. `./verify.sh` : formatage, clippy, tests, build. Rust uniquement.
 4. Les sections ci-dessous expliquent chaque lot : ce qui a changé, pourquoi, comment le vérifier à la main, et ce qui reste.
 
 ## État des lots
@@ -31,6 +33,7 @@ Aucune PR n'est ouverte. Pour la créer après relecture : `main` ← `claude/la
 | 4 | Sécurité de la page : cookie de session, CSP stricte, limites du serveur HTTP, frein aux essais | fait, testé |
 | 5 | Android : bord à bord, partage sans saturer la mémoire, messages d'erreur utiles, chaînes | fait, **non compilé** |
 | 6 | Timeline incrémentale (la page ne retélécharge plus tout le fil) | fait, testé |
+| 7 | **Rust only** : démo, agent de démo, faux agent des tests et signatures en Rust ; capsules Python figées en fixtures ; Python retiré du dépôt et de la CI | fait, testé |
 
 ---
 
@@ -180,22 +183,50 @@ Par ordre d'importance pour une version commerciale :
 6. **Juridique et marque** (§6) : licence MIT (n'importe qui peut revendre), titulaire différent selon les dépôts (Bengua / FreedzHost SASU), logos et personas de tiers, RGPD.
 7. **FoxBot** : les deux observations de la fin du lot 4 (animations de persona manquantes, lien symbolique `sprites_persona` refusé par le cœur Rust).
 
-## Règle : du Rust partout où c'est possible
+## Lot 7 : Rust only
 
-Consigne de Ben (28/10). D'après `docs/rust-port.md`, les cœurs tournent déjà sur le binaire Rust (étape 5). Le paquet Python n'est plus que la **référence testée** des formats et protocoles.
+Consigne de Ben (28/10) : « rust only », sans installer Rust et Python en double. C'est fait, en quatre commits :
 
-**Appliqué dans cette revue** : la nouvelle logique serveur (sessions, frein aux essais, assets, timeline incrémentale) est écrite d'abord en Rust (`crates/inari-core/src/session.rs`, `gateway.rs`), avec ses tests Rust. Le test des traductions est en Rust (`crates/inari-core/tests/i18n.rs`) ; sa première version Python a été supprimée. La passerelle Python a seulement été tenue au même niveau, parce que `inari-core demo` (Python) sert la même page.
-
-**Ce qui reste en Python** (environ 5 500 lignes de code et 2 700 lignes de tests, contre 11 900 lignes de Rust) :
-
-| Quoi | Pourquoi c'est encore en Python | Proposition |
+| Étape | Ce qui a changé | Où |
 |---|---|---|
-| `inari-core demo` (mesh simulé pour essayer l'interface) | n'existe pas en Rust | **la porter** (`inari-core-rs demo`) : on essaie alors l'interface sur le vrai serveur, et la passerelle Python n'a plus besoin de suivre la page |
-| `tests/fake_acp.py` (faux agent ACP) | 7 tests Rust lancent `python3` pour l'utiliser | en faire un petit binaire Rust de test : `cargo test` n'aurait plus besoin de Python |
-| `src/inari_core` (référence : capsule, téléportation, bus, passerelle, agent) | spécification d'origine | garder seulement le format capsule et le protocole de téléportation, avec `tests/test_rust_interop.py` ; retirer passerelle, agent et démo une fois la démo Rust en place |
-| Outils ponctuels (sous-ensemble des polices avec fonttools) | outil de développement, rien n'est livré | rien à changer |
+| Démo | `inari-core-rs demo [--port] [--host] [--token] [--mascot DIR] [--workdir DIR]` : trois nœuds dans un processus, l'interface, des tours en continu et une question d'approbation toutes les 25 s | `crates/inari-core/src/demo.rs` |
+| Agent de démo | `inari-core-rs demo-agent` : `write <fichier>: <texte>`, `run: <commande>`. Une commande en lecture seule (`ls`, `cat`, `echo`, `pwd`, `date`, `sleep`, `head`, `wc`, sans tube ni redirection) tourne directement ; tout le reste demande ton accord ; `sudo` ne tourne jamais | `src/demo_agent.rs` |
+| Agent des tests | `inari-core-rs fake-agent` : portage exact de `tests/fake_acp.py` (mêmes mots, même journal). `cargo test` ne lance plus `python3` | `src/demo_agent.rs`, tests `crates/inari-core/tests/*.rs` |
+| Signatures | `keygen`, `sign --key`, `verify --trusted` passent en Rust. Même format, et **même signature à l'octet près** pour une même clé. Une seule dépendance ajoutée : `ed25519-dalek` | `src/signature.rs` |
+| Compatibilité | Une capsule, son archive et une copie signée, écrites par le Python avant son retrait, sont figées en fixtures. Le Rust doit les lire hash pour hash, signaler les dégâts dans les mêmes mots, et vérifier et reproduire leur signature | `tests/fixtures/python/`, `tests/python_capsules.rs` |
+| Retrait | `src/inari_core`, `tests/`, `pyproject.toml`, `uv` dans `verify.sh` et la CI, entrées Python du `.gitignore`. La page web a déménagé dans `crates/inari-core/web/`. README, CONTRIBUTING et docs sont mis à jour | |
 
-C'est à décider ensemble : la référence Python est une règle du projet (`docs/rust-port.md`).
+**Fonctions du Python qui n'avaient pas d'équivalent Rust et disparaissent** (aucune n'était utilisée par les cœurs, qui tournent en Rust depuis l'étape 5 de `docs/rust-port.md`) :
+- la boucle de modèle intégrée (fournisseurs OpenAI-compatibles et Anthropic en direct, avec le « handover » entre formats) : les cœurs passent par les moteurs ACP (Claude Code, Gemini CLI, OpenFox) ;
+- le bac à sable conteneur des commandes ;
+- la génération des schémas JSON depuis les modèles Pydantic : `schema/` reste comme documentation du format ;
+- la passerelle autonome (`inari-core gateway --connect`) : le nœud Rust intègre la sienne.
+
+## Installer cette version (pour ton agent)
+
+**Rust uniquement, rien d'autre à installer.** Ne pas installer le paquet Python, ni `uv`, ni de service Python : il n'y en a plus. Si un ancien service Python tourne encore sur une machine, l'arrêter et le désactiver.
+
+```sh
+git fetch origin claude/laughing-maxwell-sc9qz4
+git checkout claude/laughing-maxwell-sc9qz4
+./verify.sh                                   # doit finir par PASSED
+cargo build --release                         # ou la build musl statique habituelle
+```
+
+Sur chaque cœur :
+1. Remplacer le binaire `inari-core-rs` par le nouveau (garder l'ancien à côté, par exemple `inari-core-rs.prev`, pour revenir en arrière).
+2. `systemctl --user restart inari-core.service` (le service que `join --service` installe), ou ton équivalent.
+3. Rien à migrer : la configuration et le dossier de données ne changent pas. Au premier démarrage, la passerelle crée `<data_dir>/session.key` (en 0600).
+
+**À vérifier après installation** :
+- La page s'ouvre. La première fois, il faudra peut-être ressaisir le jeton : le cookie de session remplace le jeton en URL. Derrière ta gate qui ajoute l'en-tête, rien ne change.
+- Un pass déjà enregistré sur un téléphone reste connecté (il est converti en cookie).
+- Réglages → Langue bascule FR/EN ; FoxBot s'affiche.
+- Envoyer un message, ouvrir un appel d'outil pendant que l'agent travaille : il reste ouvert.
+
+**APK** : ce dépôt ne change l'APK que par le lot 5, **non compilé ici**. `android/build.sh` d'abord. L'APK n'est pas nécessaire pour tester le reste : il charge la page servie par le cœur.
+
+**Revenir en arrière** : remettre `inari-core-rs.prev` et redémarrer le service. Les sessions ouvertes entre-temps seront simplement redemandées.
 
 ## Si quelque chose casse après merge
 

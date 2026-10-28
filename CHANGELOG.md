@@ -134,6 +134,16 @@ Newest first. An entry says what changed for someone using the thing.
   (`inari-core-rs serve-endpoint | adopt | teleport | status`). Python and Rust nodes teleport
   agents to each other over TCP, in both directions.
 
+### Removed
+
+- **The Python reference.** Inari is Rust only: `src/inari_core`, its tests, `pyproject.toml`
+  and the `uv` steps of `verify.sh` and CI are gone; nothing but the Rust binary is built,
+  tested or installed. What only the reference did either moved to Rust (the demo, its agent,
+  capsule signatures, the test agent) or was not used by the Rust core (the built-in model
+  loop and its provider handover, the container sandbox, schema generation). Capsules the
+  reference wrote are test fixtures the core reads hash for hash. The web page moved to
+  `crates/inari-core/web/`.
+
 ### Android
 
 - **The navigation bar no longer covers the composer** on Android 15, where apps are drawn edge to

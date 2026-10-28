@@ -1,4 +1,4 @@
-//! Authenticated framing over a stream, identical to the Python reference.
+//! Authenticated framing over a stream (the format the retired Python reference spoke too).
 //!
 //! Handshake: each side sends 16 random bytes; the session key is
 //! HMAC(key, "session" | client-nonce | server-nonce). Each frame is a 4-byte

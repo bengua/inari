@@ -1,6 +1,6 @@
 # UX/UI specification
 
-Status: specified and implemented as one responsive page (`src/inari_core/web/`: `index.html`,
+Status: specified and implemented as one responsive page (`crates/inari-core/web/`: `index.html`,
 `app.css`, `app.js` and the fonts under `fonts/`; no build step, no external resource) served by
 `inari-core gateway`, the page at `/` and its files under `/assets/`. Try it with
 `inari-core demo` (a simulated mesh; every drag performs a real teleportation).

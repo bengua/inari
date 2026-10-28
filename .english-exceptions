@@ -1,5 +1,5 @@
-src/inari_core/web/app.css # CSS font family names ("Plex Sans", sans-serif) read as French prose; the page is English
+crates/inari-core/web/app.css # CSS font family names ("Plex Sans", sans-serif) read as French prose; the page is English
 android/app/src/main/res/values-fr/strings.xml # the French translation of the app strings: a locale, not prose
 android/app/src/main/java/app/inari/client/Theme.kt # font family names (ibm_plex_sans) read as French prose
 docs/revue-2026-10-fr.md # the handoff of the October 2026 review, written in French for the owner on purpose
-src/inari_core/web/i18n.js # the French table of the page: a locale, not prose
+crates/inari-core/web/i18n.js # the French table of the page: a locale, not prose

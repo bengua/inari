@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 fn web(file: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../src/inari_core/web")
+        .join("web")
         .join(file);
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }

@@ -11,8 +11,8 @@ hub: it also runs the coordinator and, with `gateway_listen`, the web interface.
 non-JSON POST are refused. It reads the same file and the same data
 directory, speaks the same bus and endpoint protocols, and serves the same interface, so
 a fleet can mix both and a machine can switch in place. It drives agents through ACP
-harnesses only (`harness` with `"kind": "acp"`, or `harnesses`); the built-in model loop
-(`provider`) and the container sandbox stay in the Python node. It adds
+harnesses only (`harness` with `"kind": "acp"`, or `harnesses`); the Python node's built-in
+model loop (`provider`) and container sandbox were retired with it. It adds
 `"approval_ttl"` (seconds an approval waits for the phone, default 120).
 
 ```json

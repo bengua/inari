@@ -1,9 +1,8 @@
-//! A node of the mesh, as the Python reference (`inari_core.node`): one process that
-//! holds agents, serves capsules to its peers, drives its agents through their
-//! harnesses, and talks to the rest over the bus. A node with no `hub` is the hub: it
-//! also runs the coordinator and, when configured, the gateway. The configuration
-//! file is the reference's, and so is the data directory, so a Rust node can take
-//! over from a Python one in place.
+//! A node of the mesh: one process that holds agents, serves capsules to its peers, drives
+//! its agents through their harnesses, and talks to the rest over the bus. A node with no
+//! `hub` is the hub: it also runs the coordinator and, when configured, the gateway. The
+//! configuration file and the data directory are those the retired Python nodes used, so
+//! a core they ran was taken over in place.
 
 use crate::agent::{summary, AcpHarness, Approver, Publisher, Runner};
 use crate::approvals::NodeApprovals;

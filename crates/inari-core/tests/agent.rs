@@ -1,4 +1,4 @@
-//! The ACP harness against the scripted fake agent shared with the Python tests.
+//! The ACP harness against the scripted fake agent (`inari-core-rs fake-agent`).
 
 use inari_core::agent::{AcpHarness, Approver, Runner};
 use inari_core::capsule::attach::Attached;

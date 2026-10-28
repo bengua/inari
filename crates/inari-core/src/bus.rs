@@ -1,8 +1,8 @@
 //! An embedded event bus with NATS-style subjects (`*` one token, `>` the rest), and
 //! links between buses. A message records the buses it crossed, so a ring delivers
 //! once; receivers drop duplicates by message id; durable subjects wait in an outbox
-//! while a link is down. Same message shape as the reference, so Rust and Python
-//! buses can be linked.
+//! while a link is down. Same message shape as the retired Python reference's
+//! buses, which is how a fleet moved to Rust core by core.
 
 use serde_json::{json, Value};
 use std::collections::{HashSet, VecDeque};

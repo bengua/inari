@@ -1,7 +1,12 @@
 # Porting the core to Rust
 
-The Python package in `src/inari_core` is the reference: its formats, protocols and
-tests are the specification. The Rust crate in `crates/inari-core` implements them one
+**Done, October 2026: the core is Rust only.** The Python package that was the reference
+(its formats, protocols and tests were the specification) is retired; the capsules it wrote are
+test fixtures (`crates/inari-core/tests/fixtures/python`) that the Rust core reads hash for hash.
+What follows is how the port went. Before:
+
+The Python package in `src/inari_core` was the reference: its formats, protocols and
+tests were the specification. The Rust crate in `crates/inari-core` implements them one
 component at a time. Both speak the same bytes, so a fleet can run a mix of Python and
 Rust nodes and move machine by machine.
 
@@ -32,6 +37,7 @@ Rust nodes and move machine by machine.
 | 3 | ACP harness and runner turn, with attachments passed to the model: images as image content when the agent accepts it (Claude, Gemini), other files as links into the workspace, all named in the message (`inari-core-rs turn`) | done |
 | 4 | Node daemon and gateway (HTTP/SSE, uploads in parts from the Android app's share sheet, camera and file picker), serving the web interface (`inari-core-rs node`). A Python node joins a Rust hub and agents move between them | done |
 | 5 | Switch the three cores to the Rust binary (a static musl build runs unchanged on every Linux host), retire the Python runtime; the Python package stays as the tested reference | done |
+| 6 | Retire the reference: the demo, its agent, capsule signatures and the test agent move to Rust; the reference's capsules become fixtures; Python leaves the repository and CI | done |
 
 ## Attachments, as the phone sends them
 

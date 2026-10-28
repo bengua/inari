@@ -5,8 +5,11 @@
 **A change is verified by running it.** Before opening a pull request, the thing it
 changes has been run, and `./verify.sh` passes.
 
-    uv sync --all-extras
-    ./verify.sh          # license, Rust (fmt, clippy, tests), Python (ruff, pytest)
+    ./verify.sh          # license, Rust (fmt, clippy, tests, build)
+
+**Rust only.** The core, its tools and its tests are Rust: no second runtime is added
+beside it, nor installed on a core. The Python reference was retired in October 2026;
+the capsules it wrote are test fixtures (`crates/inari-core/tests/fixtures/python`).
 
 ## How work reaches `main`
 
@@ -22,5 +25,5 @@ and `main` only accepts green.
   restart cannot rebuild.
 - **Nothing site-specific.** No hostnames, addresses, account names or secrets in
   code, tests, docs or fixtures — configuration and environment variables instead.
-- **Schemas are generated.** After changing a model, run
-  `uv run inari-core schema schema` and commit the result; a test fails otherwise.
+- **Schemas document the format.** `schema/` describes the capsule files as the
+  reference wrote them; a change to the format changes them in the same pull request.

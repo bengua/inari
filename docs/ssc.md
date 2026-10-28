@@ -13,8 +13,9 @@ artifacts/blobs/<sha256>           content-addressed file bodies
 environment/spec.json              reproducible sandbox definition
 ```
 
-Authoritative schemas: `schema/*.schema.json`, generated from the Pydantic models
-in `src/inari_core/capsule/models.py`. A test fails if they drift.
+Authoritative schemas: `schema/*.schema.json`, generated from the models of the Python
+reference before it was retired; a change to the format changes them in the same pull request.
+Capsules that reference wrote are test fixtures (`crates/inari-core/tests/fixtures/python`).
 
 ## manifest.json
 

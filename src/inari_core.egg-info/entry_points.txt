@@ -1,0 +1,2 @@
+[console_scripts]
+inari-core = inari_core.cli:main

@@ -1,7 +1,7 @@
-//! HTTP/SSE gateway between a browser (desktop or phone) and the bus, as the Python
-//! reference (`inari_core.gateway`): it gathers the mesh into one snapshot, pushes it
-//! as server-sent events, serves the web interface, and turns the person's actions
-//! into bus messages. It holds the approval key; browsers present a bearer token.
+//! HTTP/SSE gateway between a browser (desktop or phone) and the bus: it gathers the mesh
+//! into one snapshot, pushes it as server-sent events, serves the web interface (`web/`,
+//! built into the binary), and turns the person's actions into bus messages. It holds the
+//! approval key; pages sign in for a session cookie (`session`), tools send a bearer token.
 //! Files from the phone arrive in parts (`upload_id`, `offset`, `total`), so a photo
 //! or a PDF of several megabytes needs no large request.
 
@@ -20,7 +20,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast;
 
-const INDEX: &str = include_str!("../../../src/inari_core/web/index.html");
+const INDEX: &str = include_str!("../web/index.html");
 
 /// What the page loads besides itself, under `/assets/`: its style, its script, its fonts.
 /// Public like the page (they hold no data), and cached: their URLs carry the page's version.
@@ -28,37 +28,37 @@ const ASSETS: &[(&str, &str, &[u8])] = &[
     (
         "app.css",
         "text/css; charset=utf-8",
-        include_bytes!("../../../src/inari_core/web/app.css"),
+        include_bytes!("../web/app.css"),
     ),
     (
         "app.js",
         "text/javascript; charset=utf-8",
-        include_bytes!("../../../src/inari_core/web/app.js"),
+        include_bytes!("../web/app.js"),
     ),
     (
         "i18n.js",
         "text/javascript; charset=utf-8",
-        include_bytes!("../../../src/inari_core/web/i18n.js"),
+        include_bytes!("../web/i18n.js"),
     ),
     (
         "fonts/ibm_plex_sans.woff2",
         "font/woff2",
-        include_bytes!("../../../src/inari_core/web/fonts/ibm_plex_sans.woff2"),
+        include_bytes!("../web/fonts/ibm_plex_sans.woff2"),
     ),
     (
         "fonts/ibm_plex_mono_regular.woff2",
         "font/woff2",
-        include_bytes!("../../../src/inari_core/web/fonts/ibm_plex_mono_regular.woff2"),
+        include_bytes!("../web/fonts/ibm_plex_mono_regular.woff2"),
     ),
     (
         "fonts/ibm_plex_mono_medium.woff2",
         "font/woff2",
-        include_bytes!("../../../src/inari_core/web/fonts/ibm_plex_mono_medium.woff2"),
+        include_bytes!("../web/fonts/ibm_plex_mono_medium.woff2"),
     ),
     (
         "fonts/bricolage_grotesque.woff2",
         "font/woff2",
-        include_bytes!("../../../src/inari_core/web/fonts/bricolage_grotesque.woff2"),
+        include_bytes!("../web/fonts/bricolage_grotesque.woff2"),
     ),
 ];
 

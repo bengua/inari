@@ -61,7 +61,8 @@ fn empty_object() -> Value {
 }
 
 impl TimelineEvent {
-    /// Everything but `hash`, exactly as the Python reference hashes it.
+    /// Everything but `hash`, exactly as the retired Python reference hashed it (its capsules
+    /// are test fixtures: `tests/python_capsules.rs`).
     pub fn body(&self) -> Value {
         json!({
             "id": self.id, "node_id": self.node_id, "node_seq": self.node_seq,

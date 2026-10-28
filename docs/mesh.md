@@ -63,7 +63,7 @@ without a GPU.
 
 ## Transport
 
-`inari_core.transport` carries both kinds of traffic over TCP:
+`wire.rs`, `buslink.rs` and `rpc.rs` carry both kinds of traffic over TCP:
 
 - **Wire**: a handshake proves knowledge of a shared key, then every frame carries
   an HMAC under a per-connection session key with a sequence number (no tampering,
