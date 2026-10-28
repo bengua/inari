@@ -155,7 +155,7 @@ pre.code span.l::before { counter-increment:l; content:counter(l); position:abso
   <section id="main">
     <div id="passBanner" role="status" hidden></div>
     <div id="top"><button class="btn small" id="back">‹ Back</button><button class="btn icon" id="benchMobile" title="Artifacts, terminal, journal" aria-label="Artifacts" data-icon="panel"></button><h2 id="ptitle">Inari</h2><span id="pphase"></span>
-      <button class="chip" id="modelChip" hidden></button><button class="chip" id="modeChip" hidden></button><button class="btn small" id="actionsBtn" data-icon="more" hidden><span>Actions</span></button></div>
+      <button class="chip" id="modelChip" hidden></button><button class="chip" id="modeChip" hidden></button><button class="chip" id="ctxChip" hidden></button><button class="btn small" id="actionsBtn" data-icon="more" hidden><span>Actions</span></button></div>
     <div id="stage" aria-hidden="true"></div><div id="thread"><div id="msgs"></div></div>
     <div id="dock"><form class="composer" id="composer"><div class="attached" id="attached"></div><textarea id="msg" rows="2" placeholder="Build anything…" aria-label="Message"></textarea>
       <div class="ctools"><button type="button" class="btn icon" id="attach" title="Attach a file" aria-label="Attach a file" data-icon="plus"></button><input type="file" id="file" multiple hidden>
@@ -375,7 +375,7 @@ function updatesPanel(pop, refresh) { if (refresh) pop.innerHTML = ""; pop.inser
 function renderUsageCard() { const open = store.get("usageOpen", false); $("usageCard").hidden = !open; $("usageBtn").setAttribute("aria-expanded", String(open)); if (open) { const body = $("usageBody"); body.textContent = ""; usageRows(body); } }
 function openPop(anchor, build) { const pop = $("pop"); if (pop.classList.contains("open") && pop.dataset.for === anchor.id) { pop.classList.remove("open"); return; } pop.innerHTML = ""; build(pop); pop.dataset.for = anchor.id; const r = anchor.getBoundingClientRect(); pop.classList.add("open");
   pop.style.left = Math.max(8, Math.min(r.left, innerWidth - pop.offsetWidth - 8)) + "px"; pop.style.top = Math.max(8, r.top - pop.offsetHeight - 8 > 8 ? r.top - pop.offsetHeight - 8 : r.bottom + 8) + "px"; }
-addEventListener("pointerdown", (e) => { const pop = $("pop"); if (pop.classList.contains("open") && !pop.contains(e.target) && !e.target.closest("#gear,#pill,#modelChip,#modeChip,#pickModel,#coreChip,#actionsBtn")) pop.classList.remove("open"); });
+addEventListener("pointerdown", (e) => { const pop = $("pop"); if (pop.classList.contains("open") && !pop.contains(e.target) && !e.target.closest("#gear,#pill,#modelChip,#modeChip,#ctxChip,#pickModel,#coreChip,#actionsBtn")) pop.classList.remove("open"); });
 function usageRows(pop) { const items = snap.usage || [];
   if (!items.length) pop.insertAdjacentHTML("beforeend", '<div class="empty">No quota source is configured. Local models have no quota.</div>');
   for (const u of items) { const row = document.createElement("div"); row.className = "urow"; const head = document.createElement("div"); head.className = "uhead"; head.append(badge(u.provider_id, 22)); head.insertAdjacentHTML("beforeend", `<b>${esc(u.name)}</b><small>${esc(u.plan || (u.status === "unlimited" ? "no quota" : u.status))}</small>`); row.append(head);
@@ -411,10 +411,19 @@ function frame(t) { if (!orbEl || !orbEl.isConnected) return; const ctx = orbCtx
 function renderTop() {
   const a = selected && snap.agents[selected], app = $("app"); app.classList.toggle("nosel", !a); if ($("ptitle").contentEditable !== "true") $("ptitle").textContent = a ? (a.title || selected) : composing ? `New thread · ${pendingCore || ""}` : "Inari";
   $("pphase").innerHTML = a ? `<span class="state${["listening", "loading", "inference"].includes(a.phase) ? " live" : ""}" style="--c:var(--${{ inference: "copper", loading: "copper", listening: "purple", success: "ok", error: "bad" }[a.phase] || "dim"})">${LABEL[a.phase]} <small>on ${esc(a.node)}</small></span>` : "";
-  $("actionsBtn").hidden = !a; fillModeChip(a); const chip = $("modelChip"); chip.hidden = !a; if (a) fillModelChip(chip, a.model); document.body.classList.toggle("open", !!a || composing); placeFox(); drawComposer(); drawStop();
+  $("actionsBtn").hidden = !a; fillModeChip(a); fillCtxChip(a); const chip = $("modelChip"); chip.hidden = !a; if (a) fillModelChip(chip, a.model); document.body.classList.toggle("open", !!a || composing); placeFox(); drawComposer(); drawStop();
 }
 function fillModeChip(a) { const chip = $("modeChip"), modes = a ? harnessModes(a.node, a.harness) : []; chip.hidden = !modes.length; if (chip.hidden) return;
   const cur = modes.find((m) => m.id === a.mode) || modes[0]; chip.textContent = ""; const n = document.createElement("span"); n.className = "n"; n.textContent = cur.name; chip.title = cur.description || ""; chip.append(n); }
+/* How full the agent's context is, as it reports it: a ring and a percentage; the popover has the numbers. */
+function fillCtxChip(a) { const chip = $("ctxChip"), c = a && a.context; chip.hidden = !(c && c.size); if (chip.hidden) return;
+  const pct = Math.min(100, Math.round((c.used / c.size) * 100)); chip.textContent = ""; const r = document.createElement("span"); r.className = "ring"; r.style.setProperty("--p", pct); r.style.setProperty("--rc", pct > 85 ? "var(--bad)" : pct > 60 ? "var(--warn)" : "var(--copper)"); r.innerHTML = "<i></i>";
+  const n = document.createElement("span"); n.className = "n"; n.textContent = pct + "%"; chip.append(r, n); chip.title = `${c.used.toLocaleString()} of ${c.size.toLocaleString()} tokens`; }
+$("ctxChip").onclick = () => { const a = snap.agents[selected], c = a && a.context; if (!c) return; const pct = Math.min(100, Math.round((c.used / c.size) * 100));
+  openPop($("ctxChip"), (pop) => { pop.insertAdjacentHTML("beforeend", `<h3>Context</h3><div class="urow"><div class="uhead"><span>${pct}% used</span><span>${c.used.toLocaleString()} / ${c.size.toLocaleString()} tokens</span></div><div class="ubar"><i style="width:${pct}%"></i></div></div>${c.cost != null ? `<div class="empty" style="padding:6px 0">Spent this session: $${Number(c.cost).toFixed(2)}</div>` : ""}`);
+    const compact = harnessCommands(a.node, a.harness).find((x) => x.name === "compact");
+    if (compact) { const b = document.createElement("button"); b.className = "mrow"; b.textContent = "Compact the conversation (/compact)"; b.onclick = () => { $("pop").classList.remove("open"); api("/api/message", { agent: selected, text: "/compact" }); toast("Compacting…"); }; pop.append(b); }
+    else pop.insertAdjacentHTML("beforeend", `<div class="empty" style="padding:6px 0">The agent compacts by itself when the window fills.</div>`); }); };
 $("modeChip").onclick = () => { const a = snap.agents[selected]; if (!a) return; const modes = harnessModes(a.node, a.harness);
   openPop($("modeChip"), (pop) => { pop.insertAdjacentHTML("beforeend", `<h3>${esc(harnessName(a.harness))} — mode</h3><div id="mlist"></div>`); const list = pop.querySelector("#mlist");
     for (const m of modes) { const b = document.createElement("button"); b.className = "mrow" + (m.id === (a.mode || modes[0].id) ? " on" : ""); const t = document.createElement("span"); t.textContent = m.name; b.append(t);
