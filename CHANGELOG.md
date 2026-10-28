@@ -9,6 +9,11 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Added
 
+- **Stop, rename and pin.** A **Stop** button replaces Send while an agent works (it asks the
+  agent to cancel and the thread says *Stopped*); double-click a thread's title, or pick
+  *Rename…*, to rename it in place; *Pin to the top* keeps a thread first in its core's list,
+  marked with a star.
+
 - **Each agent's own modes and slash commands, in the page.** Inari reads what every harness
   announces when it starts a session and shows it: a **mode** chip on the thread (Claude Code:
   Default, Accept Edits, Plan, Don't Ask, Bypass; Gemini: Default, Auto Edit, YOLO, Plan; OpenFox:

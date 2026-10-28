@@ -160,7 +160,7 @@ pre.code span.l::before { counter-increment:l; content:counter(l); position:abso
     <div id="dock"><form class="composer" id="composer"><div class="attached" id="attached"></div><textarea id="msg" rows="2" placeholder="Build anything…" aria-label="Message"></textarea>
       <div class="ctools"><button type="button" class="btn icon" id="attach" title="Attach a file" aria-label="Attach a file" data-icon="plus"></button><input type="file" id="file" multiple hidden>
         <button type="button" class="chip" id="coreChip" title="Where it runs"></button><button type="button" class="chip" id="pickModel" title="Choose the model"></button><span class="sp"></span>
-        <button type="button" class="btn icon" id="mic" title="Dictate" aria-label="Dictate" data-icon="mic" hidden></button><button class="send" type="submit" id="sendBtn" aria-label="Send" data-icon="send"></button></div></form>
+        <button type="button" class="btn icon" id="mic" title="Dictate" aria-label="Dictate" data-icon="mic" hidden></button><button class="send stop" type="button" id="stopBtn" aria-label="Stop" title="Stop" data-icon="stop" hidden></button><button class="send" type="submit" id="sendBtn" aria-label="Send" data-icon="send"></button></div></form>
       <div class="hint">Enter to send · Shift+Enter for a new line</div></div>
   </section>
   <aside id="bench"><div id="split" title="Drag to resize"></div>
@@ -177,7 +177,7 @@ const PATHS = {
   sidebar: '<rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/>', edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>', bars: '<path d="M4 20V11M10 20V5M16 20v-6M2 20h20"/>',
   gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/>',
-  plus: '<path d="M12 5v14M5 12h14"/>', mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>', send: '<path d="M12 19V5M5 12l7-7 7 7"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>', stop: '<rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/>', mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>', send: '<path d="M12 19V5M5 12l7-7 7 7"/>',
   expand: '<path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>', fold: '<rect x="3" y="4" width="18" height="16" rx="3"/><path d="M15 4v16M8 10l2 2-2 2"/>',
   panel: '<rect x="3" y="4" width="18" height="16" rx="3"/><path d="M15 4v16"/>', chevron: '<path d="m6 9 6 6 6-6"/>', more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
   file: '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z"/><path d="M14 3v6h6"/>', image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/>',
@@ -308,7 +308,7 @@ function render() {
 const inFlight = (mv) => mv && !["committed", "rolled_back"].includes(mv.state);
 function row(id, a, mv) {
   const el = document.createElement("div"); el.className = "row" + (selected === id ? " selected" : "") + (inFlight(mv) ? " moving" : ""); el.dataset.agent = id; el.dataset.phase = a.phase; el.dataset.node = a.node; el.tabIndex = 0;
-  el.setAttribute("aria-label", `${a.title || id}, ${LABEL[a.phase]}, on ${a.node}`); el.innerHTML = `<span class="pdot"></span><span class="t"></span>`; el.querySelector(".t").textContent = a.title || id;
+  el.setAttribute("aria-label", `${a.title || id}, ${LABEL[a.phase]}, on ${a.node}`); el.innerHTML = `<span class="pdot"></span><span class="t"></span>`; el.querySelector(".t").textContent = a.title || id; if (a.pinned) el.querySelector(".t").insertAdjacentHTML("beforebegin", '<span class="pin" title="Pinned" style="color:var(--copper);margin-right:4px">★</span>');
   const pp = a.pass && (snap.passes || []).find((x) => x.id === a.pass); if (pp) el.insertAdjacentHTML("beforeend", `<span class="ptag" title="${esc(pp.role)} pass">${esc(pp.name)}</span>`); el.title = (a.last || "") + "\n" + (a.events ?? 0) + " events · " + (a.files ?? 0) + " files";
   if (inFlight(mv)) el.insertAdjacentHTML("beforeend", `<span class="prog">→ ${esc(mv.target)} ${Math.round(Math.max(0, STEPS.indexOf(mv.state)) / 7 * 100)}%</span>`); else el.append(badge(a.model || ""), ...(ring(a.model || "") ? [ring(a.model || "")] : []));
   el.onpointerdown = (e) => startDrag(e, el, id, a.node); el.onkeydown = (e) => { if (e.key === "t" || e.key === "T") openMove(id, a.node); if (e.key === "Enter") select(id); }; return el;
@@ -323,7 +323,7 @@ function renderCores(agents) {
     c.className = "core" + (shut[n.node_id] ? " shut" : ""); c.dataset.node = n.node_id;
     c.innerHTML = `<div class="chead"><span class="chev">${icon("chevron")}</span><span class="dot"></span><b></b><span class="pct">${Math.round(load * 100)}% · ${mine.length}</span></div><div class="bar"><i style="width:${Math.round(load * 100)}%"></i></div><div class="rows"></div>`;
     c.querySelector("b").textContent = n.node_id; c.querySelector(".chead").onclick = () => { shut[n.node_id] = !shut[n.node_id]; store.set("shut", shut); c.classList.toggle("shut"); requestAnimationFrame(drawTethers); };
-    const rows = c.querySelector(".rows"); for (const [id, a] of mine) rows.append(row(id, a, snap.moves[id]));
+    const rows = c.querySelector(".rows"); for (const [id, a] of [...mine].sort((x, y) => (y[1].pinned ? 1 : 0) - (x[1].pinned ? 1 : 0))) rows.append(row(id, a, snap.moves[id]));
     for (const mv of Object.values(snap.moves)) if (mv.target === n.node_id && mv.source !== n.node_id && mv.state !== "committed") rows.insertAdjacentHTML("beforeend", `<div class="row moving"><span class="pdot" style="background:var(--copper)"></span><span class="t">⇢ ${esc(mv.agent)}</span><span class="prog">${mv.state === "rolled_back" ? "rolled back" : esc(mv.state)}</span></div>`);
     if (!rows.children.length) rows.innerHTML = '<div class="empty-core">Drop a thread here</div>'; box.append(c);
   }
@@ -409,9 +409,9 @@ function frame(t) { if (!orbEl || !orbEl.isConnected) return; const ctx = orbCtx
 
 /* ---------- top bar, models, composer ---------- */
 function renderTop() {
-  const a = selected && snap.agents[selected], app = $("app"); app.classList.toggle("nosel", !a); $("ptitle").textContent = a ? (a.title || selected) : composing ? `New thread · ${pendingCore || ""}` : "Inari";
+  const a = selected && snap.agents[selected], app = $("app"); app.classList.toggle("nosel", !a); if ($("ptitle").contentEditable !== "true") $("ptitle").textContent = a ? (a.title || selected) : composing ? `New thread · ${pendingCore || ""}` : "Inari";
   $("pphase").innerHTML = a ? `<span class="state${["listening", "loading", "inference"].includes(a.phase) ? " live" : ""}" style="--c:var(--${{ inference: "copper", loading: "copper", listening: "purple", success: "ok", error: "bad" }[a.phase] || "dim"})">${LABEL[a.phase]} <small>on ${esc(a.node)}</small></span>` : "";
-  $("actionsBtn").hidden = !a; fillModeChip(a); const chip = $("modelChip"); chip.hidden = !a; if (a) fillModelChip(chip, a.model); document.body.classList.toggle("open", !!a || composing); placeFox(); drawComposer();
+  $("actionsBtn").hidden = !a; fillModeChip(a); const chip = $("modelChip"); chip.hidden = !a; if (a) fillModelChip(chip, a.model); document.body.classList.toggle("open", !!a || composing); placeFox(); drawComposer(); drawStop();
 }
 function fillModeChip(a) { const chip = $("modeChip"), modes = a ? harnessModes(a.node, a.harness) : []; chip.hidden = !modes.length; if (chip.hidden) return;
   const cur = modes.find((m) => m.id === a.mode) || modes[0]; chip.textContent = ""; const n = document.createElement("span"); n.className = "n"; n.textContent = cur.name; chip.title = cur.description || ""; chip.append(n); }
@@ -502,7 +502,7 @@ function drawChat() {
       const path = (e.text.match(/(?:write_file|read_file|write|edit|create)[^:]*:\s*([\w./-]+\.\w+)/i) || [])[1]; if (path) { const b = document.createElement("button"); b.className = "btn small open"; b.innerHTML = icon("file") + "<span></span>"; b.lastChild.textContent = "Open " + path; b.onclick = () => openFile(path); d.append(b); } box.append(d); }
     else if (e.kind === "provider_switch") note(`Model <b>${esc(shortModel(e.text))}</b>`);
     else if (e.kind === "decision") note(esc(e.text));
-    else if (e.kind === "checkpoint") { const [why, ...rest] = e.text.split(": "); const map = { teleport: "Moved between cores", provider_error: "The model failed", harness_error: "The agent stopped", harness_timeout: "The agent took too long", model_refused: "Model not available", mode_changed: "Mode", mode_refused: "Mode not available" }; note(esc(map[why] || "Checkpoint") + (rest.length && why !== "teleport" ? ` — ${esc(rest.join(": ").slice(0, 120))}` : "")); } }
+    else if (e.kind === "checkpoint") { const [why, ...rest] = e.text.split(": "); const map = { teleport: "Moved between cores", provider_error: "The model failed", harness_error: "The agent stopped", harness_timeout: "The agent took too long", model_refused: "Model not available", mode_changed: "Mode", stopped: "Stopped", mode_refused: "Mode not available" }; note(esc(map[why] || "Checkpoint") + (rest.length && why !== "teleport" ? ` — ${esc(rest.join(": ").slice(0, 120))}` : "")); } }
   if (["listening", "loading", "inference"].includes(a.phase)) box.insertAdjacentHTML("beforeend", '<div class="msg assistant typing"><i></i><i></i><i></i></div>'); if (atEnd) th.scrollTop = th.scrollHeight;
 }
 $("back").onclick = () => { selected = null; composing = false; renderTop(); drawChat(); drawBench(); if (snap) renderCores(Object.entries(snap.agents)); };
@@ -634,6 +634,15 @@ function onUp(e) { window.onpointermove = window.onpointerup = window.onpointerc
   else if (t.kind === "sleep") sleepThread(d.id, true);
   else if (t.kind === "fox") foxMenu(d.id); }
 /* A long press without moving: everything else one can do with the thread (moving it is a drag onto a core). */
+/* Rename in place: the title becomes editable; Enter keeps it, Escape leaves it. */
+function renameThread(id) { select(id).then(() => { const t = $("ptitle"); t.contentEditable = "true"; t.focus(); const r = document.createRange(); r.selectNodeContents(t); getSelection().removeAllRanges(); getSelection().addRange(r);
+  const done = (ok) => { t.onkeydown = t.onblur = null; t.contentEditable = "false"; const v = t.textContent.trim(); if (ok && v) api("/api/rename", { agent: id, title: v }); else renderTop(); };
+  t.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); done(true); } else if (e.key === "Escape") done(false); }; t.onblur = () => done(true); }); }
+$("ptitle").ondblclick = () => { if (selected) renameThread(selected); };
+/* Stop replaces Send while the thread works and the box is empty. */
+function drawStop() { const a = selected && snap && snap.agents[selected], busy = !!a && ["listening", "loading", "inference"].includes(a.phase), empty = !$("msg").value.trim() && !attachments.length; $("stopBtn").hidden = !(busy && empty); $("sendBtn").hidden = busy && empty; }
+$("stopBtn").onclick = () => { if (selected) { api("/api/cancel", { agent: selected }); toast("Stopping…"); } };
+$("msg").addEventListener("input", drawStop);
 function actionSheet(id) { const a = snap.agents[id]; if (!a) return; const node = snap.nodes.find((n) => n.node_id === a.node) || {};
   const opts = [["Open it, with its artifacts", () => select(id).then(() => { store.set("nobench", false); document.body.classList.add("bench-open"); layout(); })]];
   const has = (n, h) => !!(((n.capabilities || {}).harnesses || {})[h]);
@@ -642,6 +651,8 @@ function actionSheet(id) { const a = snap.agents[id]; if (!a) return; const node
   for (const p of snap.passes || []) opts.push(a.pass === p.id ? [`Stop sharing with ${p.name}`, () => shareWith(id, "")] : [`Share with ${p.name}`, () => shareWith(id, p.id)]);
   const others = Object.entries(snap.agents).filter(([o, x]) => o !== id && !x.archived);
   if (others.length) opts.push(["Merge into another thread…", () => sheet(`Merge ${a.title || id} into…`, others.map(([o, x]) => [x.title || o, () => mergeInto(o, id)]))]);
+  opts.push(["Rename…", () => renameThread(id)]);
+  opts.push([a.pinned ? "Unpin" : "Pin to the top", () => api("/api/pin", { agent: id, pinned: !a.pinned })]);
   opts.push(["Summarise it", async () => { await api("/api/message", { agent: id, text: "Summarise this thread so far in a few short lines." }); select(id); }]);
   opts.push(["Start a copy from here (fork)", () => { selected = id; forkAt = null; forkNow(); }]);
   opts.push(["Put it to sleep", () => sleepThread(id, true)]);
