@@ -124,19 +124,27 @@ async fn the_page_and_its_assets_are_served_with_their_version() {
     let port = hub.gateway_port;
     let host = format!("Host: 127.0.0.1:{port}");
 
-    let (status, page) = raw(port, &format!("GET / HTTP/1.1\r\n{host}"), "").await;
+    // Kitsune is the app's first page; the full Inari app lives at /app
+    let (status, kit) = raw(port, &format!("GET / HTTP/1.1\r\n{host}"), "").await;
+    assert_eq!(status, 200);
+    assert!(
+        !kit.contains("__INARI_PAGE__"),
+        "every version mark is filled in"
+    );
+    assert!(kit.contains("Kitsune"), "the voice notebook opens first");
+    let (status, css) = raw(port, &format!("GET /assets/app.css HTTP/1.1\r\n{host}"), "").await;
+    assert_eq!(status, 200);
+    let (status, page) = raw(port, &format!("GET /app HTTP/1.1\r\n{host}"), "").await;
     assert_eq!(status, 200);
     assert!(
         !page.contains("__INARI_PAGE__"),
         "every version mark is filled in"
     );
-    let (status, css) = raw(port, &format!("GET /assets/app.css HTTP/1.1\r\n{host}"), "").await;
-    assert_eq!(status, 200);
     // the Kitsune page is served the same way, without a token, with its own style and script
-    let (status, kit) = raw(port, &format!("GET /kitsune HTTP/1.1\r\n{host}"), "").await;
+    let (status, kit2) = raw(port, &format!("GET /kitsune HTTP/1.1\r\n{host}"), "").await;
     assert_eq!(status, 200);
     assert!(
-        !kit.contains("__INARI_PAGE__"),
+        !kit2.contains("__INARI_PAGE__"),
         "every version mark is filled in"
     );
     assert!(kit.contains("Kitsune"), "the voice notebook's own page");

@@ -1124,12 +1124,17 @@ impl Gateway {
 
     async fn route(&self, r: Request, w: &mut TcpStream) -> std::io::Result<()> {
         let get = r.method == "GET";
+        // Kitsune is the app's first page: the voice notebook opens at "/", the full Inari app lives at "/app".
         if get && r.path == "/" {
-            let page = INDEX.replace("__INARI_PAGE__", page_version());
+            let page = KITSUNE_INDEX.replace("__INARI_PAGE__", page_version());
             return send(w, 200, "text/html; charset=utf-8", page.as_bytes()).await;
         }
         if get && r.path == "/kitsune" {
             let page = KITSUNE_INDEX.replace("__INARI_PAGE__", page_version());
+            return send(w, 200, "text/html; charset=utf-8", page.as_bytes()).await;
+        }
+        if get && r.path == "/app" {
+            let page = INDEX.replace("__INARI_PAGE__", page_version());
             return send(w, 200, "text/html; charset=utf-8", page.as_bytes()).await;
         }
         if get && r.path.starts_with("/assets/") {
