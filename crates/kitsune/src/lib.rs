@@ -2,6 +2,7 @@
 //! meaning, brought back by a time or a place. Everything lives in one local SQLite store,
 //! whose schema moves forward and back by numbered migrations (`migrations/`).
 
+pub mod mcp;
 pub mod migrate;
 pub mod search;
 pub mod store;
