@@ -175,6 +175,8 @@ async function load() {
   if (!state.ttsReady) missing.push("text to speech");
   say(missing.length ? "Local " + missing.join(" and ") + " not set yet." : "Ready. Notes: " + state.notes + ".");
   memLoad();
+  remFillWhen();
+  remLoad();
 }
 
 /* Talk: hold the button, record here, hand the core a 16 kHz mono wav. */
@@ -498,6 +500,125 @@ $("kNotesList").addEventListener("click", (ev) => {
 });
 $("kFind").addEventListener("submit", (ev) => { ev.preventDefault(); mem.query = $("kQuery").value; memLoad(); });
 $("kFindClear").addEventListener("click", () => { $("kQuery").value = ""; mem.query = ""; memLoad(); });
+
+/* Reminders: a time kept as a note, and the rule that brings it back. */
+
+function whenText(secs) {
+  return new Date(secs * 1000).toLocaleString(undefined, {
+    year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+  });
+}
+
+function repText(every) {
+  if (!every || every <= 0) return "once";
+  if (every === 86400) return "every day";
+  if (every === 604800) return "every week";
+  return "every " + Math.round(every / 3600) + " h";
+}
+
+function whenField(secs) {
+  const d = new Date(secs * 1000);
+  const p = (n) => String(n).padStart(2, "0");
+  return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + "T" + p(d.getHours()) + ":" + p(d.getMinutes());
+}
+
+function remFillWhen() {
+  const f = $("kRemWhen");
+  if (f.value) return;
+  f.value = whenField(Math.ceil(Date.now() / 1000 / 60) * 60 + 3600);
+}
+
+function trigLi(t, byId) {
+  const li = document.createElement("li");
+  li.className = "ktri" + (t.active ? "" : " off");
+  li.dataset.id = String(t.id);
+  const body = document.createElement("div");
+  body.className = "ktri-body";
+  const p = document.createElement("p");
+  p.className = "ktri-text";
+  const note = t.note_id != null ? byId.get(Number(t.note_id)) : null;
+  p.textContent = note && note.text ? note.text : t.kind === "time" ? "Reminder #" + t.id : t.kind + " #" + t.id;
+  const meta = document.createElement("p");
+  meta.className = "kmeta";
+  const bits = [];
+  if (t.kind === "time") {
+    const at = t.next_at != null ? t.next_at : (t.spec || {}).at;
+    if (at != null) bits.push(whenText(Number(at)));
+    bits.push(repText(Number((t.spec || {}).every) || 0));
+  } else {
+    bits.push(t.kind);
+  }
+  if (!t.active) bits.push(t.fired_at != null ? "done" : "off");
+  meta.textContent = bits.join(" \u00b7 ");
+  body.append(p, meta);
+  const drop = actButton("drop", "Forget", "btn small");
+  li.append(body, drop);
+  return li;
+}
+
+function remState(line) {
+  text($("kRemState"), line);
+}
+
+async function remLoad() {
+  const [d, n] = await Promise.all([
+    api("/api/kitsune", { action: "list_triggers" }),
+    api("/api/kitsune", { action: "list_notes", limit: 200 }),
+  ]);
+  const list = $("kTrigList");
+  list.textContent = "";
+  if (d.error) return remState("");
+  const byId = new Map((n.notes || []).map((x) => [Number(x.id), x]));
+  const all = (d.triggers || []).slice().sort((a, b) => {
+    if (!!a.active !== !!b.active) return a.active ? -1 : 1;
+    return (a.next_at || 0) - (b.next_at || 0);
+  });
+  for (const t of all) list.appendChild(trigLi(t, byId));
+  const live = all.filter((t) => t.active).length;
+  remState(!all.length ? "Nothing set to come back." : live + " of " + all.length + " still to come.");
+}
+
+async function keepReminder(ev) {
+  ev.preventDefault();
+  const what = $("kRemWhat").value.trim();
+  const when = $("kRemWhen").value;
+  if (!what) { toast("Say what should come back."); return; }
+  if (!when) { toast("Pick a time first."); return; }
+  const at = Math.round(new Date(when).getTime() / 1000);
+  if (!Number.isFinite(at)) { toast("That time cannot be read."); return; }
+  const every = Number($("kRemEvery").value) || 0;
+  activity("working");
+  const kept = await api("/api/kitsune", { action: "capture_text", text: what, tags: ["reminder"] });
+  if (kept.error) { activity("idle"); return; }
+  const spec = { at };
+  if (every > 0) spec.every = every;
+  const made = await api("/api/kitsune", { action: "create_trigger", kind: "time", spec, next_at: at, note_id: kept.id });
+  activity("idle");
+  if (made.error) { toast("The reminder was not kept."); return; }
+  $("kRemWhat").value = "";
+  $("kRemWhen").value = "";
+  remFillWhen();
+  await load();
+  say("It comes back on " + whenText(at) + ".");
+}
+
+async function dropTrigger(li) {
+  if (!confirm("Forget this reminder?")) return;
+  activity("working");
+  const d = await api("/api/kitsune", { action: "delete_trigger", id: Number(li.dataset.id) });
+  activity("idle");
+  if (d.error) return;
+  await load();
+  say("Reminder forgotten.");
+}
+
+$("kTrigList").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button[data-act]");
+  const li = b && b.closest(".ktri");
+  if (li && b.dataset.act === "drop") dropTrigger(li);
+});
+$("kRemForm").addEventListener("submit", keepReminder);
+$("kRemWhen").addEventListener("focus", remFillWhen);
 
 $("kTalk").addEventListener("pointerdown", (ev) => { ev.preventDefault(); startTalk(); });
 window.addEventListener("pointerup", stopTalk);
