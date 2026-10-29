@@ -154,9 +154,31 @@ mod tests {
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
                 let mut stream = stream;
-                let mut buf = [0u8; 65536];
-                let n = stream.read(&mut buf).unwrap_or(0);
-                s2.lock().unwrap().extend_from_slice(&buf[..n]);
+                // read the whole request (headers + Content-Length body) before replying, as a
+                // real server does, so the client never hits a reset mid-write
+                let mut req = Vec::new();
+                let mut buf = [0u8; 4096];
+                loop {
+                    let head_end = req.windows(4).position(|w| w == b"\r\n\r\n");
+                    if let Some(h) = head_end {
+                        let head = String::from_utf8_lossy(&req[..h]).to_ascii_lowercase();
+                        let len: usize = head
+                            .lines()
+                            .find_map(|l| {
+                                l.strip_prefix("content-length:")
+                                    .map(|v| v.trim().parse().unwrap_or(0))
+                            })
+                            .unwrap_or(0);
+                        if req.len() >= h + 4 + len {
+                            break;
+                        }
+                    }
+                    match stream.read(&mut buf) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => req.extend_from_slice(&buf[..n]),
+                    }
+                }
+                s2.lock().unwrap().extend_from_slice(&req);
                 let body = reply;
                 let _ = stream.write_all(
                     format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes(),
