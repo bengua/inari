@@ -7,3 +7,8 @@ docs/INSTALLER-BRANCHE-fr.md # step-by-step install of the test branch for Ben's
 docs/openfox-dans-inari-fr.md # OpenFox elements against Inari's interface, written in French for the owner
 docs/moteur-local-fr.md # the plan for the local engine (OpenFox core in Inari), written in French for the owner
 docs/kitsune-fr.md # Kitsune (voice second brain) handoff note, written in French for the owner
+crates/inari-core/tests/kitsune_api.rs # French note fixtures: the tests check the page and the API on the notes a French-speaking owner dictates
+crates/kitsune/src/brain.rs # French note fixtures in tests: what the owner says, never the code
+crates/kitsune/src/mcp.rs # French note fixtures in tests: what the owner says, never the code
+crates/kitsune/src/search.rs # French note fixtures in tests: the search is checked on accented French notes, which is the point
+crates/kitsune/src/store.rs # French note fixtures in tests: what the owner says, never the code

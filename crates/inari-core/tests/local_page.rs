@@ -132,8 +132,16 @@ async fn the_page_and_its_assets_are_served_with_their_version() {
     );
     let (status, css) = raw(port, &format!("GET /assets/app.css HTTP/1.1\r\n{host}"), "").await;
     assert_eq!(status, 200);
+    // the Kitsune page is served the same way, without a token, with its own style and script
+    let (status, kit) = raw(port, &format!("GET /kitsune HTTP/1.1\r\n{host}"), "").await;
+    assert_eq!(status, 200);
+    assert!(
+        !kit.contains("__INARI_PAGE__"),
+        "every version mark is filled in"
+    );
+    assert!(kit.contains("Kitsune"), "the voice notebook's own page");
     // everything the page and its style ask for under /assets/ is there
-    for text in [&page, &css] {
+    for text in [&page, &css, &kit] {
         for part in text.split("/assets/").skip(1) {
             let name: String = part
                 .chars()
