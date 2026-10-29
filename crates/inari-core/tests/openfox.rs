@@ -753,6 +753,7 @@ struct Lab {
     fox: Shared,
     /// Every panel the harness sent to the pages, in order.
     panels: Arc<Mutex<Vec<Value>>>,
+    harness: Arc<inari_core::agent::Harness>,
 }
 
 async fn lab(approve: bool) -> Lab {
@@ -790,12 +791,14 @@ async fn lab(approve: bool) -> Lab {
         Some(approver),
     );
     let agent = runner.create("t1", "", "a title").unwrap();
+    let harness = runner.harness("openfox").unwrap();
     Lab {
         _dir: dir,
         runner,
         agent,
         fox,
         panels,
+        harness,
     }
 }
 
@@ -845,9 +848,7 @@ async fn a_turn_streams_into_the_journal_in_the_mode_the_settings_chose() {
     let before = opened(&l);
     l.runner.run(&l.agent, "hello again", vec![]).await;
     assert_eq!(opened(&l), before, "the WebSocket was kept");
-    let models = l.runner.harnesses["openfox"]
-        .list_models(l._dir.path())
-        .await;
+    let models = l.harness.list_models(l._dir.path()).await;
     assert_eq!(models, ["local/qwen3"]);
 }
 
@@ -926,7 +927,7 @@ async fn an_end_openfox_never_said_is_found_by_asking() {
 #[tokio::test(flavor = "multi_thread")]
 async fn the_status_shows_openfox_without_its_keys() {
     let l = lab(true).await;
-    let h = l.runner.harnesses["openfox"].openfox().unwrap();
+    let h = fox_of(&l);
     let status = h.status().await;
     assert_eq!(status["reachable"], true);
     assert_eq!(status["active_provider"], "local");
@@ -945,7 +946,7 @@ fn last_panel(l: &Lab) -> Value {
 }
 
 fn fox_of(l: &Lab) -> &OpenFoxHarness {
-    l.runner.harnesses["openfox"].openfox().unwrap()
+    l.harness.openfox().unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread")]

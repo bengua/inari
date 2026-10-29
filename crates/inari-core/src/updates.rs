@@ -11,7 +11,7 @@ use std::process::Stdio;
 use std::time::Duration;
 use tokio::process::Command;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
 pub struct UpdateSpec {
     /// The npm package the harness comes from.
     pub npm: String,

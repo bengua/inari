@@ -255,7 +255,7 @@ function fillAutoChip(a) { const chip = $("autoChip"), guest = snap.ui && snap.u
   chip.classList.toggle("on", !!a.auto); chip.textContent = a.auto ? "⚡ " + t("Auto") : t("Ask first"); chip.title = a.auto ? t("This thread acts without asking. Click to ask again.") : t("The agent asks before sensitive actions. Click to let it act without asking."); }
 $("autoChip").onclick = () => { const a = snap.agents[selected]; if (!a) return; api("/api/auto", { agent: selected, auto: !a.auto }); toast(a.auto ? t("The agent will ask again") : t("Auto mode: the agent acts without asking")); };
 /* Harness updates, as the old sidebar badge: a download mark and the logos of what is out of date, on every core. */
-const HARNESS = { claude: ["claude", "Claude Code"], gemini: ["gemini", "Gemini CLI"], openfox: ["local", "OpenFox"] };
+const HARNESS = { claude: ["claude", "Claude Code"], codex: ["openai", "Codex"], gemini: ["gemini", "Gemini CLI"], kimi: ["kimi", "Kimi CLI"], openfox: ["local", "OpenFox"] };
 function harnessName(h) { return (HARNESS[h] || [h, h])[1]; }
 function updateEntries() { const out = [], jobs = snap.update_jobs || {};
   for (const n of snap.nodes || []) for (const [h, u] of Object.entries((n.capabilities || {}).updates || {})) { const job = jobs[n.node_id + "/" + h], v = { ...u, ...(job || {}) }; out.push({ node: n.node_id, harness: h, ...v }); }
@@ -292,6 +292,10 @@ $("usageBtn").onclick = () => { store.set("usageOpen", !store.get("usageOpen", f
 $("pill").onclick = () => openPop($("pill"), updatesPanel);
 $("gear").onclick = () => openPop($("gear"), (pop) => { pop.insertAdjacentHTML("beforeend", `<h3>${esc(t("Appearance"))}</h3>`); const seg = document.createElement("div"); seg.className = "seg"; for (const th of ["auto", "light", "dark"]) { const b = document.createElement("button"); b.className = "btn small" + (store.get("theme", "auto") === th ? " on" : ""); b.textContent = t(th); b.onclick = () => { theme(th); pop.classList.remove("open"); }; seg.append(b); } pop.append(seg);
   pop.insertAdjacentHTML("beforeend", `<h3 style="margin-top:12px">${esc(t("Language"))}</h3>`); const langs = document.createElement("div"); langs.className = "seg"; for (const [code, name] of Object.entries(LANGS)) { const b = document.createElement("button"); b.className = "btn small" + (LANG === code ? " on" : ""); b.textContent = name; b.lang = code; b.onclick = () => { if (code === LANG) return; setLang(code); saveDraft(); location.reload(); }; langs.append(b); } pop.append(langs);
+  // each core's agents and subscriptions (Claude Code, Codex, Gemini, Kimi, OpenFox…), set here
+  const cores = (snap ? snap.nodes : []).filter((n) => (n.capabilities || {}).harness_specs);
+  if (cores.length) { pop.insertAdjacentHTML("beforeend", `<h3 style="margin-top:12px">${esc(t("Agents and subscriptions"))}</h3>`); const box = document.createElement("div"); box.className = "seg";
+    for (const n of cores) { const b = document.createElement("button"); b.className = "btn small"; b.textContent = t("Agents of {name}", { name: n.node_id }); b.onclick = () => { pop.classList.remove("open"); harnessSheet(n.node_id); }; box.append(b); } pop.append(box); }
   // OpenFox, on each core that drives it natively: its settings live here, not in a file
   const foxes = (snap ? snap.nodes : []).flatMap((n) => Object.keys((n.capabilities || {}).openfox || {}).map((h) => [n.node_id, h]));
   if (foxes.length) { pop.insertAdjacentHTML("beforeend", `<h3 style="margin-top:12px">OpenFox</h3>`); const box = document.createElement("div"); box.className = "seg";
@@ -561,6 +565,41 @@ async function foxSettings(node, harness) { const data = await foxRead(node, har
   form.append(foxBtn(t("Save the patterns"), () => { draft.maxRetriesPerTurn = Math.max(0, Math.min(100, Number(max.value) || 0)); draft.patterns = draft.patterns.filter((x) => x.pattern.trim()); set("agent.retryPatterns", draft); }, "go"));
   sheet(t("OpenFox's settings"), [], t("Kept by OpenFox itself, for every thread it runs on this core."), form); }
 
+/* ---------- a core's agents and subscriptions: added, tried, installed, taken away from here, never in a file ---------- */
+const AGENT_PRESETS = [
+  { id: "claude", label: "Claude (Claude Code)", name: "claude", command: "claude-agent-acp", npm: "@zed-industries/claude-agent-acp", hint: "Sign in once on this core: run claude, then /login." },
+  { id: "codex", label: "ChatGPT (Codex)", name: "codex", command: "codex-acp", npm: "@zed-industries/codex-acp", hint: "Sign in once on this core: run codex login." },
+  { id: "gemini", label: "Gemini (Gemini CLI)", name: "gemini", command: "gemini --acp", npm: "@google/gemini-cli", hint: "Sign in once on this core: run gemini and choose Login with Google." },
+  { id: "kimi", label: "Kimi (Kimi CLI)", name: "kimi", command: "kimi --acp", npm: "", hint: "Install Kimi CLI on this core, then sign in once: run kimi and /login." },
+  { id: "openfox", label: "OpenFox (local models)", name: "openfox", kind: "openfox", hint: "OpenFox's settings are then in Settings → OpenFox." },
+  { id: "acp", label: "Another ACP agent", name: "", command: "", npm: "", hint: "Any agent that speaks the Agent Client Protocol: the command that starts it." },
+];
+async function harnessAct(node, action, extra, after) { const at = Math.floor(Date.now() / 1000);
+  const r = await api("/api/harnesses", { node, action, ...extra }); if (r.error) return;
+  toast(t("Sent to {name}…", { name: node }));
+  if (await until(() => ((snap.harness_results || {})[node] || {}).at >= at, 60000)) { const said = snap.harness_results[node]; const answers = (said.detail || "").match(/^It answers: (.*)$/); toast(said.ok ? (answers ? t("It answers: {models}", { models: answers[1] }) : said.detail ? t(said.detail) : t("Done.")) : said.error); if (after) setTimeout(after, 2500); }
+  else toast(t("{name} did not answer", { name: node })); }
+function harnessSheet(node) { const n = snap.nodes.find((x) => x.node_id === node), caps = (n && n.capabilities) || {}, specs = caps.harness_specs || {}, models = caps.harnesses || {}, ups = caps.updates || {};
+  const form = foxForm(), again = () => harnessSheet(node);
+  for (const [name, h] of Object.entries(specs)) { const preset = AGENT_PRESETS.find((p) => p.id === h.preset), count = (models[name] || []).length, up = ups[name] || {};
+    const bits = [name, preset ? preset.label : h.kind === "openfox" ? "OpenFox" : h.command, h.default ? t("default") : "", !h.installed ? t("not installed") : count ? counted(count, "1 model", "{n} models") : "", up.available ? t("update available") : "", h.source === "configuration" ? t("from the configuration file") : ""].filter(Boolean).join(" · ");
+    const btns = [foxBtn(t("Test"), () => harnessAct(node, "test", { name }))];
+    if (h.npm && (!h.installed || up.available)) btns.push(foxBtn(h.installed ? t("Update") : t("Install"), () => { api("/api/update", { node, harness: name }); toast(t("Installing {name}… it can take a few minutes.", { name })); }, "go"));
+    if (h.kind === "openfox") btns.push(foxBtn(t("Settings"), () => openfoxSheet(node, name)));
+    if (!h.default) { const del = foxBtn(t("Remove"), null); del.onclick = twice(del, t("Remove {name}?", { name }), () => harnessAct(node, "remove", { name }, again)); btns.push(del); }
+    foxRow(form, bits, btns); }
+  form.append(Object.assign(document.createElement("h3"), { textContent: t("Add a subscription or an agent") }));
+  const pick = foxField(form, t("Which one"), document.createElement("select")); for (const p of AGENT_PRESETS) pick.append(new Option(t(p.label), p.id));
+  const name = foxField(form, t("Its name on this core"), Object.assign(document.createElement("input"), { type: "text", spellcheck: false }));
+  const command = foxField(form, t("The command that starts it"), Object.assign(document.createElement("input"), { type: "text", spellcheck: false }));
+  const npm = foxField(form, t("Its npm package, to install and update it from here (optional)"), Object.assign(document.createElement("input"), { type: "text", spellcheck: false }));
+  const hint = document.createElement("small"); hint.className = "empty"; form.append(hint);
+  const fill = () => { const p = AGENT_PRESETS.find((x) => x.id === pick.value); name.value = p.name; command.value = p.command || ""; npm.value = p.npm || ""; hint.textContent = t(p.hint);
+    for (const x of [command, npm]) x.parentElement.hidden = p.kind === "openfox"; };
+  pick.onchange = fill; fill();
+  const body = () => { const p = AGENT_PRESETS.find((x) => x.id === pick.value); return { name: name.value.trim(), preset: p.id, kind: p.kind || "acp", command: command.value.trim(), npm: npm.value.trim() }; };
+  const row = document.createElement("div"); row.className = "row2"; row.append(foxBtn(t("Test"), () => harnessAct(node, "test", body())), foxBtn(t("Add"), () => harnessAct(node, "add", body(), again), "go")); form.append(row);
+  sheet(t("Agents of {name}", { name: node }), [], t("A subscription is used through its own agent on this core. Added here, it serves from the next message; nothing to edit by hand."), form); }
 /* ---------- the mascot: FoxBot when its folder is served, else the orb ---------- */
 let foxFrame = null, foxReady = false, foxLast = "";
 function fox(method, a) { try { const f = foxFrame && foxFrame.contentWindow && foxFrame.contentWindow.fox; if (!f) return false; if (method === "event") f.setEvent && f.setEvent(a); else if (method === "persona") { if (!f.setPersona) return false; f.setPersona(a); } else if (method === "state") { f.setHarness && f.setHarness(a.harness); f.setHealth && f.setHealth(a.health); f.setActivity && f.setActivity(a.activity); } return true; } catch (e) { return false; } }

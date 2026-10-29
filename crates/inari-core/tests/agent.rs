@@ -187,7 +187,12 @@ async fn the_model_choice_reaches_the_agent() {
     assert!(journal(&l)
         .iter()
         .any(|(k, d)| k == "provider_switch" && d["to"] == "fam/beta"));
-    let models = l.runner.harnesses["fake"].list_models(l._dir.path()).await;
+    let models = l
+        .runner
+        .harness("fake")
+        .unwrap()
+        .list_models(l._dir.path())
+        .await;
     assert_eq!(models, ["fam/alpha", "fam/beta"]);
 }
 
@@ -403,7 +408,7 @@ async fn a_thread_deleted_during_its_turn_does_not_come_back() {
 #[tokio::test]
 async fn modes_and_commands_are_read_and_the_chosen_mode_reaches_the_agent() {
     let l = lab(false, None);
-    let probe = l.runner.harnesses["fake"].probe(l._dir.path()).await;
+    let probe = l.runner.harness("fake").unwrap().probe(l._dir.path()).await;
     let ids: Vec<&str> = probe
         .modes
         .iter()

@@ -18,7 +18,7 @@ use crate::teleport::{teleport_observed, CallResult, Endpoint};
 use crate::updates::UpdateSpec;
 use base64::Engine;
 use serde::de::{MapAccess, Visitor};
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -26,10 +26,13 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct HarnessSpec {
     #[serde(default)]
     pub kind: String,
+    /// Which subscription or agent it is, when added from the interface (claude, codex…).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub preset: String,
     #[serde(default)]
     pub command: Vec<String>,
     #[serde(default = "default_timeout")]
@@ -176,6 +179,71 @@ impl NodeConfig {
     }
 }
 
+/// The harnesses set from the interface, by name (`<data_dir>/harnesses.json`): a spec added or
+/// put in place of the configuration's, or null for one of the configuration's taken away.
+fn chosen_harnesses(data_dir: &Path) -> BTreeMap<String, Option<HarnessSpec>> {
+    std::fs::read(data_dir.join("harnesses.json"))
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
+}
+
+/// The configuration's harnesses with the interface's changes, in order: the first is the default.
+fn merged_specs(cfg: &NodeConfig) -> Vec<(String, HarnessSpec)> {
+    let mut out = cfg.harness_specs();
+    for (name, spec) in chosen_harnesses(&cfg.data_dir) {
+        match (spec, out.iter().position(|(n, _)| *n == name)) {
+            (None, Some(at)) if at > 0 => {
+                out.remove(at);
+            }
+            (Some(spec), Some(at)) => out[at].1 = spec,
+            (Some(spec), None) => out.push((name, spec)),
+            _ => {} // the default stays
+        }
+    }
+    out
+}
+
+/// A harness as its spec says: OpenFox driven natively, or an agent spoken to over ACP.
+fn build_harness(cfg: &NodeConfig, name: &str, spec: &HarnessSpec) -> Harness {
+    if spec.kind == "openfox" {
+        // OpenFox driven natively: its settings are the interface's, in the data folder
+        let mut h = OpenFoxHarness::new(cfg.data_dir.join("openfox").join(name));
+        h.extra_env = spec.env.clone();
+        h.prepare = spec.prepare.clone();
+        h.prepare_timeout = Duration::from_secs_f64(spec.prepare_timeout.max(1.0));
+        return Harness::from(h);
+    }
+    let file = cfg
+        .data_dir
+        .join("host")
+        .join(format!("acp_sessions.{name}.json"));
+    let mut h = AcpHarness::new(spec.command.clone(), file);
+    h.timeout = Duration::from_secs_f64(spec.timeout.max(1.0));
+    h.extra_env = spec.env.clone();
+    h.prepare = spec.prepare.clone();
+    h.pass_env = spec.pass_env.clone();
+    h.steer = spec.steer;
+    h.prepare_timeout = Duration::from_secs_f64(spec.prepare_timeout.max(1.0));
+    Harness::from(h)
+}
+
+/// Where a command's program is, looked for as the node would start it (PATH, ~/.local/bin).
+fn find_program(program: &str) -> Option<PathBuf> {
+    if program.contains('/') {
+        return Some(PathBuf::from(program)).filter(|p| p.is_file());
+    }
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_default();
+    std::iter::once(home.join(".local/bin"))
+        .chain(std::env::split_paths(
+            &std::env::var_os("PATH").unwrap_or_default(),
+        ))
+        .map(|d| d.join(program))
+        .find(|p| p.is_file())
+}
+
 fn read_key(path: &Path) -> std::io::Result<Vec<u8>> {
     Ok(std::fs::read(path)?.trim_ascii().to_vec())
 }
@@ -294,6 +362,10 @@ pub struct Node {
     updates: Mutex<Map<String, Value>>,
     /// Set after an update: the next heartbeat re-reads the model catalogue at once.
     refresh: std::sync::atomic::AtomicBool,
+    /// The harnesses as they are now: the configuration's with the interface's changes.
+    specs: Mutex<Vec<(String, HarnessSpec)>>,
+    /// Their names, for the check of an arriving thread (CapsuleHost::on_prepare).
+    known_names: Arc<Mutex<Vec<String>>>,
 }
 
 impl Node {
@@ -308,14 +380,18 @@ impl Node {
         let bus = Bus::new(&cfg.node_id);
         let mut host = CapsuleHost::new(&cfg.node_id, &cfg.data_dir.join("host"))
             .map_err(|e| e.to_string())?;
-        let specs = cfg.harness_specs();
+        let specs = merged_specs(&cfg);
         let names: Vec<String> = specs.iter().map(|(n, _)| n.clone()).collect();
+        let known_names = Arc::new(Mutex::new(names.clone()));
         if !names.is_empty() {
             // refuse an agent whose harness this core lacks, before the point of no return
-            let known = names.clone();
+            let known = Arc::clone(&known_names);
             host.on_prepare = Some(Box::new(move |c| {
                 match c.manifest.labels().get("harness").and_then(Value::as_str) {
-                    Some(h) if !h.is_empty() && !known.iter().any(|k| k == h) => {
+                    Some(h)
+                        if !h.is_empty()
+                            && !known.lock().expect("not poisoned").iter().any(|k| k == h) =>
+                    {
                         Err(format!("this core has no {h:?} harness"))
                     }
                     _ => Ok(()),
@@ -406,28 +482,7 @@ impl Node {
             });
             let built: Vec<(String, Harness)> = specs
                 .iter()
-                .map(|(name, spec)| {
-                    if spec.kind == "openfox" {
-                        // OpenFox driven natively: its settings are the interface's, in the data folder
-                        let mut h = OpenFoxHarness::new(cfg.data_dir.join("openfox").join(name));
-                        h.extra_env = spec.env.clone();
-                        h.prepare = spec.prepare.clone();
-                        h.prepare_timeout = Duration::from_secs_f64(spec.prepare_timeout.max(1.0));
-                        return (name.clone(), Harness::from(h));
-                    }
-                    let file = cfg
-                        .data_dir
-                        .join("host")
-                        .join(format!("acp_sessions.{name}.json"));
-                    let mut h = AcpHarness::new(spec.command.clone(), file);
-                    h.timeout = Duration::from_secs_f64(spec.timeout.max(1.0));
-                    h.extra_env = spec.env.clone();
-                    h.prepare = spec.prepare.clone();
-                    h.pass_env = spec.pass_env.clone();
-                    h.steer = spec.steer;
-                    h.prepare_timeout = Duration::from_secs_f64(spec.prepare_timeout.max(1.0));
-                    (name.clone(), Harness::from(h))
-                })
+                .map(|(name, spec)| (name.clone(), build_harness(&cfg, name, spec)))
                 .collect();
             Some(Runner::new(
                 Arc::clone(&host),
@@ -489,6 +544,8 @@ impl Node {
             _client: Mutex::new(client),
             updates: Mutex::default(),
             refresh: std::sync::atomic::AtomicBool::new(false),
+            specs: Mutex::new(specs),
+            known_names,
         });
         node.subscribe();
         let beat = Arc::clone(&node);
@@ -574,9 +631,9 @@ impl Node {
     async fn openfox_status(&self) -> Map<String, Value> {
         let mut out = Map::new();
         if let Some(r) = &self.runner {
-            for (name, h) in &r.harnesses {
+            for (name, h) in r.harness_list() {
                 if let Some(fox) = h.openfox() {
-                    out.insert(name.clone(), fox.status().await);
+                    out.insert(name, fox.status().await);
                 }
             }
         }
@@ -586,11 +643,8 @@ impl Node {
     /// An OpenFox setting changed from the interface: done here, the result said on the bus.
     async fn openfox_action(&self, action: &str, p: &Value) {
         let harness = s(p, "harness");
-        let fox = self
-            .runner
-            .as_ref()
-            .and_then(|r| r.harnesses.get(&harness))
-            .and_then(|h| h.openfox());
+        let held = self.runner.as_ref().and_then(|r| r.harness(&harness));
+        let fox = held.as_deref().and_then(Harness::openfox);
         let mut detail = String::new();
         let result = match (fox, action) {
             (None, _) => Err(format!("no OpenFox harness {harness:?} on this core")),
@@ -643,17 +697,192 @@ impl Node {
         );
     }
 
+    /// The harnesses as the page shows them: where each comes from, what it runs, whether its
+    /// program is on this machine.
+    fn harness_view(&self) -> Map<String, Value> {
+        let chosen = chosen_harnesses(&self.cfg.data_dir);
+        let specs = self.specs.lock().expect("not poisoned").clone();
+        specs
+            .iter()
+            .enumerate()
+            .map(|(i, (name, spec))| {
+                let program = spec.command.first().cloned().unwrap_or_default();
+                let installed = spec.kind == "openfox" || find_program(&program).is_some();
+                (
+                    name.clone(),
+                    json!({"kind": if spec.kind.is_empty() { "acp" } else { spec.kind.as_str() },
+                           "preset": spec.preset, "command": spec.command.join(" "),
+                           "npm": spec.update.as_ref().map(|u| u.npm.clone()),
+                           "source": if chosen.contains_key(name) { "interface" } else { "configuration" },
+                           "default": i == 0, "installed": installed}),
+                )
+            })
+            .collect()
+    }
+
+    /// A harness added, changed, taken away or tried from the interface; the result said on the bus.
+    async fn harness_action(self: &Arc<Self>, action: &str, p: &Value) {
+        let name = s(p, "name");
+        let mut detail = String::new();
+        let result = self.harness_change(action, &name, p, &mut detail).await;
+        self.refresh
+            .store(true, std::sync::atomic::Ordering::Relaxed); // the catalogue and the list again
+        let (ok, error) = match result {
+            Ok(()) => (true, String::new()),
+            Err(e) => (false, e),
+        };
+        self.bus.publish(
+            &format!("node.{}.harness.result", self.cfg.node_id),
+            json!({"node": self.cfg.node_id, "action": action, "name": name, "ok": ok, "error": error, "detail": detail}),
+        );
+    }
+
+    async fn harness_change(
+        self: &Arc<Self>,
+        action: &str,
+        name: &str,
+        p: &Value,
+        detail: &mut String,
+    ) -> Result<(), String> {
+        let runner = self
+            .runner
+            .clone()
+            .ok_or("this core runs no agents (its configuration names no harness)")?;
+        let id_like = |x: &str| {
+            !x.is_empty()
+                && x.len() <= 32
+                && x.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "_-".contains(c))
+        };
+        let spec_of = |p: &Value| -> Result<HarnessSpec, String> {
+            let kind = if s(p, "kind") == "openfox" {
+                "openfox"
+            } else {
+                "acp"
+            };
+            let command: Vec<String> = s(p, "command")
+                .split_whitespace()
+                .map(String::from)
+                .collect();
+            if kind == "acp" && command.is_empty() {
+                return Err("an agent needs the command that starts it".into());
+            }
+            let npm = s(p, "npm");
+            let npm = npm.trim();
+            if !npm.is_empty()
+                && !npm
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "@/._-".contains(c))
+            {
+                return Err(format!("not an npm package: {npm:?}"));
+            }
+            let mut spec: HarnessSpec = serde_json::from_value(json!({
+                "kind": kind, "command": command, "preset": s(p, "preset"),
+                "steer": p.get("steer").and_then(Value::as_bool).unwrap_or(false)
+            }))
+            .map_err(|e| e.to_string())?;
+            if !npm.is_empty() {
+                spec.update =
+                    Some(serde_json::from_value(json!({"npm": npm})).map_err(|e| e.to_string())?);
+            }
+            Ok(spec)
+        };
+        match action {
+            "add" => {
+                if !id_like(name) {
+                    return Err("a harness's name is letters, digits, - and _ (32 at most)".into());
+                }
+                let spec = spec_of(p)?;
+                runner.set_harness_named(name, build_harness(&self.cfg, name, &spec));
+                self.keep_choice(name, Some(spec))?;
+                Ok(())
+            }
+            "remove" => {
+                if !runner.remove_harness(name)? {
+                    return Err(format!("no harness {name:?} on this core"));
+                }
+                let from_config = self.cfg.harness_specs().iter().any(|(n, _)| n == name);
+                self.keep_choice(name, None)?;
+                if !from_config {
+                    // nothing of the configuration's to hide: no trace left in the file
+                    let mut all = chosen_harnesses(&self.cfg.data_dir);
+                    all.remove(name);
+                    self.write_choices(&all)?;
+                }
+                Ok(())
+            }
+            "test" => {
+                // what the agent says when started as given: its models, or why it does not start
+                let spec = match s(p, "command").trim() {
+                    "" => self
+                        .specs
+                        .lock()
+                        .expect("not poisoned")
+                        .iter()
+                        .find(|(n, _)| n == name)
+                        .map(|(_, s)| s.clone())
+                        .ok_or_else(|| format!("no harness {name:?} on this core"))?,
+                    _ => spec_of(p)?,
+                };
+                if spec.kind != "openfox" {
+                    let program = spec.command.first().cloned().unwrap_or_default();
+                    if find_program(&program).is_none() {
+                        return Err(format!("{program} is not installed on this core"));
+                    }
+                }
+                let scratch = self.cfg.data_dir.join("scratch");
+                let _ = std::fs::create_dir_all(&scratch);
+                let probe = build_harness(&self.cfg, "test", &spec)
+                    .probe(&scratch)
+                    .await;
+                if probe.models.is_empty() && probe.modes.is_empty() {
+                    return Err("the agent started but said nothing: is it signed in?".into());
+                }
+                *detail = format!(
+                    "It answers: {}",
+                    if probe.models.is_empty() {
+                        "its own default model".to_string()
+                    } else {
+                        probe.models.join(", ")
+                    }
+                );
+                Ok(())
+            }
+            other => Err(format!("unknown harness action {other:?}")),
+        }
+    }
+
+    /// Keep a harness chosen from the interface (None: taken away), and use the new list.
+    fn keep_choice(&self, name: &str, spec: Option<HarnessSpec>) -> Result<(), String> {
+        let mut all = chosen_harnesses(&self.cfg.data_dir);
+        all.insert(name.to_string(), spec);
+        self.write_choices(&all)
+    }
+
+    fn write_choices(&self, all: &BTreeMap<String, Option<HarnessSpec>>) -> Result<(), String> {
+        crate::capsule::io::atomic_write(
+            &self.cfg.data_dir.join("harnesses.json"),
+            &serde_json::to_vec_pretty(all).expect("serializes"),
+        )
+        .map_err(|e| e.to_string())?;
+        let specs = merged_specs(&self.cfg);
+        *self.known_names.lock().expect("not poisoned") =
+            specs.iter().map(|(n, _)| n.clone()).collect();
+        *self.specs.lock().expect("not poisoned") = specs;
+        Ok(())
+    }
+
     /// What each harness announces: models, modes, slash commands (one map each, by harness).
     async fn harness_probes(&self) -> (Map<String, Value>, Map<String, Value>, Map<String, Value>) {
         let scratch = self.cfg.data_dir.join("scratch");
         let _ = std::fs::create_dir_all(&scratch);
         let (mut models, mut modes, mut commands) = (Map::new(), Map::new(), Map::new());
         if let Some(r) = &self.runner {
-            for (name, h) in &r.harnesses {
+            for (name, h) in r.harness_list() {
                 let p = h.probe(&scratch).await;
                 models.insert(name.clone(), json!(p.models));
                 modes.insert(name.clone(), json!(p.modes));
-                commands.insert(name.clone(), json!(p.commands));
+                commands.insert(name, json!(p.commands));
             }
         }
         (models, modes, commands)
@@ -732,12 +961,16 @@ impl Node {
             if forced || openfox_at.is_none_or(|t| t.elapsed() > Duration::from_secs(60)) {
                 // how each natively driven OpenFox is, for its settings in the interface
                 let status = self.openfox_status().await;
-                if !status.is_empty() {
+                if status.is_empty() {
+                    info.capabilities.remove("openfox");
+                } else {
                     info.capabilities
                         .insert("openfox".into(), Value::Object(status));
                 }
                 openfox_at = Some(std::time::Instant::now());
             }
+            info.capabilities
+                .insert("harness_specs".into(), Value::Object(self.harness_view()));
             let updates = self.updates.lock().expect("not poisoned").clone();
             if !updates.is_empty() {
                 info.capabilities
@@ -782,8 +1015,10 @@ impl Node {
     }
 
     fn update_spec(&self, harness: &str) -> Option<UpdateSpec> {
-        self.cfg
-            .harness_specs()
+        self.specs
+            .lock()
+            .expect("not poisoned")
+            .clone()
             .into_iter()
             .find(|(n, _)| n == harness)
             .and_then(|(_, s)| s.update)
@@ -799,7 +1034,8 @@ impl Node {
 
     /// Ask the registry what is new for every harness that names its package.
     pub async fn check_updates(&self) {
-        for (name, spec) in self.cfg.harness_specs() {
+        let specs = self.specs.lock().expect("not poisoned").clone();
+        for (name, spec) in specs {
             let Some(update) = spec.update else { continue };
             if self.update_running(&name) {
                 continue;
@@ -1150,6 +1386,7 @@ impl Node {
             let action = s(&m.payload, "action");
             tokio::spawn(async move {
                 if let Some(fox) = r.openfox_of(&agent) {
+                    let fox = fox.openfox().expect("an OpenFox harness");
                     if let Err(e) = fox.thread_action(&r, &agent, &action, &m.payload).await {
                         eprintln!("openfox: {action} on {agent}: {e}");
                     }
@@ -1176,15 +1413,19 @@ impl Node {
                 },
             );
         }
+        for action in ["add", "remove", "test"] {
+            self.on(
+                &format!("node.{me}.harness.{action}"),
+                move |n, m| async move {
+                    tokio::spawn(async move { n.harness_action(action, &m.payload).await });
+                },
+            );
+        }
         // part of OpenFox's library, read for the page (its answer goes to `reply`)
         self.on(&format!("node.{me}.openfox.library"), |n, m| async move {
             let p = &m.payload;
-            let fox = n
-                .runner
-                .as_ref()
-                .and_then(|r| r.harnesses.get(&s(p, "harness")))
-                .and_then(|h| h.openfox());
-            let reply = match fox {
+            let held = n.runner.as_ref().and_then(|r| r.harness(&s(p, "harness")));
+            let reply = match held.as_deref().and_then(Harness::openfox) {
                 None => json!({"ok": false, "error": "no such OpenFox harness on this core"}),
                 Some(f) => match f.library(&s(p, "kind"), &s(p, "id")).await {
                     Ok(data) => json!({"ok": true, "data": data}),

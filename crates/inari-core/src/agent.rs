@@ -1065,7 +1065,9 @@ const DRAFT_EVERY: Duration = Duration::from_millis(120);
 /// Drives the agents a node holds: one turn at a time per agent.
 pub struct Runner {
     pub host: Arc<CapsuleHost>,
-    pub harnesses: BTreeMap<String, Harness>,
+    /// Who thinks for the threads, by name: from the configuration, and changed from the
+    /// interface while the node runs (a turn keeps the harness it started with).
+    harnesses: std::sync::RwLock<BTreeMap<String, Arc<Harness>>>,
     pub default_harness: String,
     publish: Option<Publisher>,
     approver: Option<Approver>,
@@ -1093,10 +1095,12 @@ impl Runner {
         let default_harness = harnesses.first().map(|h| h.0.clone()).unwrap_or_default();
         Arc::new(Self {
             host,
-            harnesses: harnesses
-                .into_iter()
-                .map(|(name, h)| (name, h.into()))
-                .collect(),
+            harnesses: std::sync::RwLock::new(
+                harnesses
+                    .into_iter()
+                    .map(|(name, h)| (name, Arc::new(h.into())))
+                    .collect(),
+            ),
             default_harness,
             publish,
             approver,
@@ -1130,18 +1134,64 @@ impl Runner {
         }
     }
 
-    /// The native OpenFox harness this thread runs on, if it runs on one.
-    pub fn openfox_of(&self, agent: &str) -> Option<&crate::openfox::OpenFoxHarness> {
+    /// A harness by name.
+    pub fn harness(&self, name: &str) -> Option<Arc<Harness>> {
         self.harnesses
-            .get(&self.harness_of(agent))
-            .and_then(Harness::openfox)
+            .read()
+            .expect("not poisoned")
+            .get(name)
+            .cloned()
+    }
+
+    /// Every harness, by name.
+    pub fn harness_list(&self) -> Vec<(String, Arc<Harness>)> {
+        self.harnesses
+            .read()
+            .expect("not poisoned")
+            .iter()
+            .map(|(k, v)| (k.clone(), Arc::clone(v)))
+            .collect()
+    }
+
+    /// Add a harness, or put a new one in place of the one of that name (its threads use it
+    /// from their next turn).
+    pub fn set_harness_named(&self, name: &str, h: Harness) {
+        self.harnesses
+            .write()
+            .expect("not poisoned")
+            .insert(name.into(), Arc::new(h));
+    }
+
+    /// Take a harness away; false when there was none. The node's default stays.
+    pub fn remove_harness(&self, name: &str) -> Result<bool, String> {
+        if name == self.default_harness {
+            return Err(format!("{name} is this core's default harness: it stays"));
+        }
+        Ok(self
+            .harnesses
+            .write()
+            .expect("not poisoned")
+            .remove(name)
+            .is_some())
+    }
+
+    fn has_harness(&self, name: &str) -> bool {
+        self.harnesses
+            .read()
+            .expect("not poisoned")
+            .contains_key(name)
+    }
+
+    /// The native OpenFox harness this thread runs on, if it runs on one.
+    pub fn openfox_of(&self, agent: &str) -> Option<Arc<Harness>> {
+        self.harness(&self.harness_of(agent))
+            .filter(|h| h.openfox().is_some())
     }
 
     /// Whether this thread's folder stays on disk between its turns (Harness::keeps_folder).
     pub fn keeps_folder(&self, agent: &str) -> bool {
-        self.harnesses
-            .get(&self.harness_of(agent))
-            .is_some_and(Harness::keeps_folder)
+        self.harness(&self.harness_of(agent))
+            .is_some_and(|h| h.keeps_folder())
     }
 
     /// A kept folder changed outside a turn (a branch switched, say): the thread's files follow
@@ -1159,7 +1209,7 @@ impl Runner {
         self.labels(agent)
             .get("harness")
             .and_then(Value::as_str)
-            .filter(|h| self.harnesses.contains_key(*h))
+            .filter(|h| self.has_harness(h))
             .unwrap_or(&self.default_harness)
             .to_string()
     }
@@ -1296,7 +1346,7 @@ impl Runner {
         } else {
             harness.to_string()
         };
-        if !self.harnesses.contains_key(&harness) {
+        if !self.has_harness(&harness) {
             return Err(format!("no harness {harness:?} on this node"));
         }
         let staging = self.host.root.join("new").join(thread);
@@ -1386,7 +1436,7 @@ impl Runner {
     /// Choose who thinks for a thread; changing harness clears its model. Journaled
     /// as the reference does; false when nothing changed.
     pub fn set_harness(&self, agent: &str, name: &str) -> Result<bool, String> {
-        if !self.harnesses.contains_key(name) {
+        if !self.has_harness(name) {
             return Err(format!("no harness {name:?} on this node"));
         }
         if self.labels(agent).get("harness").and_then(Value::as_str) == Some(name) {
@@ -1519,12 +1569,12 @@ impl Runner {
     ) -> RunSummary {
         // OpenFox takes a message during a turn into its own queue, and slips it in at its next step
         if attachments.is_empty() {
-            if let Some(h) = self
-                .harnesses
-                .get(&self.harness_of(agent))
-                .and_then(Harness::openfox)
-            {
-                if h.join(agent, text).await {
+            if let Some(h) = self.openfox_of(agent) {
+                if h.openfox()
+                    .expect("an OpenFox harness")
+                    .join(agent, text)
+                    .await
+                {
                     return RunSummary {
                         stopped: "joined".into(),
                         ..Default::default()
@@ -1588,10 +1638,8 @@ impl Runner {
             .unwrap_or("")
             .to_string();
         let path = self.host.agents.join(agent);
-        let keep = self
-            .harnesses
-            .get(&harness_name)
-            .is_some_and(Harness::keeps_folder);
+        let harness = self.harness(&harness_name);
+        let keep = harness.as_ref().is_some_and(|h| h.keeps_folder());
         self.set_phase(agent, "listening");
         let files: Vec<Value> = attachments
             .iter()
@@ -1621,10 +1669,7 @@ impl Runner {
                 self.emit(agent, e);
             }
         }
-        let summary = match (
-            self.host.open_workdir(agent, keep),
-            self.harnesses.get(&harness_name),
-        ) {
+        let summary = match (self.host.open_workdir(agent, keep), harness) {
             (Ok(workdir), Some(h)) => {
                 let turn = Turn {
                     runner: Arc::clone(self),
