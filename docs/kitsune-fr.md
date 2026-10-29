@@ -88,3 +88,24 @@ incrément
 Ce qui suit (voix de synthèse…) arrive incrément par incrément, chacun testé avant le
 suivant. Le choix du moteur de voix et le test d'écoute à l'aveugle se font sur les
 postes, là où les modèles peuvent être servis.
+
+## L'intégration au cœur (incrément 8)
+
+Le cœur tient un cerveau Kitsune par machine, ouvert dans `<data_dir>/kitsune/`. La passerelle
+l'expose par une API **réservée au propriétaire** :
+
+- `GET /api/kitsune` — son état (réglages, serveurs ASR/TTS prêts, nombres de notes et de rappels).
+- `POST /api/kitsune {action, …}` — `set_settings`, `capture_text`, `ingest_voice` (audio en
+  base64), `search`, `speak`, `get_note`, `correct_note`, `delete_note`,
+  `create_trigger` / `list_triggers` / `delete_trigger`.
+- `GET /api/kitsune/audio?path=` — l'audio scellé, ouvert.
+
+Et **une porte pour le réseau agentique** : `POST /api/kitsune/mcp` reçoit une requête MCP
+(JSON-RPC). Le propriétaire y accède toujours ; un autre appelant (n8n, Home Assistant) présente
+le **jeton MCP du cerveau** en en-tête `Authorization: Bearer …`. Tant qu'aucun jeton n'est réglé,
+la porte est fermée au réseau (le propriétaire seul). Rien n'est en dur : adresses, modèles, voix,
+jeton et outils offerts sont tous des réglages.
+
+Les appels au cerveau (SQLite, et HTTP vers les serveurs de voix) tournent **hors du runtime
+async** (`spawn_blocking`), derrière un `Mutex`, pour ne pas bloquer la passerelle.
+
