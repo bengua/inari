@@ -36,7 +36,22 @@ SQLite, dont le schéma avance et recule par des migrations numérotées
 - **triggers** — ce qui ramène une note : une heure, un lieu entré ou quitté, un
   événement du système.
 
-Ce qui suit (capture, transcription, recherche hybride RRF, chiffrement, voix,
-déclencheurs, serveur MCP) arrive incrément par incrément, chacun testé avant le
+## Le chiffrement au repos (incrément 4)
+
+Les fichiers audio — captures vocales brutes et voix synthétisée, le gros de ce qui est
+sensible — sont chiffrés au repos en **AES-256-GCM** (RustCrypto, pur Rust : le binaire reste
+statique, aucun C, aucune build OpenSSL). La **clé** vit dans un fichier **mode 600**, lisible
+par le seul utilisateur du cœur et créée au premier usage, exactement comme Inari garde ses
+autres secrets (`keys.json`, `session.key`) ; son chemin est un réglage, jamais codé en dur.
+Chaque fichier est scellé avec un nonce tiré au hasard, et la base ne garde que son chemin
+relatif.
+
+La base elle-même (notes, embeddings) est protégée au repos par le **chiffrement de volume
+(LUKS)** du cœur, la même posture que les capsules d'Inari. Ce choix évite d'embarquer SQLCipher
+et sa build C OpenSSL, qui fragiliserait le binaire statique musl ; il est cohérent avec le reste
+du cœur, qui n'a aucune dépendance crypto en C.
+
+Ce qui suit (capture, transcription, voix,
+déclencheurs) arrive incrément par incrément, chacun testé avant le
 suivant. Le choix du moteur de voix et le test d'écoute à l'aveugle se font sur les
 postes, là où les modèles peuvent être servis.
