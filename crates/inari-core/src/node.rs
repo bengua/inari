@@ -653,8 +653,15 @@ impl Node {
         let harness = s(p, "harness");
         let held = self.runner.as_ref().and_then(|r| r.harness(&harness));
         let fox = held.as_deref().and_then(Harness::openfox);
+        let engine = held.as_deref().and_then(Harness::local);
         let mut detail = String::new();
         let result = match (fox, action) {
+            // the local engine's library, changed with OpenFox's sheets
+            (None, a) if engine.is_some() && crate::openfox_library::ACTIONS.contains(&a) => engine
+                .expect("an engine")
+                .change(a, p)
+                .await
+                .map(|d| detail = d),
             (None, _) => Err(format!("no OpenFox harness {harness:?} on this core")),
             (Some(f), "set") => {
                 let mut next = f.settings();
@@ -1252,9 +1259,9 @@ impl Node {
             let launch = match m.payload.get("workflow").filter(|w| !w.is_null()) {
                 None => None,
                 Some(w) => match serde_json::from_value::<crate::openfox::Launch>(w.clone()) {
-                    Ok(l) if l.problem().is_none() && r.openfox_of(&agent).is_some() => Some(l),
+                    Ok(l) if l.problem().is_none() && (r.openfox_of(&agent).is_some() || r.local_of(&agent).is_some()) => Some(l),
                     Ok(l) => {
-                        let why = l.problem().unwrap_or_else(|| "only an OpenFox thread runs workflows".into());
+                        let why = l.problem().unwrap_or_else(|| "only a thread on OpenFox or the local engine runs workflows".into());
                         n.bus.publish(&format!("agent.{agent}.done"), json!({"agent": agent, "stopped": "error", "error": why, "text": ""}));
                         return;
                     }
@@ -1491,6 +1498,11 @@ impl Node {
                     if let Err(e) = fox.thread_action(&r, &agent, &action, &m.payload).await {
                         eprintln!("openfox: {action} on {agent}: {e}");
                     }
+                } else if let Some(h) = r.local_of(&agent) {
+                    let engine = h.local().expect("the local engine");
+                    if let Err(e) = engine.thread_action(&r, &agent, &action, &m.payload).await {
+                        eprintln!("engine: {action} on {agent}: {e}");
+                    }
                 }
             });
         });
@@ -1535,7 +1547,13 @@ impl Node {
             let p = &m.payload;
             let held = n.runner.as_ref().and_then(|r| r.harness(&s(p, "harness")));
             let reply = match held.as_deref().and_then(Harness::openfox) {
-                None => json!({"ok": false, "error": "no such OpenFox harness on this core"}),
+                None => match held.as_deref().and_then(Harness::local) {
+                    Some(e) => match e.library(&s(p, "kind"), &s(p, "id")).await {
+                        Ok(data) => json!({"ok": true, "data": data}),
+                        Err(e) => json!({"ok": false, "error": e}),
+                    },
+                    None => json!({"ok": false, "error": "no such OpenFox harness on this core"}),
+                },
                 Some(f) => match f.library(&s(p, "kind"), &s(p, "id")).await {
                     Ok(data) => json!({"ok": true, "data": data}),
                     Err(e) => json!({"ok": false, "error": e}),

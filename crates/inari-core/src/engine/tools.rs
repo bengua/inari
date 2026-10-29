@@ -13,8 +13,26 @@ use tokio::process::Command;
 const OUTPUT_CHARS: usize = 30_000;
 const READ_LINES: usize = 2000;
 
-/// The tools' definitions, for the agent's allowed ones.
-pub fn definitions(allowed: &[&str]) -> Vec<Value> {
+/// The tools the engine has (MCP servers' come on top, named `<server>_<tool>`).
+pub const BUILT_IN: [&str; 13] = [
+    "read_file",
+    "write_file",
+    "edit_file",
+    "run_command",
+    "ask_user",
+    "session_metadata",
+    "call_sub_agent",
+    "load_skill",
+    "step_done",
+    "return_value",
+    "background_process",
+    "dev_server",
+    "project_tasks",
+];
+
+/// The tools' definitions, for the agent's allowed ones; `subagents` are the ids
+/// call_sub_agent offers.
+pub fn definitions(allowed: &[String], subagents: &[String]) -> Vec<Value> {
     let all = [
         json!({"type": "function", "function": {"name": "read_file",
             "description": "Read the contents of a file or list directory contents. For text files: returns file content. For directories: returns a tree-formatted listing of entries with file sizes.",
@@ -44,12 +62,63 @@ pub fn definitions(allowed: &[&str]) -> Vec<Value> {
                 "cwd": {"type": "string", "description": "Working directory for the command (default: session workdir)"},
                 "timeout": {"type": "number", "description": "Timeout in milliseconds (default: 120000)"}},
                 "required": ["command"]}}}),
+        json!({"type": "function", "function": {"name": "ask_user",
+            "description": "Pause execution and ask the user a question. Use this when you need clarification or user input before proceeding.",
+            "parameters": {"type": "object", "properties": {
+                "question": {"type": "string", "description": "The question to ask the user"},
+                "type": {"type": "string", "enum": ["text", "confirm", "choice"], "description": "Type of question (text, confirm, or choice)"},
+                "options": {"type": "array", "description": "Options for choice-type questions. Each entry may be a plain string or an object {value, label, description?}.",
+                    "items": {"type": "object", "properties": {"value": {"type": "string"}, "label": {"type": "string"}, "description": {"type": "string"}}, "required": ["label"]}}},
+                "required": ["question"]}}}),
+        super::state::metadata_definition(),
+        json!({"type": "function", "function": {"name": "call_sub_agent",
+            "description": format!("Call a sub-agent to perform a specialized task. Available sub-agents: {}. The sub-agent will execute with isolated context and return a text result.", subagents.join(", ")),
+            "parameters": {"type": "object", "properties": {
+                "subAgentType": {"type": "string", "enum": subagents, "description": "Type of sub-agent to call"},
+                "prompt": {"type": "string", "description": "Task description for the sub-agent. Be specific about what you need."}},
+                "required": ["subAgentType", "prompt"]}}}),
+        json!({"type": "function", "function": {"name": "load_skill",
+            "description": "Load a skill's detailed instructions into context. Use this when you need domain-specific knowledge for a task. Call with the skill ID shown in the AVAILABLE SKILLS section.",
+            "parameters": {"type": "object", "properties": {
+                "skillId": {"type": "string", "description": "ID of the skill to load"}},
+                "required": ["skillId"]}}}),
+        json!({"type": "function", "function": {"name": "step_done",
+            "description": "Signal that you have completed the current workflow step. Call this exactly once when you have finished all work for this step. After calling this, no further tool calls should be made.",
+            "parameters": {"type": "object", "properties": {}, "required": []}}}),
+        json!({"type": "function", "function": {"name": "return_value",
+            "description": "Set the return value for this sub-agent execution. Call this once at the end of your work with a structured summary of your findings. The content will be passed back to the calling agent.",
+            "parameters": {"type": "object", "properties": {
+                "content": {"type": "string", "description": "The return value content — a structured summary of findings, results, or recommendations"},
+                "result": {"type": "string", "description": "Result classification (e.g. \"passed\", \"failed\", \"error\"). Used for workflow routing."}},
+                "required": ["content"]}}}),
+        json!({"type": "function", "function": {"name": "background_process",
+            "description": "Run a long-lived command in the background (a watcher, a server) and manage it: start it, list them, read a process's output, stop it. They run in your working directory.",
+            "parameters": {"type": "object", "properties": {
+                "action": {"type": "string", "enum": ["start", "list", "logs", "stop"], "description": "The action to perform"},
+                "command": {"type": "string", "description": "The command to start (for: start)"},
+                "name": {"type": "string", "description": "A short name for it (for: start)"},
+                "id": {"type": "string", "description": "The process id (for: logs, stop)"}},
+                "required": ["action"]}}}),
+        json!({"type": "function", "function": {"name": "dev_server",
+            "description": "Manage the project's dev server, configured in .openfox/dev.json ({command, url, hotReload}): see its status, start, stop or restart it, read its logs.",
+            "parameters": {"type": "object", "properties": {
+                "action": {"type": "string", "enum": ["status", "start", "stop", "restart", "logs"], "description": "The action to perform"}},
+                "required": ["action"]}}}),
+        json!({"type": "function", "function": {"name": "project_tasks",
+            "description": "The project's task board: list tasks, add one, move one to todo, in_progress or done.",
+            "parameters": {"type": "object", "properties": {
+                "action": {"type": "string", "enum": ["list", "add", "move"], "description": "The action to perform"},
+                "prompt": {"type": "string", "description": "What the task is (for: add)"},
+                "taskId": {"type": "string", "description": "The task (for: move)"},
+                "to": {"type": "string", "enum": ["todo", "in_progress", "done"], "description": "Where it goes (for: move)"},
+                "status": {"type": "string", "description": "Only the tasks in this column (for: list)"}},
+                "required": ["action"]}}}),
     ];
     all.into_iter()
         .filter(|d| {
             d.pointer("/function/name")
                 .and_then(Value::as_str)
-                .is_some_and(|n| allowed.contains(&n))
+                .is_some_and(|n| allowed.iter().any(|a| a == n))
         })
         .collect()
 }

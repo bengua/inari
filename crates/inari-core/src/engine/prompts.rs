@@ -2,65 +2,18 @@
 //! src/server/chat/prompts.ts and src/server/agents/defaults/*.agent.md, v2.0.161),
 //! Copyright (c) the OpenFox authors, MIT licence (see THIRD-PARTY.md); adapted to Inari.
 
-/// One of the engine's top-level agents: how it works, and the tools it may use.
-pub struct Agent {
-    pub id: &'static str,
-    pub name: &'static str,
-    pub description: &'static str,
-    pub tools: &'static [&'static str],
-    pub prompt: &'static str,
-}
-
-pub const BUILDER: Agent = Agent {
-    id: "builder",
-    name: "Build",
-    description: "Implements the task by writing code and completing criteria",
-    tools: &["read_file", "write_file", "edit_file", "run_command"],
-    prompt: "# Build Mode
-
-CRITICAL: Build mode ACTIVE - implementation is now allowed.
-
-You are no longer in read-only mode.
-You may read files, edit files, run commands, and use tools as needed to satisfy the approved criteria.
-
-## Responsibility
-
-- Execute the approved work with focused changes.
-- Follow TDD when fixing or refactoring: write or update the failing test first, then make it pass.
-- Verify changes as you go.
-- Finish criteria systematically instead of replanning from scratch.",
-};
-
-pub const PLANNER: Agent = Agent {
-    id: "planner",
-    name: "Plan",
-    description: "Explores the codebase and defines criteria for the task",
-    tools: &["read_file", "run_command"],
-    prompt: "# Plan Mode
-
-CRITICAL: Plan mode ACTIVE - you are in read-only phase.
-
-You may only inspect, analyze, ask clarifying questions, and propose, refine and/or add acceptance criteria.
-You MUST NOT make any edits, implementations, commits, config changes, or other system modifications.
-
-## Responsibility
-
-- Understand the user's goal before locking in details.
-- Explore the codebase with read-only actions when needed.
-- Present clear, verifiable criteria for the user to approve or refine.
-- Stay in planning mode until the user explicitly switches to build mode.
-- Present the criteria plainly and stop there: do not write until a new <system-reminder> switches you to build mode, which only the user can trigger.",
-};
-
-pub const AGENTS: [Agent; 2] = [BUILDER, PLANNER];
-
-pub fn agent(id: &str) -> &'static Agent {
-    AGENTS.iter().find(|a| a.id == id).unwrap_or(&AGENTS[0])
-}
+use super::defs::{AgentDef, SkillDef};
 
 /// The system prompt every turn starts with (the same for every agent, so a model server's
 /// cache keeps it).
-pub fn system(workdir: &str, instructions: &str, model: &str, today: &str) -> String {
+pub fn system(
+    workdir: &str,
+    instructions: &str,
+    model: &str,
+    today: &str,
+    skills: &[SkillDef],
+    subagents: &[AgentDef],
+) -> String {
     let instructions = if instructions.trim().is_empty() {
         String::new()
     } else {
@@ -134,28 +87,69 @@ When you have completed a task, run the project's lint and typecheck commands wi
 NEVER commit changes unless user explicitly asks you to.
 
 # Tool usage policy
-You have the capability to call multiple tools in a single response. When multiple independent pieces of information are requested, batch your tool calls together.{instructions}",
+When doing file search, prefer to use the call_sub_agent tool with the \"explorer\" in order to reduce context usage, except if this would take less than 3 calls to get the information.
+You have the capability to call multiple tools in a single response. When multiple independent pieces of information are requested, batch your tool calls together.{instructions}{}{}",
         std::env::consts::OS,
         std::env::consts::ARCH,
+        skills_section(skills),
+        subagents_section(subagents),
     )
 }
 
-/// The reminder that puts the model in an agent's mode (sent with the message when the mode
-/// changes, and at a thread's first turn).
-pub fn reminder(a: &Agent) -> String {
+fn skills_section(skills: &[SkillDef]) -> String {
+    if skills.is_empty() {
+        return String::new();
+    }
+    let listing: Vec<String> = skills
+        .iter()
+        .enumerate()
+        .map(|(i, s)| format!("{}. **{}** - {}", i + 1, s.id, s.description))
+        .collect();
     format!(
-        "<system-reminder>\n{}\n\n## AVAILABLE TOOLS\n\nYou have access to these tools: {}\n</system-reminder>",
-        a.prompt,
-        a.tools.join(", ")
+        "\n\n## AVAILABLE SKILLS\n\nYou can load specialized knowledge using the load_skill tool. Only load a skill when you need its instructions for the current task.\n\n{}\n\nTo load a skill, call load_skill with the skill ID. The skill's detailed instructions will be returned as a tool result.",
+        listing.join("\n")
     )
 }
 
-/// The short reminder of every other turn.
-pub fn small_reminder(a: &Agent) -> String {
+fn subagents_section(subagents: &[AgentDef]) -> String {
+    if subagents.is_empty() {
+        return String::new();
+    }
+    let listing: Vec<String> = subagents
+        .iter()
+        .enumerate()
+        .map(|(i, a)| {
+            format!(
+                "{}. **{}** - {}\n   - Has access to: {}",
+                i + 1,
+                a.id,
+                a.description,
+                a.tools.join(", ")
+            )
+        })
+        .collect();
     format!(
-        "<system-reminder>\nReminder: you are in '{}' mode.\n</system-reminder>",
-        a.name
+        "\n\n## AVAILABLE SUB-AGENTS\n\nYou can call specialized sub-agents for specific tasks using the call_sub_agent tool:\n\n{}\n\nTo call a sub-agent, use the call_sub_agent tool with:\n- subAgentType: The ID of the sub-agent\n- prompt: Clear description of what you need",
+        listing.join("\n\n")
     )
+}
+
+/// The reminder that puts the model in an agent's mode, with the tools it has.
+pub fn reminder(a: &AgentDef, tools: &[String]) -> String {
+    let tools = if tools.is_empty() {
+        "You have no tools available.".to_string()
+    } else {
+        format!("You have access to these tools: {}", tools.join(", "))
+    };
+    format!(
+        "<system-reminder>\n{}\n\n## AVAILABLE TOOLS\n\n{tools}\n</system-reminder>",
+        a.prompt.trim()
+    )
+}
+
+/// A sub-agent's system prompt: the shared one, and its own instructions baked in.
+pub fn subagent_system(base: &str, a: &AgentDef) -> String {
+    format!("{base}\n\n{}", a.prompt.trim())
 }
 
 pub const COMPACTION: &str =

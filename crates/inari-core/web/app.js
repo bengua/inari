@@ -636,6 +636,9 @@ function engineSheet(node, harness) { const n = snap.nodes.find((x) => x.node_id
   const idOf = () => (pname.value.trim() || purl.value.trim()).toLowerCase().replace(/^https?:\/\//, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "server";
   const row = document.createElement("div"); row.className = "row2"; row.append(foxBtn(t("Test"), () => engineAct(node, harness, "provider_test", { url: purl.value.trim(), key: key.value })),
     foxBtn(t("Add"), () => { engineAct(node, harness, "provider_add", { id: idOf(), name: pname.value.trim() || purl.value.trim(), url: purl.value.trim(), key: key.value }); key.value = ""; }, "go")); form.append(row);
+  form.append(Object.assign(document.createElement("h3"), { textContent: t("The engine's library") })); const lib = document.createElement("div"); lib.className = "row2"; lib.style.flexWrap = "wrap";
+  for (const [kind, label] of Object.entries(FOX_KINDS)) lib.append(foxBtn(t(label), () => foxLibrary(node, harness, kind)));
+  lib.append(foxBtn(t("MCP servers"), () => foxMcp(node, harness)), foxBtn(t("Tools"), () => foxTools(node, harness))); form.append(lib);
   sheet(t("Local engine of {name}", { name: node }), [], t("Inari's own agent: the model runs on your server, its tools in this core. Nothing else to start."), form); }
 /* ---------- the mascot: FoxBot when its folder is served, else the orb ---------- */
 let foxFrame = null, foxReady = false, foxLast = "";
@@ -786,7 +789,7 @@ $("msg").onkeydown = (e) => { const box = $("msg");
 /* ---------- conversation ---------- */
 async function select(id) { selected = id; forkAt = null; viewing = null; files = null; events = []; tlStamp = 0; lastFiles = ""; critDraft = null; markPlanTab(); renderTop(); drawChat(); drawBench(); await refreshDetail();
   // an OpenFox thread opened before its panel came: ask for it
-  const a = snap.agents[id], n = a && snap.nodes.find((x) => x.node_id === a.node); if (!panels[id] && n && n.capabilities && n.capabilities.openfox) api("/api/openfox/thread", { agent: id, action: "refresh" });
+  const a = snap.agents[id], n = a && snap.nodes.find((x) => x.node_id === a.node); if (!panels[id] && n && n.capabilities && (n.capabilities.openfox || n.capabilities.engine)) api("/api/openfox/thread", { agent: id, action: "refresh" });
   if (snap) renderCores(Object.entries(snap.agents)); $("msg").focus(); }
 async function refreshDetail() { if (!selected) return; if (tlBusy) { refreshDetail.again = true; return; } tlBusy = true; refreshDetail.again = false; tlStamp = Date.now(); try { const id = selected, base = `/api/agent/${encodeURIComponent(id)}/timeline`, last = events.length ? events[events.length - 1].id : "";
     let tl = await api(last ? `${base}?after=${encodeURIComponent(last)}` : base); if (id !== selected) return;
@@ -860,7 +863,7 @@ function drawChat() {
       const path = (e.text.match(/(?:write_file|read_file|write|edit|create)[^:]*:\s*([\w./-]+\.\w+)/i) || [])[1]; if (path) { const b = document.createElement("button"); b.className = "btn small open"; b.innerHTML = icon("file") + "<span></span>"; b.lastChild.textContent = t("Open {path}", { path }); b.onclick = () => openFile(path); d.append(b); } box.append(d); }
     else if (e.kind === "provider_switch") note(t("Model <b>{name}</b>", { name: esc(shortModel(e.text)) }));
     else if (e.kind === "decision") note(esc(e.text));
-    else if (e.kind === "checkpoint") { const [why, ...rest] = e.text.split(": "); const map = { teleport: "Moved between cores", provider_error: "The model failed", harness_error: "The agent stopped", harness_timeout: "The agent took too long", model_refused: "Model not available", mode_changed: "Mode", stopped: "Stopped", steered: "Paused at the end of a step to read your message", auto_approved: "Allowed automatically", mode_refused: "Mode not available" }; note(esc(t(map[why] || "Checkpoint")) + (rest.length && why !== "teleport" ? ` — ${esc(rest.join(": ").slice(0, 120))}` : "")); } }
+    else if (e.kind === "checkpoint") { const [why, ...rest] = e.text.split(": "); const map = { teleport: "Moved between cores", provider_error: "The model failed", harness_error: "The agent stopped", harness_timeout: "The agent took too long", model_refused: "Model not available", mode_changed: "Mode", stopped: "Stopped", steered: "Paused at the end of a step to read your message", auto_approved: "Allowed automatically", mode_refused: "Mode not available", workflow_step: "Workflow step", workflow_waiting: "The workflow waits for you", workflow_done: "Workflow finished", workflow_blocked: "The workflow is blocked", compacted: "Conversation summarised", model_unavailable: "Model not available" }; note(esc(t(map[why] || "Checkpoint")) + (rest.length && why !== "teleport" ? ` — ${esc(rest.join(": ").slice(0, 120))}` : "")); } }
   // what OpenFox does beside its answer: its thinking, sub-agents, a question, a retry (panel)
   if (panels[selected]) { const live = foxLive(panels[selected]); if (live) box.insertAdjacentHTML("beforeend", `<div class="foxlive" data-k="foxlive" data-s="${live.length}:${hashOf(live)}">${live}</div>`); }
   // the answer being written shows as it comes; once journaled (the last answer starts with it) the message replaces it

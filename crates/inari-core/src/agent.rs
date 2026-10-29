@@ -998,7 +998,9 @@ pub(crate) fn primer(t: &Turn, prime_chars: usize) -> Result<String, String> {
     ))
 }
 
-/// A thread's harness: an agent spoken to over ACP, or OpenFox driven natively (crate::openfox).
+/// A thread's harness: an agent spoken to over ACP, OpenFox driven natively (crate::openfox),
+/// or Inari's own engine (crate::engine). Always held in an Arc: its size does not matter.
+#[allow(clippy::large_enum_variant)]
 pub enum Harness {
     Acp(AcpHarness),
     OpenFox(crate::openfox::OpenFoxHarness),
@@ -1204,6 +1206,12 @@ impl Runner {
     pub fn openfox_of(&self, agent: &str) -> Option<Arc<Harness>> {
         self.harness(&self.harness_of(agent))
             .filter(|h| h.openfox().is_some())
+    }
+
+    /// The thread's harness when it is the local engine.
+    pub fn local_of(&self, agent: &str) -> Option<Arc<Harness>> {
+        self.harness(&self.harness_of(agent))
+            .filter(|h| h.local().is_some())
     }
 
     /// Whether this thread's folder stays on disk between its turns (Harness::keeps_folder).
@@ -1485,6 +1493,15 @@ impl Runner {
         }
     }
 
+    /// The mode chosen for a thread (empty: the agent's default).
+    pub fn mode_of(&self, agent: &str) -> String {
+        self.labels(agent)
+            .get("mode")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string()
+    }
+
     /// Remember the mode chosen for a thread (empty: the agent's default); false when unchanged.
     pub fn set_mode(&self, agent: &str, mode: &str) -> Result<bool, String> {
         let previous = self
@@ -1599,8 +1616,25 @@ impl Runner {
                     };
                 }
             }
+            // so does the local engine, read at the model's next call
+            if let Some(h) = self.harness(&self.harness_of(agent)) {
+                if h.local().is_some_and(|e| e.join(agent, text)) {
+                    return RunSummary {
+                        stopped: "joined".into(),
+                        ..Default::default()
+                    };
+                }
+            }
         }
         self.take_turn(agent, text, attachments, false, None).await
+    }
+
+    /// A turn started once this one ends (a message that came too late for the model).
+    pub fn run_later(self: &Arc<Self>, agent: &str, text: String) {
+        let (r, a) = (Arc::clone(self), agent.to_string());
+        let later: std::pin::Pin<Box<dyn std::future::Future<Output = RunSummary> + Send>> =
+            Box::pin(async move { r.run(&a, &text, Vec::new()).await });
+        tokio::spawn(later);
     }
 
     /// Follow a turn the agent runs again of its own (OpenFox retrying after a model's failure):

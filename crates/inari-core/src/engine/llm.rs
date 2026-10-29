@@ -79,6 +79,8 @@ struct Body {
     left: Option<usize>,
     chunk_left: usize,
     done: bool,
+    /// The response's headers, their names in lower case.
+    headers: Vec<(String, String)>,
 }
 
 impl Body {
@@ -177,6 +179,16 @@ async fn send(
     path: &str,
     body: Option<&Value>,
 ) -> Result<(u16, Body), String> {
+    send_with(server, method, path, body, &[]).await
+}
+
+async fn send_with(
+    server: &Server,
+    method: &str,
+    path: &str,
+    body: Option<&Value>,
+    extra: &[(String, String)],
+) -> Result<(u16, Body), String> {
     let t = target(&server.url)?;
     let mut stream = tokio::time::timeout(Duration::from_secs(10), TcpStream::connect(&t.host))
         .await
@@ -189,6 +201,12 @@ async fn send(
     );
     if !server.key.is_empty() {
         head.push_str(&format!("Authorization: Bearer {}\r\n", server.key));
+    }
+    for (k, v) in extra {
+        if k.contains(['\r', '\n', ':']) || v.contains(['\r', '\n']) {
+            return Err(format!("a bad header: {k}"));
+        }
+        head.push_str(&format!("{k}: {v}\r\n"));
     }
     if let Some(p) = &payload {
         head.push_str(&format!(
@@ -211,6 +229,7 @@ async fn send(
         left: None,
         chunk_left: 0,
         done: false,
+        headers: Vec::new(),
     };
     let status_line = body
         .line()
@@ -226,6 +245,10 @@ async fn send(
             break;
         }
         let lower = line.to_ascii_lowercase();
+        if let Some((k, v)) = line.split_once(':') {
+            body.headers
+                .push((k.trim().to_ascii_lowercase(), v.trim().to_string()));
+        }
         if let Some(v) = lower.strip_prefix("content-length:") {
             body.left = v.trim().parse().ok();
         } else if lower.starts_with("transfer-encoding:") && lower.contains("chunked") {
@@ -252,6 +275,27 @@ fn error_of(status: u16, raw: &[u8]) -> String {
         })
         .unwrap_or_else(|| String::from_utf8_lossy(&raw[..raw.len().min(300)]).to_string());
     format!("HTTP {status}: {said}")
+}
+
+/// One exchange with an HTTP server that is not a model's (an MCP server): its status, its
+/// headers (names in lower case) and its whole body, within `wait`.
+pub(crate) async fn exchange(
+    url: &str,
+    extra: &[(String, String)],
+    body: &Value,
+    wait: Duration,
+) -> Result<(u16, Vec<(String, String)>, Vec<u8>), String> {
+    let server = Server {
+        url: url.trim_end_matches('/').to_string(),
+        key: String::new(),
+    };
+    tokio::time::timeout(wait, async {
+        let (status, mut b) = send_with(&server, "POST", "", Some(body), extra).await?;
+        let raw = b.all().await?;
+        Ok((status, std::mem::take(&mut b.headers), raw))
+    })
+    .await
+    .map_err(|_| format!("{url} did not answer within {} s", wait.as_secs()))?
 }
 
 /// The models a server offers (`GET /models`).

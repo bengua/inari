@@ -250,10 +250,16 @@ async fn the_model_writes_a_file_through_a_tool_then_answers() {
         .iter()
         .map(|t| t["function"]["name"].as_str().unwrap())
         .collect();
-    assert_eq!(
-        names,
-        ["read_file", "write_file", "edit_file", "run_command"]
-    );
+    for t in [
+        "read_file",
+        "write_file",
+        "edit_file",
+        "run_command",
+        "session_metadata",
+        "call_sub_agent",
+    ] {
+        assert!(names.contains(&t), "{t} in {names:?}");
+    }
     let second = asked[1]["messages"].as_array().unwrap();
     assert_eq!(second[2]["tool_calls"][0]["function"]["name"], "write_file");
     assert_eq!(second[3]["role"], "tool");
@@ -308,10 +314,11 @@ async fn a_mode_keeps_to_its_tools_and_a_path_outside_is_the_persons() {
         .iter()
         .map(|t| t["function"]["name"].as_str().unwrap())
         .collect();
-    assert_eq!(
-        names,
-        ["read_file", "run_command"],
-        "the planner does not write"
+    assert!(
+        names.contains(&"read_file")
+            && !names.contains(&"write_file")
+            && !names.contains(&"edit_file"),
+        "the planner does not write: {names:?}"
     );
     assert!(asked[0]["messages"][1]["content"]
         .as_str()
@@ -321,7 +328,7 @@ async fn a_mode_keeps_to_its_tools_and_a_path_outside_is_the_persons() {
         .as_str()
         .unwrap()
         .to_string();
-    assert!(refused.contains("not available in Plan mode"), "{refused}");
+    assert!(refused.contains("is not available to Planner"), "{refused}");
     let outside = asked[2]["messages"].as_array().unwrap().last().unwrap()["content"]
         .as_str()
         .unwrap()
@@ -392,4 +399,257 @@ async fn the_models_are_listed_and_a_missing_model_is_said() {
     let out = l.runner.run(&l.agent, "hello", vec![]).await;
     assert_eq!(out.stopped, "error");
     assert!(out.error.contains("no model chosen"), "{}", out.error);
+}
+
+fn engine_of(l: &Lab) -> Arc<inari_core::agent::Harness> {
+    l.runner.harness("local").unwrap()
+}
+
+fn state_of(l: &Lab) -> inari_core::engine::state::ThreadState {
+    inari_core::engine::state::ThreadState::load(&l.runner.host.agents.join(&l.agent))
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_workflow_walks_its_steps_and_waits_for_the_person() {
+    let l = lab(32_768).await;
+    let wf = json!({"metadata": {"id": "sandbox", "name": "Sandbox"}, "entryStep": "greet",
+    "settings": {"maxIterations": 20},
+    "steps": [
+        {"id": "greet", "name": "Say Hi", "type": "agent", "phase": "build", "agentId": "builder",
+         "prompt": "Say hi about {{topic}}.", "transitions": [{"when": {"type": "always"}, "goto": "pick"}]},
+        {"id": "pick", "name": "Pick a Mood", "type": "user", "phase": "build", "transitions": [
+            {"when": {"type": "step_result", "result": "happy"}, "goto": "happy"},
+            {"when": {"type": "always"}, "goto": "check"}]},
+        {"id": "happy", "name": "Happy", "type": "agent", "phase": "build",
+         "prompt": "Be happy.", "transitions": [{"when": {"type": "always"}, "goto": "check"}]},
+        {"id": "check", "name": "Check", "type": "shell", "phase": "verification", "command": "echo checked {{topic}}",
+         "transitions": [{"when": {"type": "step_result", "result": "success"}, "goto": "$done"},
+                         {"when": {"type": "always"}, "goto": "$blocked"}]}
+    ]});
+    let dir = l._dir.path().join("engine").join("workflows");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("sandbox.workflow.json"), wf.to_string()).unwrap();
+    {
+        let mut m = l.model.lock().unwrap();
+        // the first agent step answers without step_done: it is nudged, then done
+        m.script.push_back(answer(&["Hi!"]));
+        m.script.push_back(call("s1", "step_done", json!({})));
+        m.script.push_back(answer(&["Done."]));
+    }
+    let launch = inari_core::openfox::Launch {
+        id: "sandbox".into(),
+        params: [("topic".to_string(), "foxes".to_string())].into(),
+        ..Default::default()
+    };
+    l.runner.launch(&l.agent, "", vec![], launch).await;
+    let flow = state_of(&l).flow.unwrap();
+    assert_eq!(
+        (flow.status.as_str(), flow.step.as_str()),
+        ("waiting", "pick")
+    );
+    assert_eq!(
+        flow.choices
+            .iter()
+            .map(|c| c.id.as_str())
+            .collect::<Vec<_>>(),
+        ["happy", "continue"]
+    );
+    let asked = l.model.lock().unwrap().asked.clone();
+    let first = asked[0]["messages"].as_array().unwrap().last().unwrap()["content"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        first.contains("Say hi about foxes.") && first.contains("call step_done()"),
+        "{first}"
+    );
+    assert!(asked[0]["tools"].to_string().contains("step_done"));
+    let nudge = asked[1]["messages"].as_array().unwrap().last().unwrap()["content"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        nudge.ends_with("If you have finished the task, call step_done()"),
+        "{nudge}"
+    );
+
+    // the person picks "happy": that branch, then the shell step, then done
+    {
+        let mut m = l.model.lock().unwrap();
+        m.script.push_back(call("s2", "step_done", json!({})));
+        m.script.push_back(answer(&["Yay."]));
+    }
+    let resume = inari_core::openfox::Launch {
+        resume: true,
+        choice: Some("happy".into()),
+        label: "happy".into(),
+        ..Default::default()
+    };
+    l.runner.launch(&l.agent, "", vec![], resume).await;
+    let flow = state_of(&l).flow.unwrap();
+    assert_eq!(flow.status, "completed", "{flow:?}");
+    assert_eq!(flow.results["pick"], "happy");
+    assert_eq!(flow.results["check"], "success");
+    assert!(flow.output["stdout"].contains("checked foxes"));
+    let reasons: Vec<String> = journal(&l)
+        .iter()
+        .filter(|(k, _)| k == "checkpoint")
+        .filter_map(|(_, d)| d["reason"].as_str().map(String::from))
+        .collect();
+    assert!(
+        reasons.contains(&"workflow_waiting".to_string())
+            && reasons.contains(&"workflow_done".to_string()),
+        "{reasons:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sub_agent_works_apart_and_returns_its_value() {
+    let l = lab(32_768).await;
+    {
+        let mut m = l.model.lock().unwrap();
+        m.script.push_back(call(
+            "c1",
+            "call_sub_agent",
+            json!({"subAgentType": "explorer", "prompt": "find the parser"}),
+        ));
+        // the explorer's own run: its return value
+        m.script.push_back(call(
+            "r1",
+            "return_value",
+            json!({"content": "it is in src/parse.rs"}),
+        ));
+        m.script.push_back(answer(&["Found it."]));
+    }
+    let out = l.runner.run(&l.agent, "where is the parser?", vec![]).await;
+    assert_eq!(out.final_text, "Found it.");
+    let asked = l.model.lock().unwrap().asked.clone();
+    let sub = asked[1]["messages"].as_array().unwrap();
+    assert_eq!(
+        sub.len(),
+        2,
+        "a fresh context: its system prompt and its task"
+    );
+    assert!(sub[1]["content"]
+        .as_str()
+        .unwrap()
+        .contains("find the parser"));
+    assert!(asked[1]["tools"].to_string().contains("return_value"));
+    let back = asked[2]["messages"].as_array().unwrap().last().unwrap()["content"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(back, "it is in src/parse.rs");
+}
+
+/// An MCP server over HTTP, as the streamable transport answers: one JSON answer a request.
+async fn mcp_server(seen: Arc<Mutex<Vec<String>>>) -> u16 {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        while let Ok((mut s, _)) = listener.accept().await {
+            let seen = Arc::clone(&seen);
+            tokio::spawn(async move {
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 8192];
+                let (head, body) = loop {
+                    let n = s.read(&mut chunk).await.unwrap_or(0);
+                    if n == 0 {
+                        return;
+                    }
+                    buf.extend_from_slice(&chunk[..n]);
+                    if let Some(i) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                        let head = String::from_utf8_lossy(&buf[..i]).to_string();
+                        let len: usize = head
+                            .lines()
+                            .find_map(|l| {
+                                l.to_lowercase()
+                                    .strip_prefix("content-length:")
+                                    .map(|v| v.trim().parse().unwrap_or(0))
+                            })
+                            .unwrap_or(0);
+                        while buf.len() < i + 4 + len {
+                            let n = s.read(&mut chunk).await.unwrap_or(0);
+                            if n == 0 {
+                                break;
+                            }
+                            buf.extend_from_slice(&chunk[..n]);
+                        }
+                        break (head, buf[i + 4..].to_vec());
+                    }
+                };
+                seen.lock().unwrap().push(head);
+                let req: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+                let result = match req["method"].as_str().unwrap_or("") {
+                    "initialize" => {
+                        json!({"protocolVersion": "2025-03-26", "capabilities": {"tools": {}}, "serverInfo": {"name": "fake"}})
+                    }
+                    "tools/list" => {
+                        json!({"tools": [{"name": "echo", "description": "Says it back", "inputSchema": {"type": "object", "properties": {"text": {"type": "string"}}}}]})
+                    }
+                    "tools/call" => {
+                        json!({"content": [{"type": "text", "text": format!("echo: {}", req["params"]["arguments"]["text"].as_str().unwrap_or(""))}]})
+                    }
+                    _ => {
+                        let _ = s
+                            .write_all(b"HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n\r\n")
+                            .await;
+                        return;
+                    }
+                };
+                let b = json!({"jsonrpc": "2.0", "id": req["id"], "result": result}).to_string();
+                let _ = s.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nMcp-Session-Id: sess-1\r\nContent-Length: {}\r\n\r\n{b}", b.len()).as_bytes()).await;
+            });
+        }
+    });
+    port
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_mcp_servers_tools_are_the_agents_and_its_secret_stays() {
+    let l = lab(32_768).await;
+    let seen: Arc<Mutex<Vec<String>>> = Arc::default();
+    let port = mcp_server(Arc::clone(&seen)).await;
+    let h = engine_of(&l);
+    let engine = h.local().unwrap();
+    engine
+        .change("mcp_add", &json!({"name": "fake", "transport": "http", "url": format!("http://127.0.0.1:{port}/mcp"), "headers": "X-Token: s3cret"}))
+        .await
+        .unwrap();
+    let view = engine.library("mcp", "").await.unwrap();
+    assert_eq!(view["servers"][0]["status"], "connected", "{view}");
+    assert_eq!(view["servers"][0]["headers"], json!(["X-Token"]));
+    assert!(!view.to_string().contains("s3cret"));
+    {
+        let mut m = l.model.lock().unwrap();
+        m.script
+            .push_back(call("m1", "fake_echo", json!({"text": "hi"})));
+        m.script.push_back(answer(&["It said hi."]));
+    }
+    l.runner.run(&l.agent, "use the echo", vec![]).await;
+    let asked = l.model.lock().unwrap().asked.clone();
+    assert!(asked[0]["tools"].to_string().contains("fake_echo"));
+    let back = asked[1]["messages"].as_array().unwrap().last().unwrap()["content"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(back, "echo: hi");
+    let heads = seen.lock().unwrap().clone();
+    assert!(heads.iter().all(|h| h.contains("X-Token: s3cret")));
+    assert!(
+        heads.last().unwrap().contains("Mcp-Session-Id: sess-1"),
+        "the session goes back"
+    );
+    // turned off, its tools are not offered
+    engine
+        .change("mcp_toggle", &json!({"name": "fake", "disabled": true}))
+        .await
+        .unwrap();
+    {
+        let mut m = l.model.lock().unwrap();
+        m.script.push_back(answer(&["ok"]));
+    }
+    l.runner.run(&l.agent, "again", vec![]).await;
+    let asked = l.model.lock().unwrap().asked.clone();
+    assert!(!asked[2]["tools"].to_string().contains("fake_echo"));
 }
