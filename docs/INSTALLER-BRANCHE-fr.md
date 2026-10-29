@@ -285,6 +285,9 @@ Ouvrir la webapp, puis :
     pose une question à choix, une carte « OpenFox demande » s'affiche avec ses réponses. L'onglet « Plan » de
     l'établi montre l'agent, l'effort, les confirmations, le contexte, les tâches et les critères ; « Modifier les
     critères » puis « Enregistrer » les change chez OpenFox.
+12. Dans la zone de saisie : ↑ reprend ton message précédent ; « @ » propose les fichiers du fil. Après une édition
+    d'OpenFox, déplier l'outil montre le diff (lignes retirées et ajoutées en couleur). Réglages → OpenFox : la liste
+    des fournisseurs, « Tester » une adresse, « Ajouter » un fournisseur.
 
 ## Étape 11 — Le compte rendu à envoyer à Ben
 

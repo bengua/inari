@@ -1754,7 +1754,17 @@ impl Gateway {
                 // active provider; a check. The node does it and says how it went.
                 let action = s(d, "action");
                 if !need(&["node", "harness", "action"])
-                    || !["set", "login", "activate", "check"].contains(&action.as_str())
+                    || ![
+                        "set",
+                        "login",
+                        "activate",
+                        "check",
+                        "provider_test",
+                        "provider_add",
+                        "provider_remove",
+                        "provider_refresh",
+                    ]
+                    .contains(&action.as_str())
                 {
                     return bad;
                 }

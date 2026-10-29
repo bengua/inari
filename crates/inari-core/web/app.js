@@ -300,6 +300,8 @@ $("gear").onclick = () => openPop($("gear"), (pop) => { pop.insertAdjacentHTML("
 
 /* ---------- OpenFox: the panel of a thread it runs, live from the core ("panel" events) ---------- */
 const panels = {}; let critDraft = null, foxThinkOpen = false;
+// a count in words: its singular when there is one
+const counted = (n, one, many) => (n === 1 ? t(one) : t(many, { n }));
 const foxAct = (action, extra) => api("/api/openfox/thread", { agent: selected, action, ...extra });
 const hashOf = (text) => { let h = 0; for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) | 0; return h; };
 function markPlanTab() { const has = !!(selected && panels[selected]); $("planTab").hidden = !has; if (!has && tab === "plan") tab = "artifacts"; }
@@ -354,6 +356,9 @@ function planTab(body) { const p = panels[selected]; if (!p) { body.innerHTML = 
     body.append(ul); const edit = el("button", "btn small", t("Edit the criteria")); edit.type = "button"; edit.onclick = () => { critDraft = (p.criteria || []).map((c) => ({ id: c.id, text: c.text, status: c.status })); drawBench(); }; body.append(edit); }
   for (const [key, items] of Object.entries(p.metadata || {})) { if (!items.length) continue; sec(key.replace(/_/g, " ")); const ul = el("ul", "plist"); for (const x of items) { const li = el("li", "st-" + x.status); li.append(el("span", "pm", mark(x.status)), el("span", "", x.text)); ul.append(li); } body.append(ul); }
   if ((p.queue || []).length) { sec(t("Waiting for OpenFox")); const ul = el("ul", "plist"); for (const q of p.queue) { const li = el("li"); li.append(el("span", "", q.content)); const del = el("button", "btn small", "✕"); del.type = "button"; del.setAttribute("aria-label", t("Remove")); del.onclick = () => foxAct("dequeue", { id: q.id }); li.append(del); ul.append(li); } body.append(ul); }
+  if (p.git && (p.git.branch || (p.git.files || []).length)) { sec(t("Git")); if (p.git.branch) body.append(el("p", "pstate", t("Branch {name}", { name: p.git.branch })));
+    const ul = el("ul", "plist"); for (const f of p.git.files || []) { const li = el("li"); li.append(el("span", "pm", ({ added: "+", deleted: "−" })[f.status] || "~"), el("span", "", f.path), el("small", "", ` +${f.additions} −${f.deletions}`)); ul.append(li); } body.append(ul); }
+  if (p.session_stats) { const s = p.session_stats; sec(t("This session")); body.append(el("p", "pstate", [counted(s.answers, "1 answer", "{n} answers"), counted(s.calls, "1 model call", "{n} model calls"), t("{n} tokens in, {m} out", { n: (s.tokens_in || 0).toLocaleString(LANG), m: (s.tokens_out || 0).toLocaleString(LANG) }), s.speed ? t("{n} tokens/s", { n: Math.round(s.speed) }) : "", s.seconds ? t("{n} s", { n: Math.round(s.seconds) }) : ""].filter(Boolean).join(" · "))); }
   if (p.stats) { const s = p.stats; sec(t("Last turn")); body.append(el("p", "pstate", [s.model, s.effort, s.speed ? t("{n} tokens/s", { n: Math.round(s.speed) }) : "", s.seconds ? t("{n} s", { n: Math.round(s.seconds) }) : ""].filter(Boolean).join(" · "))); } }
 
 /* ---------- OpenFox's settings on a core (the core keeps them; nothing is written by hand) ---------- */
@@ -364,7 +369,7 @@ function openfoxSheet(node, harness, said) {
   if (st.reachable === false) line("bad", t("OpenFox does not answer: {why}", { why: st.problem || "" }));
   else if (st.password && !st.signed_in) line("warn", t("OpenFox asks for its password: sign in below."));
   else line("good", t("Connected to OpenFox · {n} providers", { n: (st.providers || []).length }));
-  if (said) line(said.ok ? "good" : "bad", said.ok ? t("Done.") : said.error);
+  if (said) line(said.ok ? "good" : "bad", said.ok ? (said.detail ? t(said.detail) : t("Done.")) : said.error);
   const field = (label, el) => { const l = document.createElement("label"); l.className = "col"; const sp = document.createElement("span"); sp.textContent = label; l.append(sp, el); form.append(l); return el; };
   const url = field(t("OpenFox's address"), Object.assign(document.createElement("input"), { type: "text", value: st.url || "", placeholder: "http://127.0.0.1:10369", spellcheck: false }));
   const mode = field(t("Agent a new thread starts with"), document.createElement("select"));
@@ -385,7 +390,28 @@ function openfoxSheet(node, harness, said) {
     for (const p of st.providers) { const g = document.createElement("optgroup"); g.label = `${p.name || p.id}${p.local ? " · " + t("local") : ""}${p.id === st.active_provider ? " · " + t("active") : ""}`;
       (p.models || []).forEach((m, i) => g.append(new Option(m, `${p.id}\n${m}`, false, p.id === st.active_provider && i === 0))); pick.append(g); }
     const use = document.createElement("button"); use.className = "btn small"; use.type = "button"; use.textContent = t("Make it OpenFox's default"); form.append(use);
-    use.onclick = () => { const [provider, model] = pick.value.split("\n"); act("activate", { provider, model }); }; }
+    use.onclick = () => { const [provider, model] = pick.value.split("\n"); act("activate", { provider, model }); };
+    // OpenFox's providers: refresh a server's models, remove one (asked twice)
+    form.append(Object.assign(document.createElement("h3"), { textContent: t("Providers") }));
+    for (const p of st.providers) { const row = document.createElement("div"); row.className = "row2";
+      const name = document.createElement("span"); name.textContent = [p.name || p.id, p.local ? t("local") : t("cloud"), p.status, counted((p.models || []).length, "1 model", "{n} models")].filter(Boolean).join(" · "); name.style.flex = "1";
+      const again = document.createElement("button"); again.className = "btn small"; again.type = "button"; again.textContent = t("Refresh its models"); again.onclick = () => act("provider_refresh", { provider: p.id });
+      const del = document.createElement("button"); del.className = "btn small"; del.type = "button"; del.textContent = t("Remove"); del.onclick = () => { if (del.dataset.sure) act("provider_remove", { provider: p.id }); else { del.dataset.sure = "1"; del.textContent = t("Remove {name}?", { name: p.name || p.id }); } };
+      row.append(name, again, del); form.append(row); } }
+  if (st.reachable) { // a new provider: a local model server, or a cloud one with its key
+    form.append(Object.assign(document.createElement("h3"), { textContent: t("Add a provider") }));
+    const pname = field(t("Name"), Object.assign(document.createElement("input"), { type: "text", placeholder: "vLLM 5080" }));
+    const purl = field(t("Its address"), Object.assign(document.createElement("input"), { type: "text", placeholder: "http://127.0.0.1:8000/v1", spellcheck: false }));
+    const kind = field(t("Kind of server"), document.createElement("select")); for (const k of ["vllm", "sglang", "ollama", "llamacpp", "lmstudio", "openai", "anthropic", "unknown"]) kind.append(new Option(k, k));
+    const where = field(t("Where it runs"), document.createElement("select")); where.append(new Option(t("On my machines"), "local"), new Option(t("In the cloud"), "cloud"));
+    const key = field(t("API key (cloud only)"), Object.assign(document.createElement("input"), { type: "password", autocomplete: "off" }));
+    const note = document.createElement("small"); note.className = "empty"; note.textContent = t("The key goes to OpenFox and nowhere else: Inari neither keeps nor shows it."); form.append(note);
+    const row = document.createElement("div"); row.className = "row2";
+    const test = document.createElement("button"); test.className = "btn small"; test.type = "button"; test.textContent = t("Test");
+    test.onclick = () => act("provider_test", { url: purl.value.trim(), backend: kind.value });
+    const add = document.createElement("button"); add.className = "btn small go"; add.type = "button"; add.textContent = t("Add");
+    add.onclick = () => { act("provider_add", { name: pname.value.trim(), url: purl.value.trim(), backend: kind.value, local: where.value === "local", api_key: key.value }); key.value = ""; };
+    row.append(test, add); form.append(row); }
   sheet(t("OpenFox on {name}", { name: node }), [[t("Check"), () => act("check", {})]], t("These settings are kept by the core. Models and providers come from OpenFox itself."), form); }
 
 /* ---------- the mascot: FoxBot when its folder is served, else the orb ---------- */
@@ -510,7 +536,29 @@ $("composer").onsubmit = async (e) => { e.preventDefault(); let text = $("msg").
     $("msg").value = ""; const w = snap.agents[id]; if (w && id === selected && ["listening", "loading", "inference"].includes(w.phase)) (queued[id] = queued[id] || []).push({ text: text.trim(), after: events.length });
     await api("/api/message", { agent: id, text: text.trim(), attachments: sent }); drawStop(); drawChat(); tlStamp = 0; setTimeout(() => { $("thread").scrollTop = $("thread").scrollHeight; }, 60);
   } finally { $("sendBtn").disabled = false; } };
-$("msg").onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("composer").requestSubmit(); } };
+/* The composer: ↑ and ↓ go through this thread's earlier messages (at the start of an empty or recalled text);
+   "@" offers the thread's files, as the search offers its hits. */
+let recall = -1, mention = null;
+function mentionsFor(box) { const before = box.value.slice(0, box.selectionStart), m = before.match(/(^|\s)@([\w./-]*)$/), list = $("mentions");
+  if (!m || !files || !selected) { list.style.display = "none"; mention = null; return; }
+  const q = m[2].toLowerCase(), found = files.map((f) => f.path).filter((p) => !p.startsWith(".git/") && p.toLowerCase().includes(q)).slice(0, 8);
+  if (!found.length) { list.style.display = "none"; mention = null; return; }
+  mention = { from: before.length - m[2].length - 1, to: before.length, found, at: 0 }; list.textContent = "";
+  found.forEach((path, i) => { const b = document.createElement("button"); b.type = "button"; b.setAttribute("role", "option"); b.className = i === 0 ? "on" : ""; b.textContent = path; b.onmousedown = (ev) => { ev.preventDefault(); mention.at = i; takeMention(box); }; list.append(b); });
+  const r = $("composer").getBoundingClientRect(); list.style.left = r.left + "px"; list.style.width = Math.min(r.width, 420) + "px"; list.style.bottom = (innerHeight - r.top + 6) + "px"; list.style.top = "auto"; list.style.display = "block"; }
+function takeMention(box) { const m = mention, path = m.found[m.at]; box.value = box.value.slice(0, m.from) + "@" + path + " " + box.value.slice(m.to); const at = m.from + path.length + 2; box.setSelectionRange(at, at); $("mentions").style.display = "none"; mention = null; box.focus(); box.dispatchEvent(new Event("input")); }
+$("msg").addEventListener("input", (e) => { if (e.isTrusted) recall = -1; mentionsFor($("msg")); });
+$("msg").addEventListener("blur", () => setTimeout(() => { $("mentions").style.display = "none"; mention = null; }, 150));
+$("msg").onkeydown = (e) => { const box = $("msg");
+  if (mention && ["ArrowDown", "ArrowUp", "Enter", "Tab", "Escape"].includes(e.key)) { e.preventDefault();
+    if (e.key === "Escape") { $("mentions").style.display = "none"; mention = null; return; }
+    if (e.key === "Enter" || e.key === "Tab") { takeMention(box); return; }
+    mention.at = (mention.at + (e.key === "ArrowDown" ? 1 : mention.found.length - 1)) % mention.found.length; [...$("mentions").children].forEach((b, i) => b.classList.toggle("on", i === mention.at)); return; }
+  if ((e.key === "ArrowUp" || e.key === "ArrowDown") && box.selectionStart === 0 && box.selectionEnd === 0 && (!box.value || recall >= 0)) {
+    const mine = events.filter((x) => x.kind === "user_message").map((x) => x.text).reverse(); if (!mine.length) return;
+    const next = e.key === "ArrowUp" ? Math.min(recall + 1, mine.length - 1) : recall - 1; e.preventDefault();
+    recall = next; box.value = next < 0 ? "" : mine[next]; box.setSelectionRange(0, 0); drawStop(); return; }
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); recall = -1; $("composer").requestSubmit(); } };
 
 /* ---------- conversation ---------- */
 async function select(id) { selected = id; forkAt = null; viewing = null; files = null; events = []; tlStamp = 0; lastFiles = ""; critDraft = null; markPlanTab(); renderTop(); drawChat(); drawBench(); await refreshDetail();
@@ -570,6 +618,9 @@ function reconcile(box, out) {
 function drawDraft() { const el = $("msgs").querySelector(".msg.draft"), dr = drafts[selected];
   if (!el || !dr || dr.done) return drawChat();
   const th = $("thread"), atEnd = th.scrollHeight - th.scrollTop - th.clientHeight < 90; el.innerHTML = md(dr.text); el.dataset.s = dr.text.length; if (atEnd) th.scrollTop = th.scrollHeight; }
+/* A tool's output; an edit's diff in it (lines under an "@@ path" header) in the theme's colours. */
+function toolOutput(pre, text) { const at = text.indexOf("\n@@ "); if (at < 0) { pre.textContent = text; return; } pre.textContent = text.slice(0, at + 1);
+  for (const line of text.slice(at + 1).split("\n")) { const sp = document.createElement("span"); sp.className = line.startsWith("@@") ? "dl-hunk" : line.startsWith("+ ") ? "dl-add" : line.startsWith("- ") ? "dl-del" : ""; sp.textContent = line + "\n"; pre.append(sp); } }
 function drawChat() {
   const shown = $("msgs"), th = $("thread"), atEnd = th.scrollHeight - th.scrollTop - th.clientHeight < 90, before = shown.children.length, box = document.createElement("div"), fresh = drawChat.thread !== selected; drawChat.thread = events.length ? selected : null;
   if (!selected) { shown.textContent = ""; shown.innerHTML = `<div class="hero"><h2>${esc(t("What should we build?"))}</h2><p>${esc(t("Pick a thread on the left, or describe a task below. It runs on the core you choose and can move to another one at any time."))}</p></div>`; $("jump").hidden = true; return; }
@@ -582,7 +633,7 @@ function drawChat() {
     else if (e.kind === "tool_call") { lastNote = ""; const r = events[i + 1] && events[i + 1].kind === "tool_result" ? events[++i] : null, err = r && /^(denied|\w+Error)/.test(r.text);
       const d = document.createElement("details"); d.className = "tool" + (err ? " err" : ""); d.dataset.k = e.id; d.dataset.s = r ? r.id : ""; const shell = /^(\$ |bash|execute|shell|run)/.test(e.text);
       d.innerHTML = `<summary>${icon(shell ? "terminal" : "tool")}<span class="tn"></span><span class="ts">${esc(t(r ? (err ? "failed" : "done") : "running…"))}</span><span class="cv">${icon("chevron")}</span></summary><pre></pre>`;
-      d.querySelector(".tn").textContent = e.text; d.querySelector("pre").textContent = r ? r.text : t("running…");
+      d.querySelector(".tn").textContent = e.text; toolOutput(d.querySelector("pre"), r ? r.text : t("running…"));
       const path = (e.text.match(/(?:write_file|read_file|write|edit|create)[^:]*:\s*([\w./-]+\.\w+)/i) || [])[1]; if (path) { const b = document.createElement("button"); b.className = "btn small open"; b.innerHTML = icon("file") + "<span></span>"; b.lastChild.textContent = t("Open {path}", { path }); b.onclick = () => openFile(path); d.append(b); } box.append(d); }
     else if (e.kind === "provider_switch") note(t("Model <b>{name}</b>", { name: esc(shortModel(e.text)) }));
     else if (e.kind === "decision") note(esc(e.text));
@@ -657,7 +708,10 @@ function drawBench(soft) {
 
 /* ---------- search, sheets, create, drag to teleport ---------- */
 let hitTimer = null;
-$("search").oninput = () => { clearTimeout(hitTimer); hitTimer = setTimeout(async () => { const q = $("search").value.trim(), box = $("hits"); box.textContent = ""; if (!q) { box.style.display = "none"; return; } const { hits = [] } = await api("/api/search?q=" + encodeURIComponent(q)); box.style.display = "block"; box.style.top = $("search").getBoundingClientRect().bottom + 4 + "px"; if (!hits.length) box.innerHTML = `<small class="empty">${esc(t("No match"))}</small>`; for (const h of hits) { const b = document.createElement("button"); b.innerHTML = "<span></span><small></small>"; b.firstChild.textContent = h.text.slice(0, 90); b.lastChild.textContent = h.agent + " · " + h.kind; b.onclick = () => { box.style.display = "none"; select(h.agent); }; box.append(b); } }, 300); };
+$("search").oninput = () => { clearTimeout(hitTimer); hitTimer = setTimeout(async () => { const q = $("search").value.trim(), box = $("hits"); box.textContent = ""; if (!q) { box.style.display = "none"; return; } const { hits = [] } = await api("/api/search?q=" + encodeURIComponent(q)); box.style.display = "block"; box.style.top = $("search").getBoundingClientRect().bottom + 4 + "px"; if (!hits.length) box.innerHTML = `<small class="empty">${esc(t("No match"))}</small>`;
+  // the open thread's hits first; a hit opens its thread at the message
+  for (const h of [...hits.filter((x) => x.agent === selected), ...hits.filter((x) => x.agent !== selected)]) { const b = document.createElement("button"); b.innerHTML = "<span></span><small></small>"; b.firstChild.textContent = h.text.slice(0, 90); b.lastChild.textContent = (h.agent === selected ? t("this thread") : h.agent) + " · " + h.kind;
+    b.onclick = async () => { box.style.display = "none"; if (h.agent !== selected) await select(h.agent); const at = h.id && $("msgs").querySelector(`[data-k="${CSS.escape(h.id)}"]`); if (at) { at.scrollIntoView({ block: "center" }); at.classList.add("found"); setTimeout(() => at.classList.remove("found"), 1600); } }; box.append(b); } }, 300); };
 function sheet(title, options, note, extra) { $("sheetTitle").textContent = title; const opts = $("sheetOpts"); opts.textContent = ""; if (extra) opts.append(extra); if (note) { const p = document.createElement("small"); p.className = "empty"; p.textContent = note; opts.append(p); } for (const [label, fn] of options) { const b = document.createElement("button"); b.className = "btn"; b.textContent = label; b.onclick = () => { $("sheet").classList.remove("open"); fn(); }; opts.append(b); } const c = document.createElement("button"); c.className = "btn"; c.textContent = options.length ? t("Cancel") : t("Close"); c.onclick = () => $("sheet").classList.remove("open"); opts.append(c); $("sheet").classList.add("open"); (extra || opts.querySelector("button")).focus(); }
 /* Add a core: attach one you deployed (a VPS, a new VM, another workstation) through your
    private network, or a core pass (coming next). */

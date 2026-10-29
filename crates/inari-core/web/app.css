@@ -44,7 +44,7 @@ button,input,textarea,select { font:inherit; color:inherit; }
 #foxSlot { height:min(240px, 28vh); } #fox { position:fixed; left:0; top:0; width:240px; height:240px; z-index:56; opacity:0; transform-origin:0 0; will-change:transform; transition:opacity .2s ease; } #fox.shown { opacity:1; } #fox iframe { width:100%; height:100%; border:0; background:transparent; color-scheme:normal; } #fox canvas { height:100%; width:auto; aspect-ratio:1; display:block; margin:0 auto; }
 .nav { display:grid; gap:2px; } .nav button { display:flex; align-items:center; gap:10px; background:none; border:0; border-radius:9px; padding:8px 10px; cursor:pointer; text-align:left; color:var(--ink); } .nav button:hover { background:var(--copper-soft); }
 #search { display:none; width:100%; padding:8px 10px; border-radius:10px; border:1px solid var(--hair); background:var(--raise); } #search.on { display:block; }
-#hits { position:absolute; left:10px; right:10px; z-index:45; padding:6px; display:none; } #hits button { display:block; width:100%; text-align:left; background:none; border:0; padding:7px 8px; border-radius:8px; cursor:pointer; } #hits button:hover { background:var(--copper-soft); } #hits small { color:var(--dim); display:block; }
+#hits, #mentions { position:absolute; left:10px; right:10px; z-index:45; padding:6px; display:none; } #hits button, #mentions button { display:block; width:100%; text-align:left; background:none; border:0; padding:7px 8px; border-radius:8px; cursor:pointer; } #hits button:hover, #mentions button:hover { background:var(--copper-soft); } #hits small, #mentions small { color:var(--dim); display:block; }
 #cores { overflow-y:auto; overflow-x:hidden; min-height:0; display:grid; grid-auto-rows:max-content; gap:10px; align-content:start; padding-right:2px; }
 .shead { display:flex; align-items:center; } .shead .btn { margin-left:auto; width:28px; height:28px; font-size:15px; line-height:1; text-transform:none; }
 .invite { display:grid; gap:8px; } .invite code { display:block; padding:8px; border-radius:8px; background:var(--raise); border:1px solid var(--hair); font-size:12px; word-break:break-all; user-select:all; } .invite input { width:100%; }
@@ -198,7 +198,7 @@ dl.keys { display:grid; grid-template-columns:auto 1fr; gap:8px 14px; margin:0 0
 .msg .ma { display:inline-flex; align-items:center; gap:5px; padding:4px 8px; border:0; border-radius:8px; background:transparent; color:var(--dim); font:inherit; font-size:12px; line-height:1; cursor:pointer; opacity:.5; transition:opacity .15s, background .15s, color .15s; }
 .msg .ma .i { width:15px; height:15px; } .msg .mtools .ma { padding:5px; }
 .msg:hover .ma, .msg:focus-within .ma { opacity:1; } .msg .ma:hover, .msg .ma:focus-visible { background:color-mix(in srgb,var(--ink) 9%,transparent); color:var(--ink); }
-.guest .msg .ma.own { display:none; } .msg .ma.sel { display:none; } .msg.selecting { outline:2px solid var(--copper); outline-offset:2px; } @media (max-width:760px) { .msg .mbar .ma span { display:none; } .msg .mbar { gap:6px; } } /* a phone: icons only */
+.guest .msg .ma.own { display:none; } .msg .ma.sel { display:none; } .msg.selecting, .found { outline:2px solid var(--copper); outline-offset:2px; } @media (max-width:760px) { .msg .mbar .ma span { display:none; } .msg .mbar { gap:6px; } } /* a phone: icons only */
 @media (pointer:coarse) { .msg { -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; } .msg .ma.sel { display:inline-flex; } .msg.selecting { -webkit-user-select:text; user-select:text; -webkit-touch-callout:default; } .msg .ma { opacity:.85; padding:8px 10px; font-size:13px; } .msg .mtools .ma { padding:8px; } .msg .mtools { margin:-9px -13px 2px 8px; } }
 /* a message sent while the agent works, until it reads it */
 .msg.queued { opacity:.72; border-style:dashed; } .msg .qnote { margin-top:6px; font-size:12px; color:var(--dim); }
@@ -227,3 +227,8 @@ dl.keys { display:grid; grid-template-columns:auto 1fr; gap:8px 14px; margin:0 0
 .critedit { display:grid; gap:6px; } .critedit .row2 { display:flex; gap:6px; } .critedit input { flex:1; }
 /* a phone: five tabs and the two buttons fit (the Plan tab of an OpenFox thread makes five) */
 @media (max-width:760px) { .tabs { gap:0; } .tab { padding-left:9px; padding-right:9px; } }
+
+/* an edit's diff in a tool's output, in the theme's colours; the mention list sits by the composer */
+.tool pre .dl-add { color:var(--good, #3b8f5a); } .tool pre .dl-del { color:var(--bad); } .tool pre .dl-hunk { color:var(--faint); }
+#mentions { position:fixed; left:auto; right:auto; max-height:240px; overflow:auto; }
+#mentions button.on { background:var(--copper-soft); }

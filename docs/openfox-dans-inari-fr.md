@@ -38,10 +38,10 @@ Légende : ✅ déjà dans Inari · 🟡 en partie · ❌ à ajouter
 | Critères (contrat) et leur éditeur | `CriteriaEditor` | ✅ onglet Plan, modifiables (lot 1) | — |
 | Sous-agents | `SubAgentContainer` | ✅ dans le fil (lot 1) | — |
 | Contexte : remplissage, compactage | `ContextPopover`, `DynamicContextPreviewModal` | ✅ anneau, onglet Plan, « Compacter » (lot 1) ; aperçu du contexte dynamique : lot 2 | — |
-| Statistiques du tour et de la session | `StatsModal`, `TurnStatsModal`, `Sparkline` | 🟡 usage et coût ; stats par tour à ajouter | 2 |
-| Recherche dans les messages | `MessageSearchModal` | 🟡 recherche dans les fils | 2 |
-| Historique des invites | `PromptHistory` | ❌ | 2 |
-| Mention de fichiers avec `@` | `AtMentionAutocomplete` | ❌ | 2 |
+| Statistiques du tour et de la session | `StatsModal`, `TurnStatsModal`, `Sparkline` | ✅ onglet Plan : dernier tour et totaux de la session (lot 2) ; courbes : non | — |
+| Recherche dans les messages | `MessageSearchModal` | ✅ le fil ouvert d'abord, ouverture au message (lot 2) | — |
+| Historique des invites | `PromptHistory` | ✅ ↑ et ↓ dans la zone de saisie (lot 2) | — |
+| Mention de fichiers avec `@` | `AtMentionAutocomplete` | ✅ liste des fichiers du fil (lot 2) | — |
 | Pièces jointes, images, vision | `VisionFallbackItem` | ✅ pièces jointes ; repli vision géré par OpenFox | — |
 | Reprendre après une erreur du modèle | `chat.retry`, `chat.llm_retry_now` | ✅ bandeau dans le fil, « Réessayer » suivi (lot 1) | — |
 | Session en lecture seule | `ReadonlySessionView` | ✅ pass « supervision » | — |
@@ -51,9 +51,9 @@ Légende : ✅ déjà dans Inari · 🟡 en partie · ❌ à ajouter
 | Élément d'OpenFox | Composant(s) OpenFox | Inari aujourd'hui | Lot |
 |---|---|---|---|
 | Fichiers du projet, visionneuse | `DirectoryBrowser` | ✅ onglets Artefacts / Visionneuse | — |
-| Différences (diff) | `DiffView`, `DiffViewer` | ❌ | 2 |
+| Différences (diff) | `DiffView`, `DiffViewer` | ✅ diff des éditions dans le résultat de l'outil (lot 2) | — |
 | Terminal | `TerminalDrawer`, `TerminalPane` | ✅ onglet Terminal | — |
-| Branche Git, état, espace de travail | `WorkspaceBranchSection`, `BranchModal`, `WorkspaceModal` | ❌ | 2 |
+| Branche Git, état, espace de travail | `WorkspaceBranchSection`, `BranchModal`, `WorkspaceModal` | 🟡 branche et fichiers modifiés dans l'onglet Plan (lot 2). Changer de branche : non, voir plus bas | — |
 | Serveur de dev, journaux | `DevServerFooter`, `DevServerConfigModal`, `LogViewer` | ❌ | 3 |
 | Processus d'arrière-plan | `BackgroundProcesses` | ❌ | 3 |
 | Workflows (barre, lancement, paramètres) | `WorkflowBar`, `WorkflowParamModal`, `WorkflowStartedCard` | ❌ | 3 |
@@ -69,7 +69,7 @@ Légende : ✅ déjà dans Inari · 🟡 en partie · ❌ à ajouter
 | Adresse d'OpenFox, connexion (mot de passe) | `PasswordModal` | ❌ (fichier de `openfox-acp`) | 0 |
 | Mode de départ, durée max d'un tour | — | ❌ (en dur dans le pont) | 0 |
 | Fournisseur et modèle actifs | `ProviderSelector`, `model-list` | ❌ | 0 |
-| Gérer les fournisseurs (ajouter, tester) | `ManageProvidersModal` | ❌ (clés d'API : à cadrer) | 2 |
+| Gérer les fournisseurs (ajouter, tester) | `ManageProvidersModal` | ✅ fiche OpenFox : tester, ajouter (clé envoyée à OpenFox seulement), relire les modèles, retirer (lot 2) | — |
 | Agents, skills, commandes, instructions | `AgentsModal`, `SkillsModal`, `CommandsModal`, `InstructionsModal` | 🟡 commandes `/` listées | 3 |
 | Workflows (éditeur, diagramme) | `WorkflowsModal`, `FlowDiagram` | ❌ | 3 |
 | Outils et permissions | `ToolsTab` | ❌ | 3 |
@@ -92,7 +92,7 @@ Légende : ✅ déjà dans Inari · 🟡 en partie · ❌ à ajouter
 - **Lot 1 : ce qu'on voit pendant un tour local.** Fait (28-29/10/2026).
   - Liste de tâches, critères, réflexion, sous-agents, agent et effort, questions à choix, compactage du contexte,
     reprise après erreur du modèle.
-- **Lot 2 : le confort du fil.**
+- **Lot 2 : le confort du fil.** Fait (29/10/2026).
   - Diff, branche Git, statistiques par tour, historique des invites, `@` fichiers, recherche dans les messages,
     gestion des fournisseurs.
 - **Lot 3 : le travail du projet.**
@@ -102,3 +102,12 @@ Légende : ✅ déjà dans Inari · 🟡 en partie · ❌ à ajouter
 
 Chaque lot est testé (un faux serveur OpenFox dans les tests Rust, des essais dans un vrai navigateur), documenté
 et poussé sur la branche avant le suivant.
+
+## Ce qui n'est pas repris, et pourquoi
+
+- **Changer de branche Git, créer un espace de travail.** Inari ne sort le dossier d'un fil sur le disque que
+  pendant un tour, puis le range dans le fil (c'est ce qui permet de déplacer un fil d'un cœur à l'autre). Une
+  branche changée entre deux tours serait écrasée au tour suivant. L'onglet Plan montre la branche et les fichiers
+  modifiés tels qu'OpenFox les annonce ; pour changer de branche, le demander à l'agent dans le fil.
+- **Les courbes de statistiques** (`Sparkline`) : les totaux et le dernier tour suffisent ici.
+

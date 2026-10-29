@@ -154,6 +154,8 @@ async fn work(fox: Shared, content: String) {
             "metadata.updated",
             json!({"key": "criteria", "entries": [{"id": "c1", "description": "parses empty input", "status": "pending"}]}),
         );
+        fox.lock().unwrap().criteria =
+            vec![json!({"id": "c1", "description": "parses empty input", "status": "pending"})]; // OpenFox keeps what it says
         say(
             &fox,
             "chat.delta",
@@ -197,6 +199,24 @@ async fn work(fox: Shared, content: String) {
             "chat.llm_retry_failed",
             json!({"attempts": 3, "error": "connection refused"}),
         );
+    } else if content.contains("edit") {
+        say(
+            &fox,
+            "chat.tool_call",
+            json!({"messageId": "m", "callId": "e1", "tool": "edit_file",
+            "args": {"path": "src/x.rs", "old_string": "let a = 1;\nlet b = 2;", "new_string": "let a = 10;"}}),
+        );
+        say(
+            &fox,
+            "chat.tool_result",
+            json!({"messageId": "m", "callId": "e1", "tool": "edit_file", "result": {"success": true, "output": "Edited src/x.rs"}}),
+        );
+        say(
+            &fox,
+            "git.status",
+            json!({"branch": "main", "diff": {"files": [{"path": "src/x.rs", "status": "modified", "additions": 1, "deletions": 2}]}}),
+        );
+        piece(&fox, "Edited.");
     } else if content.contains("retried") {
         piece(&fox, "Second try worked.");
     } else if content.contains("lost") {
@@ -355,6 +375,21 @@ async fn serve(fox: Shared, mut s: TcpStream) {
         }
     } else if !token_ok {
         (401, json!({"error": "Unauthorized"}))
+    } else if path == "/api/providers/test" {
+        if body["url"] == "http://127.0.0.1:8000/v1" {
+            (200, json!({"success": true, "model": "qwen3-coder"}))
+        } else {
+            (
+                400,
+                json!({"success": false, "error": "nothing answers there"}),
+            )
+        }
+    } else if (path == "/api/providers" && method == "POST")
+        || (path == "/api/providers/local" && method == "DELETE")
+    {
+        (200, json!({"success": true}))
+    } else if path == "/api/providers/local/refresh" {
+        (200, json!({"success": true, "models": []}))
     } else if path == "/api/providers" {
         (
             200,
@@ -410,6 +445,8 @@ async fn serve(fox: Shared, mut s: TcpStream) {
             200,
             json!({"session": {"id": "s1", "mode": f.mode, "isRunning": f.running, "providerId": pid, "providerModel": pm,
                                "metadataEntries": {"criteria": f.criteria}},
+                     "sessionStats": {"totalTime": 12.5, "toolTime": 2.0, "prefillTokens": 900, "generationTokens": 120,
+                                      "avgGenerationSpeed": 40.0, "responseCount": 2, "llmCallCount": 3},
                      "messages": f.messages}),
         )
     } else if path.starts_with("/api/sessions/") && !path.starts_with("/api/sessions/s1/") {
@@ -854,5 +891,75 @@ async fn the_agent_openfox_switched_to_is_kept_on_the_next_turn() {
         l.fox.lock().unwrap().mode,
         "reviewer",
         "not put back to the starting agent"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_edit_shows_its_diff_and_the_panel_its_git_and_totals() {
+    let l = lab(true).await;
+    l.runner.run(&l.agent, "edit the file", vec![]).await;
+    let result = journal(&l)
+        .into_iter()
+        .find(|(k, _)| k == "tool_result")
+        .map(|(_, d)| d["output"].as_str().unwrap_or("").to_string())
+        .unwrap();
+    assert_eq!(
+        result,
+        "Edited src/x.rs\n\n@@ src/x.rs\n- let a = 1;\n- let b = 2;\n+ let a = 10;"
+    );
+    let p = last_panel(&l);
+    assert_eq!(p["git"]["branch"], "main");
+    assert_eq!(p["git"]["files"][0]["deletions"], 2);
+    assert_eq!(
+        p["session_stats"]["answers"], 2,
+        "the session's totals, read at the end of the turn"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn providers_are_managed_and_their_keys_only_reach_openfox() {
+    let l = lab(true).await;
+    let fox = fox_of(&l);
+    assert_eq!(
+        fox.test_provider("http://127.0.0.1:8000/v1", "vllm")
+            .await
+            .unwrap(),
+        "qwen3-coder"
+    );
+    assert!(fox
+        .test_provider("http://127.0.0.1:9/v1", "vllm")
+        .await
+        .is_err());
+    assert!(
+        fox.add_provider(&json!({"name": "", "url": "x", "backend": "vllm"}))
+            .await
+            .is_err(),
+        "a name is needed"
+    );
+    fox.add_provider(
+        &json!({"name": "Kimi", "url": "https://api.moonshot.ai/v1", "backend": "openai",
+                             "local": false, "api_key": "sk-kimi-secret"}),
+    )
+    .await
+    .unwrap();
+    fox.refresh_provider("local").await.unwrap();
+    fox.remove_provider("local").await.unwrap();
+    let seen = l.fox.lock().unwrap().seen.clone();
+    let added = seen
+        .iter()
+        .find(|(k, _)| k == "POST /api/providers")
+        .map(|(_, b)| b.clone())
+        .unwrap();
+    assert_eq!(
+        added,
+        json!({"name": "Kimi", "url": "https://api.moonshot.ai/v1", "backend": "openai", "isLocal": false, "apiKey": "sk-kimi-secret"})
+    );
+    assert!(seen.iter().any(|(k, _)| k == "DELETE /api/providers/local"));
+    assert!(seen
+        .iter()
+        .any(|(k, _)| k == "POST /api/providers/local/refresh"));
+    assert!(
+        !fox.status().await.to_string().contains("sk-kimi-secret"),
+        "never said back"
     );
 }

@@ -215,6 +215,8 @@ pub mod proto {
         pub messages: Vec<Message>,
         #[serde(default)]
         pub context_state: Option<ContextState>,
+        #[serde(default)]
+        pub session_stats: Option<StatsSummary>,
     }
 
     /// `POST /api/sessions` and `POST /api/projects`.
@@ -476,6 +478,45 @@ pub mod proto {
         pub message: String,
     }
 
+    /// `git.status`: the workspace's branch and what changed in it.
+    #[derive(Deserialize, Debug)]
+    pub struct GitStatus {
+        pub branch: Option<String>,
+        pub diff: GitDiff,
+    }
+
+    #[derive(Deserialize, Debug)]
+    pub struct GitDiff {
+        pub files: Vec<GitFile>,
+    }
+
+    #[derive(Deserialize, Debug, serde::Serialize, Clone)]
+    pub struct GitFile {
+        pub path: String,
+        pub status: String,
+        #[serde(default)]
+        pub additions: u64,
+        #[serde(default)]
+        pub deletions: u64,
+    }
+
+    /// The session's totals (`sessionStats` of `GET /api/sessions/:id`).
+    #[derive(Deserialize, Debug, Clone)]
+    #[serde(rename_all = "camelCase")]
+    pub struct StatsSummary {
+        pub total_time: f64,
+        #[serde(default)]
+        pub tool_time: f64,
+        pub prefill_tokens: u64,
+        pub generation_tokens: u64,
+        #[serde(default)]
+        pub avg_generation_speed: f64,
+        #[serde(default)]
+        pub response_count: u64,
+        #[serde(default)]
+        pub llm_call_count: u64,
+    }
+
     #[derive(Deserialize, Debug)]
     #[serde(rename_all = "camelCase")]
     pub struct ToolCall {
@@ -616,6 +657,7 @@ pub mod proto {
         Paused(Pause),
         Stats(Stats),
         Progress(Progress),
+        Git(GitStatus),
         Ack,
         /// A kind this core does not follow (yet): git status, queue state, workflows…
         Other(String),
@@ -673,6 +715,7 @@ pub mod proto {
             "session.pause" => typed(&kind, payload, Event::Paused),
             "chat.stats" => typed(&kind, payload, Event::Stats),
             "chat.progress" => typed(&kind, payload, Event::Progress),
+            "git.status" => typed(&kind, payload, Event::Git),
             "ack" => Event::Ack,
             _ => Event::Other(kind.clone()),
         };
@@ -1072,6 +1115,65 @@ impl OpenFoxHarness {
             json!({"model": model})
         };
         self.act("POST", &format!("/api/providers/{provider}/activate"), body)
+            .await
+    }
+
+    /// Whether OpenFox reaches a model server at `url`: the model it found there.
+    pub async fn test_provider(&self, url: &str, backend: &str) -> Result<String, String> {
+        let (status, raw) = self
+            .raw(
+                "POST",
+                "/api/providers/test",
+                Some(json!({"url": url, "backend": backend})),
+                true,
+            )
+            .await?;
+        let v: Value = serde_json::from_slice(&raw).unwrap_or_default();
+        if status >= 400 || v.get("success") == Some(&Value::Bool(false)) {
+            return Err(format!("OpenFox could not reach {url}: {}", reason(&raw)));
+        }
+        Ok(v.get("model")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string())
+    }
+
+    /// Add a provider to OpenFox. Its API key, if any, goes to OpenFox and nowhere else: the
+    /// core neither keeps nor says it.
+    pub async fn add_provider(&self, p: &Value) -> Result<(), String> {
+        let text = |k: &str| {
+            p.get(k)
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string()
+        };
+        let (name, url, backend) = (text("name"), text("url"), text("backend"));
+        if name.is_empty() || url.is_empty() || backend.is_empty() {
+            return Err("a provider needs a name, an address and a kind".into());
+        }
+        let mut body = json!({"name": name, "url": url, "backend": backend,
+                              "isLocal": p.get("local").and_then(Value::as_bool).unwrap_or(true)});
+        let key = text("api_key");
+        if !key.is_empty() {
+            body["apiKey"] = json!(key);
+        }
+        self.act("POST", "/api/providers", body).await
+    }
+
+    pub async fn remove_provider(&self, id: &str) -> Result<(), String> {
+        let (status, raw) = self
+            .raw("DELETE", &format!("/api/providers/{id}"), None, true)
+            .await?;
+        if status >= 400 {
+            return Err(format!("OpenFox kept the provider: {}", reason(&raw)));
+        }
+        Ok(())
+    }
+
+    /// Ask the provider's server for its models again.
+    pub async fn refresh_provider(&self, id: &str) -> Result<(), String> {
+        self.act("POST", &format!("/api/providers/{id}/refresh"), json!({}))
             .await
     }
 
@@ -1493,6 +1595,9 @@ impl OpenFoxHarness {
                 a.done = true;
             }
         });
+        if let Err(e) = self.read_back(&t.agent, &sid).await {
+            eprintln!("openfox: the session's totals: {e}"); // the panel keeps what it had
+        }
         self.show(t, &mut follow, true);
         self.keep(&sid, link);
         Ok(follow.summary)
@@ -1574,17 +1679,26 @@ impl OpenFoxHarness {
                 p.thinking.push_str(&th.content);
                 p.thinking = tail(&p.thinking, 20_000);
             }),
-            Event::ToolCall(c) => update(
-                f,
-                json!({"sessionUpdate": "tool_call", "toolCallId": c.call_id, "title": tool_title(&c.tool, &c.args),
-                       "kind": tool_kind(&c.tool), "rawInput": c.args}),
-            ),
+            Event::ToolCall(c) => {
+                if let Some(d) = edit_diff(&c.tool, &c.args) {
+                    f.diffs.insert(c.call_id.clone(), d);
+                }
+                update(
+                    f,
+                    json!({"sessionUpdate": "tool_call", "toolCallId": c.call_id, "title": tool_title(&c.tool, &c.args),
+                           "kind": tool_kind(&c.tool), "rawInput": c.args}),
+                )
+            }
             Event::ToolResult(r) => {
                 let failed = r.result.get("success") == Some(&Value::Bool(false))
                     || r.result
                         .get("error")
                         .is_some_and(|e| !e.is_null() && e != "");
-                let out: String = result_text(&r.result).chars().take(8_000).collect();
+                let mut out: String = result_text(&r.result).chars().take(8_000).collect();
+                if let Some(d) = f.diffs.remove(&r.call_id).filter(|_| !failed) {
+                    out.push_str("\n\n");
+                    out.push_str(&d);
+                }
                 update(
                     f,
                     json!({"sessionUpdate": "tool_call_update", "toolCallId": r.call_id,
@@ -1785,6 +1899,12 @@ impl OpenFoxHarness {
                     p.stats = Some(json!({"model": x.model, "effort": x.reasoning_effort, "seconds": x.total_time,
                                           "tokens_in": x.prefill_tokens, "tokens_out": x.generation_tokens,
                                           "speed": x.generation_speed}))
+                });
+            }
+            Event::Git(g) => {
+                force = true;
+                self.edit_panel(&t.agent, |p| {
+                    p.git = Some(json!({"branch": g.branch, "files": g.diff.files}))
                 });
             }
             Event::Progress(pr) => {
@@ -2089,6 +2209,11 @@ impl OpenFoxHarness {
             if let Some(c) = &view.context_state {
                 x.context = Some(ContextView::from(c));
             }
+            if let Some(st) = &view.session_stats {
+                x.session_stats = Some(json!({"seconds": st.total_time, "tool_seconds": st.tool_time,
+                    "tokens_in": st.prefill_tokens, "tokens_out": st.generation_tokens,
+                    "speed": st.avg_generation_speed, "answers": st.response_count, "calls": st.llm_call_count}));
+            }
             for (key, entries) in &s.metadata_entries {
                 x.set_entries(key, entries);
             }
@@ -2125,6 +2250,10 @@ pub struct Panel {
     pub question: Option<Question>,
     pub retry: Option<RetryState>,
     pub stats: Option<Value>,
+    /// The session's totals so far.
+    pub session_stats: Option<Value>,
+    /// The workspace's branch and changed files, as OpenFox last said (during a turn).
+    pub git: Option<Value>,
     pub progress: String,
     /// The last action's failure, for the page to say.
     pub error: String,
@@ -2217,6 +2346,33 @@ impl From<&proto::ContextState> for ContextView {
     }
 }
 
+/// What an edit or a write changes, as diff lines under a `@@ path` header (at most DIFF_LINES):
+/// the thread shows it with the tool's result.
+fn edit_diff(tool: &str, args: &Value) -> Option<String> {
+    let path = args.get("path").and_then(Value::as_str).unwrap_or("");
+    let lines = |text: &str, mark: char| -> Vec<String> {
+        text.lines().map(|l| format!("{mark} {l}")).collect()
+    };
+    let mut out: Vec<String> = match tool {
+        "edit_file" => {
+            let old = args.get("old_string")?.as_str()?;
+            let new = args.get("new_string")?.as_str()?;
+            lines(old, '-').into_iter().chain(lines(new, '+')).collect()
+        }
+        "write_file" => lines(args.get("content")?.as_str()?, '+'),
+        _ => return None,
+    };
+    if out.len() > DIFF_LINES {
+        let more = out.len() - DIFF_LINES;
+        out.truncate(DIFF_LINES);
+        out.push(format!("@@ … {more} more lines"));
+    }
+    Some(format!("@@ {path}\n{}", out.join("\n")))
+}
+
+/// How many lines of an edit the thread shows.
+const DIFF_LINES: usize = 120;
+
 /// The last `n` characters of a text.
 fn tail(text: &str, n: usize) -> String {
     let count = text.chars().count();
@@ -2243,6 +2399,8 @@ struct Follow {
     asked: Instant,
     /// The step whose thinking the panel shows.
     thinking_id: String,
+    /// What an edit changes, by tool call: joined to its result in the journal.
+    diffs: HashMap<String, String>,
     panel_at: Instant,
     panel_dirty: bool,
 }
@@ -2265,6 +2423,7 @@ impl Follow {
             heard: Instant::now(),
             asked: Instant::now(),
             thinking_id: String::new(),
+            diffs: HashMap::new(),
             panel_at: Instant::now(),
             panel_dirty: false,
         }
@@ -2357,8 +2516,13 @@ mod tests {
             matches!(f.event, Event::Malformed(ref k, _) if k == "chat.tool_call"),
             "no callId: {f:?}"
         );
+        let f = proto::read(r#"{"type":"devServer.state","payload":{}}"#).unwrap();
+        assert!(matches!(f.event, Event::Other(ref k) if k == "devServer.state"));
         let f = proto::read(r#"{"type":"git.status","payload":{}}"#).unwrap();
-        assert!(matches!(f.event, Event::Other(ref k) if k == "git.status"));
+        assert!(
+            matches!(f.event, Event::Malformed(ref k, _) if k == "git.status"),
+            "followed now: a git status without its files shows"
+        );
         assert!(proto::read("not json").is_none());
     }
 

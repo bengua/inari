@@ -591,6 +591,7 @@ impl Node {
             .as_ref()
             .and_then(|r| r.harnesses.get(&harness))
             .and_then(|h| h.openfox());
+        let mut detail = String::new();
         let result = match (fox, action) {
             (None, _) => Err(format!("no OpenFox harness {harness:?} on this core")),
             (Some(f), "set") => {
@@ -608,6 +609,19 @@ impl Node {
             }
             (Some(f), "login") => f.login(&s(p, "password")).await,
             (Some(f), "activate") => f.activate(&s(p, "provider"), &s(p, "model")).await,
+            (Some(f), "provider_test") => f
+                .test_provider(&s(p, "url"), &s(p, "backend"))
+                .await
+                .map(|model| {
+                    detail = if model.is_empty() {
+                        "OpenFox reaches it".into()
+                    } else {
+                        format!("OpenFox reaches it: {model}")
+                    };
+                }),
+            (Some(f), "provider_add") => f.add_provider(p).await,
+            (Some(f), "provider_remove") => f.remove_provider(&s(p, "provider")).await,
+            (Some(f), "provider_refresh") => f.refresh_provider(&s(p, "provider")).await,
             (Some(_), "check") => Ok(()),
             (Some(_), other) => Err(format!("unknown OpenFox action {other:?}")),
         };
@@ -619,7 +633,7 @@ impl Node {
         };
         self.bus.publish(
             &format!("node.{}.openfox.result", self.cfg.node_id),
-            json!({"node": self.cfg.node_id, "harness": harness, "action": action, "ok": ok, "error": error}),
+            json!({"node": self.cfg.node_id, "harness": harness, "action": action, "ok": ok, "error": error, "detail": detail}),
         );
     }
 
@@ -1114,7 +1128,16 @@ impl Node {
                 }
             });
         });
-        for action in ["set", "login", "activate", "check"] {
+        for action in [
+            "set",
+            "login",
+            "activate",
+            "check",
+            "provider_test",
+            "provider_add",
+            "provider_remove",
+            "provider_refresh",
+        ] {
             self.on(
                 &format!("node.{me}.openfox.{action}"),
                 move |n, m| async move {

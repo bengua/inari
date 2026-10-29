@@ -19,6 +19,14 @@ Newest first. An entry says what changed for someone using the thing.
   workbench tabs aligned with them; the thread's *Actions* is its icon; in a narrow column the
   state leaves out its core and the model name is shortened (whole on hover). A bar that still
   lacks room wraps, it never hides a control.
+- **The thread's comforts, OpenFox's and everyone's.** An edit's diff shows in its tool's output
+  (OpenFox's edit_file and write_file, in the theme's colours). The Plan tab of an OpenFox thread
+  shows its Git branch and changed files and the session's totals (read at the end of each turn).
+  In the composer, ↑ and ↓ go through the thread's earlier messages and "@" offers its files. The
+  search puts the open thread's hits first and opens a hit at its message. OpenFox's sheet
+  manages its providers: test a server, add one (a cloud one's key goes to OpenFox only, on a
+  bus subject that is never kept), refresh its models, remove it.
+
 - **What OpenFox does, beside the answer.** For a thread OpenFox runs, the core sends the pages a
   live panel: the thinking (shown, not journaled), the sub-agents (their words no longer mixed
   into the answer), a question with choices or a free answer (OpenFox waits for it), a retry under
