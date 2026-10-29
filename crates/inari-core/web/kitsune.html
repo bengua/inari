@@ -70,12 +70,22 @@
       <section class="glass kcard">
         <h2>Coming next</h2>
         <ul class="klist">
-          <li>Search what you said, read it back aloud, correct or delete it.</li>
           <li>Set reminders by time or by place.</li>
           <li>Point the core at your own speech and embedding servers.</li>
         </ul>
       </section>
     </aside>
+    <section class="glass kcard" id="kmem" aria-label="Memory">
+      <h2>Memory</h2>
+      <form class="kfind" id="kFind">
+        <input class="kfield" id="kQuery" type="search" placeholder="Search what you said" autocomplete="off" aria-label="Search the notes">
+        <button class="btn small" id="kFindGo" type="submit">Find</button>
+        <button class="btn small" id="kFindClear" type="button" hidden>All</button>
+      </form>
+      <p class="kmeta" id="kMemState" aria-live="polite"></p>
+      <ul class="plist" id="kNotesList"></ul>
+      <audio id="kPlayer" hidden></audio>
+    </section>
   </main>
 </div>
 <div id="toast" class="glass" role="status" aria-live="polite"></div>

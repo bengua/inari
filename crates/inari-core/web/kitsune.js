@@ -174,6 +174,7 @@ async function load() {
   if (!state.asrReady) missing.push("speech to text");
   if (!state.ttsReady) missing.push("text to speech");
   say(missing.length ? "Local " + missing.join(" and ") + " not set yet." : "Ready. Notes: " + state.notes + ".");
+  memLoad();
 }
 
 /* Talk: hold the button, record here, hand the core a 16 kHz mono wav. */
@@ -358,6 +359,145 @@ async function keepTyped() {
   $("kText").value = "";
   await keep(d.id);
 }
+
+/* Memory: find what was said, read it back, correct it, forget it. */
+const mem = { query: "", url: "" };
+
+function stamp(t) {
+  const at = Number(t) || 0;
+  if (!at) return "";
+  return new Date(at * 1000).toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+function actButton(act, label, cls) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = cls || "btn small";
+  b.dataset.act = act;
+  b.textContent = label;
+  return b;
+}
+
+function noteLi(n) {
+  const li = document.createElement("li");
+  li.className = "knote";
+  li.dataset.id = String(n.id);
+  const words = document.createElement("p");
+  words.className = "knote-text" + (n.text ? "" : " waiting");
+  words.textContent = n.text || (n.status === "needs_review" ? "Audio kept, words missing." : "Nothing written in this note.");
+  li.appendChild(words);
+  const meta = document.createElement("p");
+  meta.className = "kmeta";
+  const bits = [stamp(n.created_at), n.place, n.source];
+  for (const t of n.tags || []) bits.push("#" + t);
+  meta.textContent = bits.filter(Boolean).join(" \u00b7 ");
+  li.appendChild(meta);
+  const acts = document.createElement("div");
+  acts.className = "knote-actions";
+  acts.append(actButton("read", "Read aloud"), actButton("fix", "Correct"), actButton("drop", "Delete", "btn small danger"));
+  li.appendChild(acts);
+  const fix = document.createElement("div");
+  fix.className = "knote-fix";
+  fix.hidden = true;
+  const ta = document.createElement("textarea");
+  ta.className = "kfield";
+  ta.value = n.text || "";
+  ta.setAttribute("aria-label", "Correct the note");
+  fix.appendChild(ta);
+  fix.append(actButton("save", "Save", "btn small go"), actButton("cancel", "Cancel"));
+  li.appendChild(fix);
+  return li;
+}
+
+function memState(line) {
+  $("kMemState").textContent = line || "";
+}
+
+function renderNotes(notes) {
+  const list = $("kNotesList");
+  list.textContent = "";
+  for (const n of notes) list.appendChild(noteLi(n));
+}
+
+async function memLoad() {
+  const q = mem.query.trim();
+  const d = q
+    ? await api("/api/kitsune", { action: "search", query: q, k: 20 })
+    : await api("/api/kitsune", { action: "list_notes", limit: 20 });
+  if (d.error) return memState("");
+  const notes = q ? (d.hits || []).map((h) => h.note) : (d.notes || []);
+  $("kFindClear").hidden = !q;
+  renderNotes(notes);
+  if (!notes.length) return memState(q ? "Nothing matches " + q + "." : "Nothing kept yet.");
+  memState(q ? notes.length + " note(s) for " + q + "." : "The " + notes.length + " newest notes.");
+}
+
+function playAudio(src, revoke) {
+  const p = $("kPlayer");
+  if (mem.url) URL.revokeObjectURL(mem.url);
+  mem.url = revoke ? src : "";
+  p.src = src;
+  p.play().catch(() => {});
+}
+
+async function readNote(id) {
+  const d = await api("/api/kitsune", { action: "get_note", id });
+  if (d.error) return;
+  const n = d.note || {};
+  const kept = (d.audio || [])[0];
+  if (kept && kept.path) {
+    activity("working");
+    const r = await fetch("/api/kitsune/audio?path=" + encodeURIComponent(kept.path)).catch(() => null);
+    activity("idle");
+    if (!r || !r.ok) { toast("That audio cannot be read back."); return; }
+    playAudio(URL.createObjectURL(await r.blob()), true);
+    return say("Here is what you said.");
+  }
+  if (!n.text) { toast("There are no words to read back yet."); return; }
+  activity("working");
+  const s = await api("/api/kitsune", { action: "speak", text: n.text, note_id: n.id });
+  activity("idle");
+  if (s.error) return;
+  if (!s.audio) { toast("The core answered without audio."); return; }
+  const bytes = Uint8Array.from(atob(s.audio), (c) => c.charCodeAt(0));
+  playAudio(URL.createObjectURL(new Blob([bytes], { type: s.mime || "audio/wav" })), true);
+  say("Reading it back.");
+}
+
+async function saveFix(li) {
+  const words = li.querySelector(".knote-fix .kfield").value.trim();
+  if (!words) { toast("Write the words first."); return; }
+  activity("working");
+  const d = await api("/api/kitsune", { action: "correct_note", id: Number(li.dataset.id), text: words });
+  activity("idle");
+  if (d.error) return;
+  await load();
+  say("Corrected: " + words);
+}
+
+async function dropNote(li) {
+  if (!confirm("Forget this note and its audio?")) return;
+  activity("working");
+  const d = await api("/api/kitsune", { action: "delete_note", id: Number(li.dataset.id) });
+  activity("idle");
+  if (d.error) return;
+  await load();
+  say("Forgotten.");
+}
+
+$("kNotesList").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button[data-act]");
+  const li = b && b.closest(".knote");
+  if (!li) return;
+  const act = b.dataset.act;
+  if (act === "read") return readNote(Number(li.dataset.id));
+  if (act === "fix") { const f = li.querySelector(".knote-fix"); f.hidden = false; f.querySelector(".kfield").focus(); return; }
+  if (act === "cancel") { li.querySelector(".knote-fix").hidden = true; return; }
+  if (act === "save") return saveFix(li);
+  if (act === "drop") return dropNote(li);
+});
+$("kFind").addEventListener("submit", (ev) => { ev.preventDefault(); mem.query = $("kQuery").value; memLoad(); });
+$("kFindClear").addEventListener("click", () => { $("kQuery").value = ""; mem.query = ""; memLoad(); });
 
 $("kTalk").addEventListener("pointerdown", (ev) => { ev.preventDefault(); startTalk(); });
 window.addEventListener("pointerup", stopTalk);

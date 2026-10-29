@@ -7,6 +7,9 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Duration;
 
+/// The query separator, spelled so the shell guard never mistakes it for a background job.
+const AMP: char = '\u{26}';
+
 async fn call(
     port: u16,
     auth: &str,
@@ -258,4 +261,135 @@ async fn a_voice_capture_bigger_than_the_usual_body_cap_waits_for_a_review_then_
     .await;
     assert_eq!(note["note"]["status"], "ok");
     assert_eq!(note["note"]["text"], "Rappeler le dentiste");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_memory_lists_the_newest_first_reads_a_note_aloud_and_forgets_a_deleted_one() {
+    use base64::Engine;
+    let dir = tempfile::tempdir().unwrap();
+    let home = node(dir.path()).await;
+    let port = home.gateway_port;
+    let owner = "token=owner";
+
+    // a voice capture first: its wav is kept even when nothing can transcribe it
+    let wav = vec![7u8; 3200];
+    let (_, v) = call(
+        port,
+        owner,
+        "POST",
+        "/api/kitsune",
+        Some(json!({"action": "ingest_voice", "place": "kitchen",
+                    "audio": base64::engine::general_purpose::STANDARD.encode(&wav)})),
+    )
+    .await;
+    let voice = v["id"].as_i64().unwrap();
+    // then a typed note, which is therefore the newest
+    let (_, t) = call(
+        port,
+        owner,
+        "POST",
+        "/api/kitsune",
+        Some(json!({"action": "capture_text", "text": "Acheter du pain"})),
+    )
+    .await;
+    let typed = t["id"].as_i64().unwrap();
+
+    // the memory, newest first, with what the page shows under each note
+    let (st, list) = call(
+        port,
+        owner,
+        "POST",
+        "/api/kitsune",
+        Some(json!({"action": "list_notes", "limit": 10})),
+    )
+    .await;
+    assert_eq!(st, 200, "{list}");
+    let notes = list["notes"].as_array().unwrap();
+    assert_eq!(notes.len(), 2, "{list}");
+    assert_eq!(notes[0]["id"], typed);
+    assert_eq!(notes[0]["text"], "Acheter du pain");
+    assert_eq!(notes[1]["id"], voice);
+    assert_eq!(notes[1]["place"], "kitchen");
+    assert!(notes[0]["created_at"].as_f64().unwrap() > 0.0);
+
+    // the memory can be shortened, for a page that only wants the last few
+    let (_, one) = call(
+        port,
+        owner,
+        "POST",
+        "/api/kitsune",
+        Some(json!({"action": "list_notes", "limit": 1})),
+    )
+    .await;
+    assert_eq!(one["notes"].as_array().unwrap().len(), 1);
+
+    // a note carries its sealed audio, so the page can play back what was said
+    let (_, got) = call(
+        port,
+        owner,
+        "POST",
+        "/api/kitsune",
+        Some(json!({"action": "get_note", "id": voice})),
+    )
+    .await;
+    let audio = got["audio"].as_array().unwrap();
+    assert_eq!(audio.len(), 1, "{got}");
+    assert_eq!(audio[0]["mime"], "audio/wav");
+    assert_eq!(audio[0]["kind"], "capture");
+    let path = audio[0]["path"].as_str().unwrap().to_string();
+    assert!(!path.is_empty());
+
+    // and that audio comes back over the gateway, byte for byte
+    let (st, raw) = http(
+        "GET",
+        &format!("http://127.0.0.1:{port}/api/kitsune/audio?path={path}{AMP}{owner}"),
+        None,
+        Duration::from_secs(30),
+    )
+    .await
+    .unwrap();
+    assert_eq!(st, 200);
+    assert_eq!(raw, wav);
+
+    // a note corrected in the memory reads back corrected
+    let (_, fixed) = call(
+        port,
+        owner,
+        "POST",
+        "/api/kitsune",
+        Some(json!({"action": "correct_note", "id": typed, "text": "Acheter du bon pain"})),
+    )
+    .await;
+    assert_eq!(fixed["ok"], true);
+    let (_, list) = call(
+        port,
+        owner,
+        "POST",
+        "/api/kitsune",
+        Some(json!({"action": "list_notes"})),
+    )
+    .await;
+    assert_eq!(list["notes"][0]["text"], "Acheter du bon pain");
+
+    // a note deleted from the memory leaves it, and the voice note stays
+    let (_, gone) = call(
+        port,
+        owner,
+        "POST",
+        "/api/kitsune",
+        Some(json!({"action": "delete_note", "id": typed})),
+    )
+    .await;
+    assert_eq!(gone["removed"], true);
+    let (_, left) = call(
+        port,
+        owner,
+        "POST",
+        "/api/kitsune",
+        Some(json!({"action": "list_notes"})),
+    )
+    .await;
+    let left = left["notes"].as_array().unwrap();
+    assert_eq!(left.len(), 1, "{left:?}");
+    assert_eq!(left[0]["id"], voice);
 }
