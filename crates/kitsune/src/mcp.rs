@@ -29,7 +29,7 @@ pub struct Config {
 }
 
 impl Config {
-    fn offers(&self, name: &str) -> bool {
+    pub fn offers(&self, name: &str) -> bool {
         self.tools.is_empty() || self.tools.iter().any(|t| t == name)
     }
 }

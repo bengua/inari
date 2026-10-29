@@ -11,6 +11,7 @@ pub mod net;
 pub mod search;
 pub mod store;
 pub mod triggers;
+pub mod tts;
 
 pub use asr::AsrConfig;
 pub use brain::{Kitsune, Settings};
@@ -18,6 +19,7 @@ pub use crypto::{AudioVault, Key};
 pub use migrate::{migrate_to, version, LATEST};
 pub use search::{cosine, haversine_m, Filters, Geo, Hit, SearchOptions};
 pub use store::{AudioRef, NewNote, Note, Store, Trigger};
+pub use tts::TtsConfig;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
