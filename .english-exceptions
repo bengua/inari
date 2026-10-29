@@ -12,3 +12,4 @@ crates/kitsune/src/brain.rs # French note fixtures in tests: what the owner says
 crates/kitsune/src/mcp.rs # French note fixtures in tests: what the owner says, never the code
 crates/kitsune/src/search.rs # French note fixtures in tests: the search is checked on accented French notes, which is the point
 crates/kitsune/src/store.rs # French note fixtures in tests: what the owner says, never the code
+docs/ai-memory-integration-fr.md # plan to integrate akitaonrails/ai-memory, written in French for the owner

@@ -454,6 +454,7 @@ fr: /* FR-START */ {
  "A thread's folder between two turns": "Le dossier d'un fil entre deux tours",
  "Add a pattern": "Ajouter un motif",
  "Add an MCP server": "Ajouter un serveur MCP",
+ "AI-Memory (shared agent memory)": "AI-Memory (mémoire partagée des agents)",
  "Again": "À refaire",
  "An address (HTTP)": "Une adresse (HTTP)",
  "Asks before changing a branch or a workspace": "Demander avant de changer de branche ou d'espace de travail",
