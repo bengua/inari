@@ -96,6 +96,7 @@ async function signIn(secret) {
 const signOut = () => fetch("/api/logout", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).catch(() => null).then(() => location.reload());
 function openStream() { const es = (stream = new EventSource("/events"));
   es.onmessage = (e) => { snap = JSON.parse(e.data); lastSnapAt = Date.now(); online(true); render(); };
+  es.addEventListener("panel", (e) => { lastSnapAt = Date.now(); onPanel(JSON.parse(e.data)); });
   es.addEventListener("draft", (e) => { const d = JSON.parse(e.data); lastSnapAt = Date.now();
     if (d.text) drafts[d.agent] = { text: d.text }; else if (drafts[d.agent]) drafts[d.agent].done = Date.now();
     if (d.agent !== selected) return; if (!d.text) { tlStamp = 0; refreshDetail(); } drawDraft(); });
@@ -297,6 +298,64 @@ $("gear").onclick = () => openPop($("gear"), (pop) => { pop.insertAdjacentHTML("
     for (const [node, h] of foxes) { const b = document.createElement("button"); b.className = "btn small"; b.textContent = foxes.length > 1 ? `${node} · ${h}` : t("Settings of {name}", { name: node }); b.onclick = () => { pop.classList.remove("open"); openfoxSheet(node, h); }; box.append(b); } pop.append(box); }
   pop.insertAdjacentHTML("beforeend", `<h3 style="margin-top:12px">${esc(t("Session"))}</h3>`); const out = document.createElement("button"); out.className = "btn small"; out.textContent = t("Sign out"); out.onclick = signOut; pop.append(out); });
 
+/* ---------- OpenFox: the panel of a thread it runs, live from the core ("panel" events) ---------- */
+const panels = {}; let critDraft = null, foxThinkOpen = false;
+const foxAct = (action, extra) => api("/api/openfox/thread", { agent: selected, action, ...extra });
+const hashOf = (text) => { let h = 0; for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) | 0; return h; };
+function markPlanTab() { const has = !!(selected && panels[selected]); $("planTab").hidden = !has; if (!has && tab === "plan") tab = "artifacts"; }
+function onPanel(d) { panels[d.agent] = d.panel; if (d.agent !== selected) return; markPlanTab(); fillModeChip(snap && snap.agents[selected]);
+  // the live cards change in place; the thread is drawn again only when they appear or go
+  const box = $("msgs").querySelector(".foxlive"), live = foxLive(d.panel);
+  if (box && live) { box.innerHTML = live; box.dataset.s = `${live.length}:${hashOf(live)}`; } else if (box || live) drawChat();
+  if (tab === "plan") drawBench(true); }
+/* The thread's live cards: OpenFox's thinking, its sub-agents, a question it asks, a retry under way. */
+function foxLive(p) { const out = [];
+  if (p.running && p.thinking) out.push(`<details class="foxthink"${foxThinkOpen ? " open" : ""}><summary>${icon("spinner")}<span>${esc(t("Thinking"))}</span></summary><pre>${esc(p.thinking)}</pre></details>`);
+  for (const a of (p.subagents || []).filter((x) => !x.done)) out.push(`<details class="foxsub"><summary>${icon("fork")}<span>${esc(t("Sub-agent {name} is working", { name: a.kind }))}</span></summary><pre>${esc(a.text)}</pre></details>`);
+  if (p.question) { const q = p.question; const opts = (q.options || []).map((o) => `<button type="button" class="btn small" data-answer="${esc(o.value)}" title="${esc(o.description || "")}">${esc(o.label || o.value)}</button>`).join("");
+    out.push(`<div class="foxask" data-call="${esc(q.call_id)}"><b>${esc(t("OpenFox asks"))}</b><p>${esc(q.question)}</p>${opts ? `<div class="row2">${opts}</div>` : `<div class="row2"><input type="text" class="foxfree" placeholder="${esc(t("Your answer"))}"><button type="button" class="btn small go" data-free>${esc(t("Answer"))}</button></div>`}<button type="button" class="btn small" data-skip>${esc(t("Skip the question"))}</button></div>`); }
+  if (p.retry) { const r = p.retry; out.push(r.failed
+      ? `<div class="foxretry bad"><b>${esc(t("The model did not answer"))}</b><p>${esc(r.error)}</p><button type="button" class="btn small go" data-retry>${esc(t("Retry"))}</button></div>`
+      : `<div class="foxretry"><b>${esc(t("The model did not answer, attempt {n}", { n: r.attempt }))}</b><p>${esc(r.error)}</p><button type="button" class="btn small" data-retry-now>${esc(t("Retry now"))}</button></div>`); }
+  if (p.running && p.progress) out.push(`<p class="foxprog">${esc(p.progress)}</p>`);
+  return out.join(""); }
+$("msgs").addEventListener("click", (e) => { const c = e.target.closest(".foxask, .foxretry"); if (!c) return;
+  if (e.target.closest("[data-answer]")) foxAct("answer", { call_id: c.dataset.call, answer: e.target.closest("[data-answer]").dataset.answer });
+  else if (e.target.closest("[data-free]")) { const v = c.querySelector(".foxfree").value.trim(); if (v) foxAct("answer", { call_id: c.dataset.call, answer: v }); }
+  else if (e.target.closest("[data-skip]")) foxAct("answer", { call_id: c.dataset.call });
+  else if (e.target.closest("[data-retry]")) foxAct("retry", {});
+  else if (e.target.closest("[data-retry-now]")) foxAct("retry_now", {}); });
+$("msgs").addEventListener("toggle", (e) => { if (e.target.classList && e.target.classList.contains("foxthink")) foxThinkOpen = e.target.open; }, true);
+/* The Plan tab: how OpenFox works on this thread, and what the person may change of it. */
+function planTab(body) { const p = panels[selected]; if (!p) { body.innerHTML = `<p class="empty">${esc(t("OpenFox has said nothing about this thread yet."))}</p>`; return; }
+  body.style.padding = "12px"; const el = (tag, cls, text) => { const x = document.createElement(tag); if (cls) x.className = cls; if (text !== undefined) x.textContent = text; return x; };
+  const sec = (title) => body.append(el("h3", "ph", title));
+  if (p.error) body.append(el("p", "bad", p.error));
+  const ctl = el("div", "pctl"); body.append(ctl);
+  const pick = (label, opts, value, onchange) => { const l = el("label", "col"); l.append(el("span", "", label)); const sel = document.createElement("select"); for (const [v, text] of opts) sel.append(new Option(text, v, false, v === value)); sel.onchange = () => onchange(sel.value); l.append(sel); ctl.append(l); };
+  pick(t("Agent"), (p.agents || []).map((a) => [a.id, a.name]), p.agent, (mode) => foxAct("agent", { mode }));
+  if ((p.efforts || []).length) pick(t("Reasoning effort"), [["", t("OpenFox's default")], ...p.efforts.map((x) => [x, x])], p.effort || "", (effort) => foxAct("effort", { effort }));
+  pick(t("Confirmations"), [["normal", t("Ask before risky actions")], ["dangerous", t("Bold: no confirmations")]], p.danger === "dangerous" ? "dangerous" : "normal", (level) => foxAct("danger", { level }));
+  const state = el("p", "pstate", [p.phase && t("Phase: {phase}", { phase: p.phase }), p.running ? t("working") : t("idle"), ["pending", "paused"].includes(p.paused) ? t("paused") : ""].filter(Boolean).join(" · ")); body.append(state);
+  if (p.running) { const b = el("button", "btn small", ["pending", "paused"].includes(p.paused) ? t("Resume") : t("Pause")); b.type = "button"; b.onclick = () => foxAct(["pending", "paused"].includes(p.paused) ? "resume" : "pause", {}); state.append(" ", b); }
+  if (p.context && p.context.max) { sec(t("Context")); const c = p.context, bar = el("div", "pbar" + (c.danger ? " danger" : "")); const fill = el("i"); fill.style.width = Math.min(100, Math.round((c.used / c.max) * 100)) + "%"; bar.append(fill); body.append(bar);
+    const line = el("p", "pstate", t("{used} of {max} tokens · compactions: {n}", { used: c.used.toLocaleString(LANG), max: c.max.toLocaleString(LANG), n: c.compactions })); body.append(line);
+    if (c.can_compact) { const b = el("button", "btn small", t("Compact")); b.type = "button"; b.onclick = () => foxAct("compact", {}); line.append(" ", b); } }
+  const mark = (status) => ({ completed: "✓", passed: "✓", in_progress: "●", failed: "✗" })[status] || "○";
+  if ((p.todos || []).length) { sec(t("Tasks")); const ul = el("ul", "plist"); for (const x of p.todos) { const li = el("li", "st-" + x.status); li.append(el("span", "pm", mark(x.status)), el("span", "", x.text)); ul.append(li); } body.append(ul); }
+  sec(t("Criteria"));
+  if (critDraft) { const ed = el("div", "critedit"); critDraft.forEach((c, i) => { const r = el("div", "row2"), inp = el("input"); inp.type = "text"; inp.value = c.text; inp.oninput = () => { critDraft[i].text = inp.value; }; const del = el("button", "btn small", "✕"); del.type = "button"; del.setAttribute("aria-label", t("Remove")); del.onclick = () => { critDraft.splice(i, 1); drawBench(); }; r.append(inp, del); ed.append(r); });
+    const add = el("button", "btn small", t("Add a criterion")); add.type = "button"; add.onclick = () => { critDraft.push({ id: "", text: "", status: "" }); drawBench(); };
+    const save = el("button", "btn small go", t("Save")); save.type = "button"; save.onclick = () => { foxAct("criteria", { criteria: critDraft }); critDraft = null; drawBench(); };
+    const cancel = el("button", "btn small", t("Cancel")); cancel.type = "button"; cancel.onclick = () => { critDraft = null; drawBench(); };
+    const btns = el("div", "row2"); btns.append(add, save, cancel); ed.append(btns); body.append(ed); }
+  else { const ul = el("ul", "plist"); for (const x of p.criteria || []) { const li = el("li", "st-" + x.status); li.append(el("span", "pm", mark(x.status)), el("span", "", x.text)); if (x.reason) li.append(el("small", "", " — " + x.reason)); ul.append(li); }
+    if (!(p.criteria || []).length) ul.append(el("li", "empty", t("No criteria yet: what must be true when the work is done?")));
+    body.append(ul); const edit = el("button", "btn small", t("Edit the criteria")); edit.type = "button"; edit.onclick = () => { critDraft = (p.criteria || []).map((c) => ({ id: c.id, text: c.text, status: c.status })); drawBench(); }; body.append(edit); }
+  for (const [key, items] of Object.entries(p.metadata || {})) { if (!items.length) continue; sec(key.replace(/_/g, " ")); const ul = el("ul", "plist"); for (const x of items) { const li = el("li", "st-" + x.status); li.append(el("span", "pm", mark(x.status)), el("span", "", x.text)); ul.append(li); } body.append(ul); }
+  if ((p.queue || []).length) { sec(t("Waiting for OpenFox")); const ul = el("ul", "plist"); for (const q of p.queue) { const li = el("li"); li.append(el("span", "", q.content)); const del = el("button", "btn small", "✕"); del.type = "button"; del.setAttribute("aria-label", t("Remove")); del.onclick = () => foxAct("dequeue", { id: q.id }); li.append(del); ul.append(li); } body.append(ul); }
+  if (p.stats) { const s = p.stats; sec(t("Last turn")); body.append(el("p", "pstate", [s.model, s.effort, s.speed ? t("{n} tokens/s", { n: Math.round(s.speed) }) : "", s.seconds ? t("{n} s", { n: Math.round(s.seconds) }) : ""].filter(Boolean).join(" · "))); } }
+
 /* ---------- OpenFox's settings on a core (the core keeps them; nothing is written by hand) ---------- */
 function openfoxSheet(node, harness, said) {
   const n = snap.nodes.find((x) => x.node_id === node), st = ((n && n.capabilities && n.capabilities.openfox) || {})[harness] || {};
@@ -373,8 +432,9 @@ function renderTop() {
   $("pphase").innerHTML = a ? `<span class="state${["listening", "loading", "inference"].includes(a.phase) ? " live" : ""}" style="--c:var(--${{ inference: "copper", loading: "copper", listening: "purple", success: "ok", error: "bad" }[a.phase] || "dim"})">${LABEL[a.phase]} <small>${esc(t("on {node}", { node: a.node }))}</small></span>` : "";
   $("actionsBtn").hidden = !a; fillModeChip(a); fillCtxChip(a); fillAutoChip(a); const chip = $("modelChip"); chip.hidden = !a; if (a) fillModelChip(chip, a.model); document.body.classList.toggle("open", !!a || composing); placeFox(); drawComposer(); drawStop();
 }
-function fillModeChip(a) { const chip = $("modeChip"), modes = a ? harnessModes(a.node, a.harness) : []; chip.hidden = !modes.length; if (chip.hidden) return;
-  const cur = modes.find((m) => m.id === a.mode) || modes[0]; chip.textContent = ""; const n = document.createElement("span"); n.className = "n"; n.textContent = cur.name; chip.title = cur.description || ""; chip.append(n); }
+function fillModeChip(a) { const chip = $("modeChip"), fox = a && panels[selected], modes = fox && (fox.agents || []).length ? fox.agents : a ? harnessModes(a.node, a.harness) : []; chip.hidden = !modes.length; if (chip.hidden) return;
+  // an OpenFox thread: the agent OpenFox runs it as now (it may switch by itself)
+  const cur = modes.find((m) => m.id === (fox ? fox.agent : a.mode)) || modes[0]; chip.textContent = ""; const n = document.createElement("span"); n.className = "n"; n.textContent = cur.name; chip.title = cur.description || ""; chip.append(n); }
 /* How full the agent's context is, as it reports it: a ring and a percentage; the popover has the numbers. */
 function fillCtxChip(a) { const chip = $("ctxChip"), c = a && a.context; chip.hidden = !(c && c.size); if (chip.hidden) return;
   const pct = Math.min(100, Math.round((c.used / c.size) * 100)); chip.textContent = ""; const r = document.createElement("span"); r.className = "ring"; r.style.setProperty("--p", pct); r.style.setProperty("--rc", pct > 85 ? "var(--bad)" : pct > 60 ? "var(--warn)" : "var(--copper)"); r.innerHTML = "<i></i>";
@@ -384,11 +444,11 @@ $("ctxChip").onclick = () => { const a = snap.agents[selected], c = a && a.conte
     const compact = harnessCommands(a.node, a.harness).find((x) => x.name === "compact");
     if (compact) { const b = document.createElement("button"); b.className = "mrow"; b.textContent = t("Compact the conversation (/compact)"); b.onclick = () => { $("pop").classList.remove("open"); api("/api/message", { agent: selected, text: "/compact" }); toast(t("Compacting…")); }; pop.append(b); }
     else pop.insertAdjacentHTML("beforeend", `<div class="empty" style="padding:6px 0">${esc(t("The agent compacts by itself when the window fills."))}</div>`); }); };
-$("modeChip").onclick = () => { const a = snap.agents[selected]; if (!a) return; const modes = harnessModes(a.node, a.harness);
+$("modeChip").onclick = () => { const a = snap.agents[selected]; if (!a) return; const fox = panels[selected], modes = fox && (fox.agents || []).length ? fox.agents : harnessModes(a.node, a.harness);
   openPop($("modeChip"), (pop) => { pop.insertAdjacentHTML("beforeend", `<h3>${esc(t("{harness} — mode", { harness: harnessName(a.harness) }))}</h3><div id="mlist"></div>`); const list = pop.querySelector("#mlist");
-    for (const m of modes) { const b = document.createElement("button"); b.className = "mrow" + (m.id === (a.mode || modes[0].id) ? " on" : ""); const nm = document.createElement("span"); nm.textContent = m.name; b.append(nm);
+    for (const m of modes) { const b = document.createElement("button"); b.className = "mrow" + (m.id === (fox ? fox.agent : a.mode || modes[0].id) ? " on" : ""); const nm = document.createElement("span"); nm.textContent = m.name; b.append(nm);
       if (m.description) { const d = document.createElement("small"); d.style.cssText = "margin-left:auto;color:var(--faint);max-width:55%;text-align:right"; d.textContent = m.description; b.append(d); }
-      b.onclick = () => { $("pop").classList.remove("open"); api("/api/mode", { agent: selected, mode: m.id }); toast(t("Mode: {name}", { name: m.name })); }; list.append(b); } }); };
+      b.onclick = () => { $("pop").classList.remove("open"); if (fox) foxAct("agent", { mode: m.id }); else api("/api/mode", { agent: selected, mode: m.id }); toast(t("Mode: {name}", { name: m.name })); }; list.append(b); } }); };
 function fillModelChip(chip, model) { chip.textContent = ""; chip.append(badge(model, 18)); const n = document.createElement("span"); n.className = "n"; n.textContent = shortModel(model); chip.title = shortModel(model); chip.append(n); const r = ring(model); if (r) chip.append(r); }
 function drawComposer() {
   const a = selected && snap.agents[selected], cc = $("coreChip"), pm = $("pickModel"); $("msg").placeholder = a ? t("Message the agent…") : t("Build anything…");
@@ -453,7 +513,10 @@ $("composer").onsubmit = async (e) => { e.preventDefault(); let text = $("msg").
 $("msg").onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("composer").requestSubmit(); } };
 
 /* ---------- conversation ---------- */
-async function select(id) { selected = id; forkAt = null; viewing = null; files = null; events = []; tlStamp = 0; lastFiles = ""; renderTop(); drawChat(); drawBench(); await refreshDetail(); if (snap) renderCores(Object.entries(snap.agents)); $("msg").focus(); }
+async function select(id) { selected = id; forkAt = null; viewing = null; files = null; events = []; tlStamp = 0; lastFiles = ""; critDraft = null; markPlanTab(); renderTop(); drawChat(); drawBench(); await refreshDetail();
+  // an OpenFox thread opened before its panel came: ask for it
+  const a = snap.agents[id], n = a && snap.nodes.find((x) => x.node_id === a.node); if (!panels[id] && n && n.capabilities && n.capabilities.openfox) api("/api/openfox/thread", { agent: id, action: "refresh" });
+  if (snap) renderCores(Object.entries(snap.agents)); $("msg").focus(); }
 async function refreshDetail() { if (!selected) return; if (tlBusy) { refreshDetail.again = true; return; } tlBusy = true; refreshDetail.again = false; tlStamp = Date.now(); try { const id = selected, base = `/api/agent/${encodeURIComponent(id)}/timeline`, last = events.length ? events[events.length - 1].id : "";
     let tl = await api(last ? `${base}?after=${encodeURIComponent(last)}` : base); if (id !== selected) return;
     // a plain continuation is appended; a journal that changed under the page (a merge, a fork) is asked for whole
@@ -524,6 +587,8 @@ function drawChat() {
     else if (e.kind === "provider_switch") note(t("Model <b>{name}</b>", { name: esc(shortModel(e.text)) }));
     else if (e.kind === "decision") note(esc(e.text));
     else if (e.kind === "checkpoint") { const [why, ...rest] = e.text.split(": "); const map = { teleport: "Moved between cores", provider_error: "The model failed", harness_error: "The agent stopped", harness_timeout: "The agent took too long", model_refused: "Model not available", mode_changed: "Mode", stopped: "Stopped", steered: "Paused at the end of a step to read your message", auto_approved: "Allowed automatically", mode_refused: "Mode not available" }; note(esc(t(map[why] || "Checkpoint")) + (rest.length && why !== "teleport" ? ` — ${esc(rest.join(": ").slice(0, 120))}` : "")); } }
+  // what OpenFox does beside its answer: its thinking, sub-agents, a question, a retry (panel)
+  if (panels[selected]) { const live = foxLive(panels[selected]); if (live) box.insertAdjacentHTML("beforeend", `<div class="foxlive" data-k="foxlive" data-s="${live.length}:${hashOf(live)}">${live}</div>`); }
   // the answer being written shows as it comes; once journaled (the last answer starts with it) the message replaces it
   const dr = drafts[selected], lastSaid = [...events].reverse().find((e) => e.kind === "assistant_message");
   if (dr && dr.done && (Date.now() - dr.done > 10000 || (lastSaid && (lastSaid.text || "").trim().startsWith(dr.text.trim())))) delete drafts[selected];
@@ -581,10 +646,11 @@ function terminal(body) {
 }
 function drawBench(soft) {
   document.querySelectorAll(".tab").forEach((t) => { const on = t.dataset.tab === tab; t.classList.toggle("on", on); t.setAttribute("aria-selected", on); t.tabIndex = on ? 0 : -1; }); const body = $("bbody"); body.setAttribute("aria-label", tab); if (soft && tab === "terminal" && document.activeElement && document.activeElement.id === "terminput") return;
+  if (soft && tab === "plan" && (critDraft || body.contains(document.activeElement))) return; // an edit in progress stays as it is
   const keep = body.scrollTop; body.textContent = ""; body.style.padding = ""; if (!selected) { body.innerHTML = `<p class="empty">${esc(t("Select a thread to see its files, run commands, view results and read its journal."))}</p>`; return; }
   if (tab === "artifacts") { const hidden = !store.get("showgit", false); const shown = files ? files.filter((f) => !hidden || !f.path.startsWith(".git/")) : files; if (!files) { body.innerHTML = `<p class="empty">${esc(t("Loading…"))}</p>`; return; } if (!shown.length) { body.innerHTML = `<p class="empty">${esc(t("No files yet. Ask the agent to create something — its workspace travels with it when you move it."))}</p>`; return; } body.insertAdjacentHTML("beforeend", `<label class="empty" style="display:flex;gap:6px;align-items:center;margin-bottom:6px"><input type="checkbox" id="showgit" ${hidden ? "" : "checked"}> ${esc(t("show .git ({n} files)", { n: files.length - files.filter((f) => !f.path.startsWith(".git/")).length }))}</label><div class="files"></div>`); $("showgit").onchange = (e) => { store.set("showgit", e.target.checked); drawBench(); };
     for (const f of shown) { const b = document.createElement("button"); b.innerHTML = `<span class="ic">${icon(KIND[ext(f.path)] || "file")}</span><span></span><small></small>`; b.children[1].textContent = f.path; b.children[2].textContent = f.size + " B"; b.onclick = () => openFile(f.path); body.querySelector(".files").append(b); } }
-  else if (tab === "terminal") terminal(body); else if (tab === "viewer") viewer(body);
+  else if (tab === "terminal") terminal(body); else if (tab === "viewer") viewer(body); else if (tab === "plan") planTab(body);
   else { body.insertAdjacentHTML("beforeend", `<p class="empty">${esc(t("Tap an event to fork the thread from it, then press Fork."))}</p><ul id="tree"></ul>`); const tree = body.querySelector("#tree"); events.forEach((ev) => { const li = document.createElement("li"); li.className = ev.kind + (ev.id === forkAt ? " pick" : ""); const k = document.createElement("b"); k.textContent = ev.kind.replace("_", " "); li.append(k, " " + ev.text.slice(0, 160)); li.onclick = () => { forkAt = ev.id; tree.querySelectorAll(".pick").forEach((x) => x.classList.remove("pick")); li.classList.add("pick"); }; tree.append(li); }); }
   body.scrollTop = keep;
 }

@@ -19,6 +19,15 @@ Newest first. An entry says what changed for someone using the thing.
   workbench tabs aligned with them; the thread's *Actions* is its icon; in a narrow column the
   state leaves out its core and the model name is shortened (whole on hover). A bar that still
   lacks room wraps, it never hides a control.
+- **What OpenFox does, beside the answer.** For a thread OpenFox runs, the core sends the pages a
+  live panel: the thinking (shown, not journaled), the sub-agents (their words no longer mixed
+  into the answer), a question with choices or a free answer (OpenFox waits for it), a retry under
+  way or given up (Retry follows OpenFox's second try as a turn of its own), and a Plan tab: the
+  agent it runs as (OpenFox's own, the person's included; the top bar's chip follows it), the
+  reasoning effort its model offers, the confirmations level, pause, the context with Compact, its
+  tasks, its criteria (editable), the other data it keeps, its queue, the last turn's stats. The
+  agent a new session starts with is applied once: after that OpenFox's own switches are kept.
+
 - **OpenFox, driven natively.** A harness `{"kind": "openfox"}` speaks to the machine's own
   OpenFox through its REST API and WebSocket instead of the Python `openfox-acp` bridge started
   for each message: one WebSocket per thread kept between turns, reconnection, an end of turn

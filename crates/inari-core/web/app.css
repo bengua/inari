@@ -206,3 +206,24 @@ dl.keys { display:grid; grid-template-columns:auto 1fr; gap:8px 14px; margin:0 0
 .foxform label.col { display:flex; flex-direction:column; align-items:stretch; gap:4px; } .foxform input, .foxform select { width:100%; }
 .foxform select { font:inherit; font-size:14px; padding:9px 10px; border-radius:10px; border:1px solid var(--hair); background:var(--raise); color:var(--ink); }
 .foxform p { margin:0; font-size:13px; } .foxform p.good { color:var(--good, #3b8f5a); } .foxform p.bad { color:var(--bad); } .foxform p.warn { color:var(--copper-text); }
+/* OpenFox: its live cards in the thread, and the Plan tab */
+.foxlive { display:grid; gap:8px; margin:8px 0; max-width:80%; }
+.foxthink, .foxsub { border:1px dashed var(--hair); border-radius:12px; padding:6px 10px; background:var(--raise); }
+.foxthink summary, .foxsub summary { display:flex; gap:6px; align-items:center; cursor:pointer; color:var(--dim); font-size:13px; }
+.foxthink .i { animation:spin 1.2s linear infinite; width:14px; height:14px; } .foxsub .i { width:14px; height:14px; }
+.foxthink pre, .foxsub pre { white-space:pre-wrap; max-height:260px; overflow:auto; font:12px/1.5 var(--mono); color:var(--dim); margin:6px 0 0; }
+.foxask, .foxretry { border:1px solid var(--copper); border-radius:14px; padding:10px 12px; background:var(--copper-soft); display:grid; gap:6px; }
+.foxask p, .foxretry p { margin:0; } .foxask .row2 { display:flex; flex-wrap:wrap; gap:6px; } .foxask input { flex:1; min-width:160px; }
+.foxretry.bad { border-color:var(--bad); background:color-mix(in srgb,var(--bad) 10%,transparent); }
+.foxprog { margin:0; font-size:12px; color:var(--faint); }
+.pctl { display:grid; gap:8px; margin-bottom:8px; } .pctl label.col { display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--dim); }
+.pctl select { font:inherit; font-size:14px; padding:8px 10px; border-radius:10px; border:1px solid var(--hair); background:var(--raise); color:var(--ink); }
+#bbody h3.ph { margin:14px 0 6px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--faint); }
+.pstate { margin:4px 0; font-size:13px; color:var(--dim); } #bbody p.bad { color:var(--bad); }
+.pbar { height:6px; border-radius:3px; background:var(--hair); overflow:hidden; } .pbar i { display:block; height:100%; background:var(--copper); } .pbar.danger i { background:var(--bad); }
+.plist { list-style:none; margin:0; padding:0; display:grid; gap:4px; } .plist li { display:flex; gap:8px; align-items:baseline; font-size:14px; } .plist li .btn { margin-left:auto; }
+.plist .pm { width:14px; flex:none; color:var(--faint); } .plist .st-completed .pm, .plist .st-passed .pm { color:var(--good, #3b8f5a); } .plist .st-in_progress .pm { color:var(--copper); } .plist .st-failed .pm { color:var(--bad); }
+.plist .st-completed > span:last-child { color:var(--dim); text-decoration:line-through; }
+.critedit { display:grid; gap:6px; } .critedit .row2 { display:flex; gap:6px; } .critedit input { flex:1; }
+/* a phone: five tabs and the two buttons fit (the Plan tab of an OpenFox thread makes five) */
+@media (max-width:760px) { .tabs { gap:0; } .tab { padding-left:9px; padding-right:9px; } }

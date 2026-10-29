@@ -1363,12 +1363,14 @@ impl OpenFoxHarness {
             t.phase("inference");
             return self.follow(t, sid, link).await;
         }
+        // the agent a new session starts with; after that it is OpenFox's (it switches by itself,
+        // from planner to builder say) or the person's, from the panel: never put back here
         let wanted_mode = if t.mode.is_empty() {
             self.settings().mode
         } else {
             t.mode.clone()
         };
-        if session.mode.as_deref() != Some(wanted_mode.as_str()) {
+        if fresh && session.mode.as_deref() != Some(wanted_mode.as_str()) {
             self.act(
                 "PUT",
                 &format!("/api/sessions/{sid}/mode"),
@@ -2049,39 +2051,49 @@ impl OpenFoxHarness {
                 });
                 Ok(())
             }
-            "refresh" => {
-                let view = self
-                    .session_view(&sid)
-                    .await?
-                    .ok_or("OpenFox no longer has this session")?;
-                let agents = self.agent_list().await;
-                let efforts = self.efforts_for(view.session.model()).await;
-                let s = view.session;
-                self.edit_panel(agent, |x| {
-                    x.agent = s.mode.clone().unwrap_or_default();
-                    x.agents = agents;
-                    x.effort = s.provider_reasoning_effort.clone();
-                    x.efforts = efforts;
-                    x.danger = s.danger_level.clone().unwrap_or_else(|| "normal".into());
-                    x.phase = s.phase.clone().unwrap_or_default();
-                    x.paused = s.pause_state.clone().unwrap_or_else(|| "none".into());
-                    x.running = s.is_running;
-                    if let Some(c) = &view.context_state {
-                        x.context = Some(ContextView::from(c));
-                    }
-                    for (key, entries) in &s.metadata_entries {
-                        x.set_entries(key, entries);
-                    }
-                });
-                Ok(())
-            }
+            "refresh" => Ok(()),
             other => Err(format!("unknown OpenFox action {other:?}")),
         };
+        // what OpenFox has now: outside a turn no WebSocket brings it, so it is read back
+        if result.is_ok() && !["retry", "retry_now", "compact"].contains(&action) {
+            if let Err(e) = self.read_back(agent, &sid).await {
+                eprintln!("openfox: reading {agent}'s session back: {e}");
+            }
+        }
         self.edit_panel(agent, |x| {
             x.error = result.as_ref().err().cloned().unwrap_or_default()
         });
         self.publish_panel(runner, agent);
         result
+    }
+
+    /// The panel as OpenFox has the session now (REST): its agent, effort, danger, phase, context
+    /// and structured data. Live things (thinking, sub-agents, a question) stay as they are.
+    async fn read_back(&self, agent: &str, sid: &str) -> Result<(), String> {
+        let view = self
+            .session_view(sid)
+            .await?
+            .ok_or("OpenFox no longer has this session")?;
+        let agents = self.agent_list().await;
+        let efforts = self.efforts_for(view.session.model()).await;
+        let s = view.session;
+        self.edit_panel(agent, |x| {
+            x.agent = s.mode.clone().unwrap_or_default();
+            x.agents = agents;
+            x.effort = s.provider_reasoning_effort.clone();
+            x.efforts = efforts;
+            x.danger = s.danger_level.clone().unwrap_or_else(|| "normal".into());
+            x.phase = s.phase.clone().unwrap_or_default();
+            x.paused = s.pause_state.clone().unwrap_or_else(|| "none".into());
+            x.running = s.is_running;
+            if let Some(c) = &view.context_state {
+                x.context = Some(ContextView::from(c));
+            }
+            for (key, entries) in &s.metadata_entries {
+                x.set_entries(key, entries);
+            }
+        });
+        Ok(())
     }
 }
 

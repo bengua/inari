@@ -26,24 +26,24 @@ Légende : ✅ déjà dans Inari · 🟡 en partie · ❌ à ajouter
 | Réponse au fil de l'écriture | `StreamingCursor` | ✅ (depuis `9bdba09`) | — |
 | Appels d'outils et résultats | `ToolCallDisplay`, `RunCommandView` | ✅ outils repliables | — |
 | Confirmations (chemins, commandes) | `CrossSessionConfirmationBanner`, permissions | ✅ approbations | 0 |
-| Questions de l'agent (choix, oui/non) | `chat.ask_user` | 🟡 oui/non seulement | 1 |
-| Message pendant le travail (file) | `QueuedMessages` | 🟡 affiché « en attente » ; la file d'OpenFox (`asap`) à brancher | 0 |
+| Questions de l'agent (choix, oui/non) | `chat.ask_user` | ✅ carte dans le fil (lot 1) | — |
+| Message pendant le travail (file) | `QueuedMessages` | ✅ file d'OpenFox (lot 0), visible et modifiable dans l'onglet Plan (lot 1) | — |
 | Arrêter | bouton Stop | ✅ | — |
 | Choix du modèle | `ModelPicker`, `ProviderSelector` | ✅ puce modèle | 0 |
-| Agent (builder, planner, agents perso) | `AgentSelector` | 🟡 modes builder/planner ; agents perso à ajouter | 1 |
-| Niveau de danger / permissions | `DangerLevelSelector` | 🟡 « Demander » / auto | 1 |
-| Effort de réflexion | `EffortChangeGate` | ❌ | 1 |
-| Blocs de réflexion | `ThinkingBlock`, `ThinkingSummary` | ❌ (ignorés aujourd'hui) | 1 |
-| Liste de tâches de l'agent | `TodoListDisplay` | ❌ (ignorée aujourd'hui) | 1 |
-| Critères (contrat) et leur éditeur | `CriteriaEditor` | ❌ | 1 |
-| Sous-agents | `SubAgentContainer` | ❌ | 1 |
-| Contexte : remplissage, compactage | `ContextPopover`, `DynamicContextPreviewModal` | 🟡 anneau de remplissage ; compactage à ajouter | 1 |
+| Agent (builder, planner, agents perso) | `AgentSelector` | ✅ puce du haut et onglet Plan (lot 1) | — |
+| Niveau de danger / permissions | `DangerLevelSelector` | ✅ onglet Plan, « Confirmations » (lot 1) | — |
+| Effort de réflexion | `EffortChangeGate` | ✅ onglet Plan (lot 1) | — |
+| Blocs de réflexion | `ThinkingBlock`, `ThinkingSummary` | ✅ dans le fil, en direct (lot 1) | — |
+| Liste de tâches de l'agent | `TodoListDisplay` | ✅ onglet Plan (lot 1) | — |
+| Critères (contrat) et leur éditeur | `CriteriaEditor` | ✅ onglet Plan, modifiables (lot 1) | — |
+| Sous-agents | `SubAgentContainer` | ✅ dans le fil (lot 1) | — |
+| Contexte : remplissage, compactage | `ContextPopover`, `DynamicContextPreviewModal` | ✅ anneau, onglet Plan, « Compacter » (lot 1) ; aperçu du contexte dynamique : lot 2 | — |
 | Statistiques du tour et de la session | `StatsModal`, `TurnStatsModal`, `Sparkline` | 🟡 usage et coût ; stats par tour à ajouter | 2 |
 | Recherche dans les messages | `MessageSearchModal` | 🟡 recherche dans les fils | 2 |
 | Historique des invites | `PromptHistory` | ❌ | 2 |
 | Mention de fichiers avec `@` | `AtMentionAutocomplete` | ❌ | 2 |
 | Pièces jointes, images, vision | `VisionFallbackItem` | ✅ pièces jointes ; repli vision géré par OpenFox | — |
-| Reprendre après une erreur du modèle | `chat.retry`, `chat.llm_retry_now` | 🟡 Réessayer (nouveau fil) ; la reprise d'OpenFox à brancher | 1 |
+| Reprendre après une erreur du modèle | `chat.retry`, `chat.llm_retry_now` | ✅ bandeau dans le fil, « Réessayer » suivi (lot 1) | — |
 | Session en lecture seule | `ReadonlySessionView` | ✅ pass « supervision » | — |
 
 ## Le travail autour du fil
@@ -89,7 +89,7 @@ Légende : ✅ déjà dans Inari · 🟡 en partie · ❌ à ajouter
   - Le protocole d'OpenFox décrit par des types Rust.
   - Les réglages du cœur depuis l'interface : adresse, connexion, mode, durée, fournisseur et modèle actifs.
   - Sans ce lot, rien d'autre ne peut passer.
-- **Lot 1 : ce qu'on voit pendant un tour local.**
+- **Lot 1 : ce qu'on voit pendant un tour local.** Fait (28-29/10/2026).
   - Liste de tâches, critères, réflexion, sous-agents, agent et effort, questions à choix, compactage du contexte,
     reprise après erreur du modèle.
 - **Lot 2 : le confort du fil.**

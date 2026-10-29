@@ -281,6 +281,10 @@ Ouvrir la webapp, puis :
     OpenFox demande son mot de passe, le taper et « Se connecter ». La liste « Modèle par défaut d'OpenFox » montre
     les modèles d'OpenFox lui-même. Un fil OpenFox répond au fil de l'eau ; un message envoyé pendant qu'il
     travaille est pris par OpenFox à sa prochaine étape, sans rien annuler.
+11. Dans un fil OpenFox : pendant qu'il travaille, sa réflexion apparaît dans le fil (« Réflexion », à déplier) ; s'il
+    pose une question à choix, une carte « OpenFox demande » s'affiche avec ses réponses. L'onglet « Plan » de
+    l'établi montre l'agent, l'effort, les confirmations, le contexte, les tâches et les critères ; « Modifier les
+    critères » puis « Enregistrer » les change chez OpenFox.
 
 ## Étape 11 — Le compte rendu à envoyer à Ben
 

@@ -31,6 +31,8 @@ struct Fox {
     ws: Option<mpsc::UnboundedSender<Value>>,
     confirmed: Option<bool>,
     answered: Option<String>,
+    /// The session's criteria as OpenFox keeps them (PUT /criteria).
+    criteria: Vec<Value>,
     stops: usize,
     log: Vec<String>,
     /// What the REST calls and WebSocket messages carried, for the tests to read.
@@ -372,6 +374,17 @@ async fn serve(fox: Shared, mut s: TcpStream) {
     } else if path == "/api/sessions/s1/answer" {
         fox.lock().unwrap().answered = body["answer"].as_str().map(String::from);
         (200, json!({}))
+    } else if path == "/api/sessions/s1/criteria" {
+        let kept: Vec<Value> = body["criteria"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .enumerate()
+            .map(|(i, c)| json!({"id": c["id"].as_str().map(String::from).unwrap_or(format!("n{i}")), "description": c["description"], "status": "pending"}))
+            .collect();
+        fox.lock().unwrap().criteria = kept;
+        (200, json!({}))
     } else if [
         "/api/sessions/s1/criteria",
         "/api/sessions/s1/danger-level",
@@ -395,7 +408,8 @@ async fn serve(fox: Shared, mut s: TcpStream) {
         let (pid, pm) = f.provider.clone().unzip();
         (
             200,
-            json!({"session": {"id": "s1", "mode": f.mode, "isRunning": f.running, "providerId": pid, "providerModel": pm},
+            json!({"session": {"id": "s1", "mode": f.mode, "isRunning": f.running, "providerId": pid, "providerModel": pm,
+                               "metadataEntries": {"criteria": f.criteria}},
                      "messages": f.messages}),
         )
     } else if path.starts_with("/api/sessions/") && !path.starts_with("/api/sessions/s1/") {
@@ -781,6 +795,14 @@ async fn the_panels_actions_reach_openfox() {
     )
     .await
     .unwrap();
+    // outside a turn, the panel shows the criteria as OpenFox now keeps them (read back)
+    let texts: Vec<Value> = last_panel(&l)["criteria"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["text"].clone())
+        .collect();
+    assert_eq!(texts, [json!("fast"), json!("safe")]);
     act("danger", json!({"level": "dangerous"})).await.unwrap();
     act("effort", json!({"effort": "high"})).await.unwrap();
     act("compact", json!({})).await.unwrap();
@@ -815,4 +837,22 @@ async fn the_panels_actions_reach_openfox() {
         "high"
     );
     assert!(seen.iter().any(|(k, _)| k == "WS context.compact"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_agent_openfox_switched_to_is_kept_on_the_next_turn() {
+    let l = lab(true).await;
+    l.runner.run(&l.agent, "hello", vec![]).await;
+    assert_eq!(
+        l.fox.lock().unwrap().mode,
+        "builder",
+        "a new session starts with the settings' agent"
+    );
+    l.fox.lock().unwrap().mode = "reviewer".into(); // OpenFox (or the person, in OpenFox) switched
+    l.runner.run(&l.agent, "hello again", vec![]).await;
+    assert_eq!(
+        l.fox.lock().unwrap().mode,
+        "reviewer",
+        "not put back to the starting agent"
+    );
 }
