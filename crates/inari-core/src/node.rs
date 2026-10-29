@@ -757,7 +757,13 @@ impl Node {
                     if let Some(t) = p.get("temperature") {
                         next.temperature = t.as_f64();
                     }
+                    if let Some(k) = p.get("keep_folder").and_then(Value::as_bool) {
+                        next.keep_folder = k;
+                    }
                     e.set_settings(next)
+                }
+                "forge_add" | "forge_remove" | "forge_test" => {
+                    e.forge_action(action, p).await.map(|d| detail = d)
                 }
                 "provider_add" => {
                     let id = s(p, "id");
@@ -1526,7 +1532,15 @@ impl Node {
                 },
             );
         }
-        for action in ["set", "provider_add", "provider_remove", "provider_test"] {
+        for action in [
+            "set",
+            "provider_add",
+            "provider_remove",
+            "provider_test",
+            "forge_add",
+            "forge_remove",
+            "forge_test",
+        ] {
             self.on(
                 &format!("node.{me}.engine.{action}"),
                 move |n, m| async move {

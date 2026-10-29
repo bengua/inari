@@ -7,6 +7,7 @@
 //! never shown.
 
 pub mod defs;
+pub mod forge;
 mod library;
 pub mod llm;
 mod mcp;
@@ -65,6 +66,13 @@ pub struct Settings {
     /// The skills the agents are not offered.
     #[serde(default)]
     pub disabled_skills: Vec<String>,
+    /// A thread's folder stays on disk between its turns (its dev server and processes go on).
+    #[serde(default = "yes")]
+    pub keep_folder: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 fn builder() -> String {
@@ -151,6 +159,8 @@ pub struct LocalEngine {
     compact_next: Mutex<HashSet<String>>,
     /// The MCP servers' links and tools.
     mcp: mcp::Hub,
+    /// The processes the threads' projects run on this core.
+    works: project::Works,
 }
 
 impl LocalEngine {
@@ -173,6 +183,7 @@ impl LocalEngine {
             active: Mutex::default(),
             compact_next: Mutex::default(),
             mcp: mcp::Hub::default(),
+            works: project::Works::default(),
         }
     }
 
@@ -271,7 +282,8 @@ impl LocalEngine {
         }
         json!({"providers": providers, "model": s.model, "mode": s.mode, "context_window": s.context_window,
                "max_steps": s.max_steps, "turn_timeout": s.turn_timeout, "temperature": s.temperature,
-               "instructions": s.instructions, "modes": self.modes(None)})
+               "instructions": s.instructions, "modes": self.modes(None), "keep_folder": s.keep_folder,
+               "forges": self.forges_view()})
     }
 
     pub async fn probe(&self) -> Probe {

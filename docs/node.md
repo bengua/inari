@@ -154,6 +154,9 @@ are all configuration, and every default is empty.
 | `agent.<id>.fork` `{new_thread, upto}` | fork on the holder |
 | `agent.merge` `{target, source}` | union two journals on the same holder |
 | `agent.history.request` `{agent}` | the holder replies `agent.<id>.history` |
+| `agent.<id>.openfox` `{action, …}` | something done on the thread's Plan tab (OpenFox or the local engine): criteria, an answer, a task, the dev server, a branch, `git_clone` `{forge, repo, branch}`, `git_publish` `{forge, repo, base, title, body}` |
+| `node.<id>.engine.<action>` `{harness, …}` | a local engine's settings: `set`, `provider_add`, `provider_remove`, `provider_test`, `forge_add` `{id, name, kind, url, user, token, ssh, api}`, `forge_remove` `{id}`, `forge_test`; the result goes on `node.<id>.harness.result` |
+| `node.<id>.openfox.library` `{harness, kind, id, reply}` | part of the library of OpenFox or of a local engine (agents, skills, commands, workflows, mcp, tools) |
 
 Long work runs off the bus: a handler that blocks stalls the link reader, and an agent
 waiting for an approval would be waiting for the very frame it blocks (found by a test).

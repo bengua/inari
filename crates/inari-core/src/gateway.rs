@@ -261,7 +261,7 @@ fn s(p: &Value, k: &str) -> String {
 
 /// OpenFox panel actions a pass may not do: they run commands, or OpenFox sessions outside the
 /// thread (a task), that the pass's supervision does not see.
-const OWNER_ONLY: [&str; 7] = [
+const OWNER_ONLY: [&str; 9] = [
     "task_add",
     "task_move",
     "task_remove",
@@ -269,6 +269,9 @@ const OWNER_ONLY: [&str; 7] = [
     "dev_start",
     "dev_restart",
     "instructions",
+    // with the owner's forge token
+    "git_clone",
+    "git_publish",
 ];
 
 fn percent_decode(text: &str) -> String {
@@ -1804,7 +1807,9 @@ impl Gateway {
             }
             "/api/openfox/thread" => {
                 // something done on a thread's OpenFox panel; the thread's node does it
-                const ACTIONS: [&str; 25] = [
+                const ACTIONS: [&str; 27] = [
+                    "git_clone",
+                    "git_publish",
                     "agent",
                     "effort",
                     "danger",
@@ -1843,8 +1848,16 @@ impl Gateway {
                 let action = s(d, "action");
                 let node = s(d, "node");
                 if !need(&["node", "harness", "action"])
-                    || !["set", "provider_add", "provider_remove", "provider_test"]
-                        .contains(&action.as_str())
+                    || ![
+                        "set",
+                        "provider_add",
+                        "provider_remove",
+                        "provider_test",
+                        "forge_add",
+                        "forge_remove",
+                        "forge_test",
+                    ]
+                    .contains(&action.as_str())
                     || !node
                         .chars()
                         .all(|c| c.is_ascii_alphanumeric() || "-_".contains(c))

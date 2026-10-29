@@ -9,6 +9,26 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Added
 
+- **The local engine does what OpenFox does, inside the core.** A thread on the local engine has
+  OpenFox's Plan tab (criteria, todos, review findings, thinking, questions, the queue of messages,
+  its context), sub-agents with a context of their own, skills and slash commands, workflows walked
+  as OpenFox's executor walks them (agent, sub-agent, shell, person and parallel steps), and the
+  tools of MCP servers (a command on the core, or a plain-http address), their secrets kept on the
+  core. Its library (agents, skills, commands, workflows, MCP servers) is set from its sheet.
+- **A thread's project on the local engine.** Its folder stays on disk between turns (a setting of
+  the engine); the Plan tab has its task board, its dev server (run by the core), the processes its
+  agent started, its branches and its instructions, all kept in the folder so they travel with it.
+- **Git forges, set in the interface.** The local engine's sheet lists the forges a thread is
+  cloned from and published to, as many as wanted, each GitHub or Forgejo/Gitea: its address, the
+  account that publishes, its token (kept on the core, never shown again), Git over SSH if wanted.
+  From a thread's Plan tab: clone a repository into its folder, then push its branch and open a
+  pull request. The token serves the person's actions only, never the model's commands.
+
+### Changed
+
+- OpenFox as a separate program is now offered as a legacy harness: the local engine does the same
+  inside Inari.
+
 - **Inari's local engine.** For local models, Inari no longer needs another program: a harness of
   kind `local` is the OpenFox core inside the core. The model runs on any OpenAI-compatible
   server on the machine or the private network (vLLM, SGLang, Ollama, llama.cpp, LM Studio),

@@ -3007,6 +3007,12 @@ pub struct ProjectView {
     pub processes: Vec<proto::Process>,
     pub branches: Vec<String>,
     pub branch: String,
+    /// The folder is a Git repository (the local engine says; OpenFox gives its branches).
+    pub is_git: bool,
+    /// The Git forges this core publishes to (the local engine's): id, name, kind.
+    pub forges: Vec<Value>,
+    /// The forge and repository the folder belongs to, and its last pull request.
+    pub git: Option<Value>,
 }
 
 impl Panel {

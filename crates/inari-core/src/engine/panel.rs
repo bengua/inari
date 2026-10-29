@@ -275,7 +275,7 @@ impl LocalEngine {
             mode
         };
         self.fill_panel(agent, &mode, &state, Some(&workdir));
-        self.fill_project(agent, &workdir).await;
+        self.fill_project(agent, &workdir, &capsule).await;
         self.edit_panel(agent, |x| {
             x.error = result.as_ref().err().cloned().unwrap_or_default()
         });

@@ -1074,6 +1074,7 @@ impl Harness {
     /// processes and its task board need it; an ACP agent finds it afresh each turn).
     pub fn keeps_folder(&self) -> bool {
         self.openfox().is_some_and(|h| h.settings().keep_folder)
+            || self.local().is_some_and(|e| e.settings().keep_folder)
     }
 }
 

@@ -89,7 +89,8 @@ impl LocalEngine {
         });
         let state = ThreadState::load(&t.path());
         self.fill_panel(&t.agent, &self.mode_for(t), &state, Some(&t.workdir));
-        self.fill_project(&t.agent, &t.workdir).await;
+        self.after_turn(&t.agent, &t.workdir).await;
+        self.fill_project(&t.agent, &t.workdir, &t.path()).await;
         self.show(&t.runner, &t.agent, true);
         if !left.is_empty() {
             t.runner.run_later(&t.agent, left.join("\n\n"));

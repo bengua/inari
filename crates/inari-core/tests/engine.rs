@@ -653,3 +653,269 @@ async fn an_mcp_servers_tools_are_the_agents_and_its_secret_stays() {
     let asked = l.model.lock().unwrap().asked.clone();
     assert!(!asked[2]["tools"].to_string().contains("fake_echo"));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_threads_project_has_its_tasks_branches_and_dev_server() {
+    let l = lab(32_768).await;
+    {
+        let mut m = l.model.lock().unwrap();
+        m.script.push_back(answer(&["Ready."]));
+    }
+    l.runner.run(&l.agent, "hello", vec![]).await;
+    let workdir = l.runner.host.workdir(&l.agent);
+    assert!(workdir.is_dir(), "the folder is kept on disk");
+    let h = engine_of(&l);
+    let engine = h.local().unwrap();
+    engine
+        .thread_action(
+            &l.runner,
+            &l.agent,
+            "task_add",
+            &json!({"prompt": "write the README"}),
+        )
+        .await
+        .unwrap();
+    let tasks: Value =
+        serde_json::from_slice(&std::fs::read(workdir.join(".openfox/tasks.json")).unwrap())
+            .unwrap();
+    assert_eq!(tasks[0]["prompt"], "write the README");
+    assert_eq!(tasks[0]["status"], "todo");
+
+    // a Git folder: a new branch from the panel
+    let git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .args(args)
+            .current_dir(&workdir)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@t")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@t")
+            .output()
+            .unwrap()
+    };
+    git(&["init", "-q", "-b", "main"]);
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "first"]);
+    engine
+        .thread_action(
+            &l.runner,
+            &l.agent,
+            "branch_new",
+            &json!({"name": "feat/readme"}),
+        )
+        .await
+        .unwrap();
+    let head = String::from_utf8(git(&["rev-parse", "--abbrev-ref", "HEAD"]).stdout).unwrap();
+    assert_eq!(head.trim(), "feat/readme");
+    assert!(engine
+        .thread_action(
+            &l.runner,
+            &l.agent,
+            "checkout",
+            &json!({"branch": "--force"})
+        )
+        .await
+        .is_err());
+
+    // the dev server, set from the panel, started by the agent's tool
+    engine
+        .thread_action(
+            &l.runner,
+            &l.agent,
+            "dev_config",
+            &json!({"command": "echo up on $PORT; sleep 30", "url": "http://localhost:5999"}),
+        )
+        .await
+        .unwrap();
+    {
+        let mut m = l.model.lock().unwrap();
+        m.script
+            .push_back(call("d1", "dev_server", json!({"action": "start"})));
+        m.script
+            .push_back(call("d2", "dev_server", json!({"action": "logs"})));
+        m.script.push_back(answer(&["It runs."]));
+    }
+    l.runner.run(&l.agent, "start the dev server", vec![]).await;
+    let asked = l.model.lock().unwrap().asked.clone();
+    let started = asked.last().unwrap()["messages"].as_array().unwrap();
+    let status = started.iter().find(|m| m["tool_call_id"] == "d1").unwrap()["content"]
+        .as_str()
+        .unwrap();
+    assert!(status.contains("\"state\": \"running\""), "{status}");
+    let logs = started.last().unwrap()["content"].as_str().unwrap();
+    assert!(logs.contains("up on 5999"), "{logs}");
+    engine
+        .thread_action(&l.runner, &l.agent, "dev_stop", &json!({}))
+        .await
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_forge_is_set_from_the_interface_and_its_token_stays() {
+    let l = lab(32_768).await;
+    let seen: Arc<Mutex<Vec<String>>> = Arc::default();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let s2 = Arc::clone(&seen);
+    tokio::spawn(async move {
+        while let Ok((mut s, _)) = listener.accept().await {
+            let mut buf = vec![0u8; 8192];
+            let n = s.read(&mut buf).await.unwrap_or(0);
+            let head = String::from_utf8_lossy(&buf[..n]).to_string();
+            s2.lock().unwrap().push(head.clone());
+            let b = if head.starts_with("GET /api/v1/user ") {
+                json!({"login": "fh-publisher"}).to_string()
+            } else {
+                json!({"message": "not found"}).to_string()
+            };
+            let code = if head.starts_with("GET /api/v1/user ") {
+                "200 OK"
+            } else {
+                "404 Not Found"
+            };
+            let _ = s
+                .write_all(format!("HTTP/1.1 {code}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{b}", b.len()).as_bytes())
+                .await;
+        }
+    });
+    let h = engine_of(&l);
+    let engine = h.local().unwrap();
+    let form = json!({"id": "atelier", "name": "Forgejo atelier", "kind": "forgejo", "url": format!("http://127.0.0.1:{port}"), "user": "fh-publisher", "token": "t0ken"});
+    engine.forge_action("forge_add", &form).await.unwrap();
+    let said = engine
+        .forge_action("forge_test", &json!({"id": "atelier", "name": "Forgejo atelier", "kind": "forgejo", "url": format!("http://127.0.0.1:{port}")}))
+        .await
+        .unwrap();
+    assert_eq!(said, "Signed in as fh-publisher", "the token kept is used");
+    assert!(seen.lock().unwrap()[0].contains("Authorization: token t0ken"));
+    let view = json!(engine.forges_view());
+    assert_eq!(view[0]["token"], true);
+    assert!(!view.to_string().contains("t0ken"));
+    assert!(engine
+        .forge_action(
+            "forge_add",
+            &json!({"id": "x", "kind": "svn", "url": "http://a"})
+        )
+        .await
+        .is_err());
+    // publishing needs a Git folder and a branch of its own
+    assert!(engine
+        .publish(
+            &l.runner.host.workdir(&l.agent),
+            "atelier",
+            "ben/site",
+            "main",
+            "t",
+            ""
+        )
+        .await
+        .is_err());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_repository_is_cloned_from_a_forge_into_the_threads_folder() {
+    let l = lab(32_768).await;
+    {
+        let mut m = l.model.lock().unwrap();
+        m.script.push_back(answer(&["Ready."]));
+    }
+    l.runner.run(&l.agent, "hello", vec![]).await;
+    // a repository the forge serves (git's plain HTTP: files as they are)
+    let root = tempfile::tempdir().unwrap();
+    let src = root.path().join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    let run = |dir: &std::path::Path, args: &[&str]| {
+        let o = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@t")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@t")
+            .output()
+            .unwrap();
+        assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    };
+    std::fs::write(src.join("README.md"), "# site\n").unwrap();
+    run(&src, &["init", "-q", "-b", "main"]);
+    run(&src, &["add", "-A"]);
+    run(&src, &["commit", "-qm", "first"]);
+    let served = root.path().join("ben");
+    std::fs::create_dir_all(&served).unwrap();
+    run(
+        root.path(),
+        &["clone", "-q", "--bare", "src", "ben/site.git"],
+    );
+    run(&served.join("site.git"), &["update-server-info"]);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let base = root.path().to_path_buf();
+    tokio::spawn(async move {
+        while let Ok((mut s, _)) = listener.accept().await {
+            let base = base.clone();
+            tokio::spawn(async move {
+                let mut buf = vec![0u8; 8192];
+                let n = s.read(&mut buf).await.unwrap_or(0);
+                let head = String::from_utf8_lossy(&buf[..n]).to_string();
+                let path = head
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap_or("/")
+                    .split('?')
+                    .next()
+                    .unwrap_or("/")
+                    .to_string();
+                let file = base.join(path.trim_start_matches('/'));
+                let reply = match std::fs::read(&file) {
+                    Ok(b) if !path.contains("..") => {
+                        let mut r = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            b.len()
+                        )
+                        .into_bytes();
+                        r.extend(b);
+                        r
+                    }
+                    _ => {
+                        b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                            .to_vec()
+                    }
+                };
+                let _ = s.write_all(&reply).await;
+            });
+        }
+    });
+    let h = engine_of(&l);
+    let engine = h.local().unwrap();
+    engine
+        .forge_action("forge_add", &json!({"id": "home", "name": "Home", "kind": "forgejo", "url": format!("http://127.0.0.1:{port}")}))
+        .await
+        .unwrap();
+    engine
+        .thread_action(
+            &l.runner,
+            &l.agent,
+            "git_clone",
+            &json!({"forge": "home", "repo": "ben/site"}),
+        )
+        .await
+        .unwrap();
+    let workdir = l.runner.host.workdir(&l.agent);
+    assert_eq!(
+        std::fs::read_to_string(workdir.join("README.md")).unwrap(),
+        "# site\n"
+    );
+    assert!(workdir.join(".git").is_dir());
+    let state = state_of(&l);
+    assert_eq!(state.git.unwrap().repo, "ben/site");
+    // a second clone is refused: the folder is a repository now
+    assert!(engine
+        .thread_action(
+            &l.runner,
+            &l.agent,
+            "git_clone",
+            &json!({"forge": "home", "repo": "ben/site"})
+        )
+        .await
+        .is_err());
+}

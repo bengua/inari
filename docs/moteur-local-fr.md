@@ -45,19 +45,42 @@ Dans l'interface, sans fichier à modifier :
 
 ## Les phases
 
-Chaque phase est testée contre de vrais modèles servis en local (pas d'imitation), poussée sur la branche, et
-livrée en binaire tout fait (Linux x86_64, statique). Rien ne casse en route : le moteur local arrive comme un
-harnais de plus, « Local (Inari) », choisi dans l'interface ; OpenFox reste utilisable jusqu'à la fin de la phase 3.
+Chaque phase est poussée sur la branche et livrée en binaire tout fait (Linux x86_64, statique). Les tests
+tournent contre un faux serveur de modèle qui parle comme vLLM (flux SSE, appels d'outils découpés) ; l'essai
+contre un vrai modèle servi en local reste à faire sur les postes (le réseau de l'atelier de développement ne
+laisse pas télécharger de modèle).
 
-1. **L'onglet des abonnements et de leurs harnais.** Les harnais deviennent modifiables à chaud (aujourd'hui
-   ils sont lus une fois, au démarrage, dans la configuration).
-2. **Le cœur de l'agent.** Client LLM local, boucle de l'agent, outils de base, agents planner et builder,
-   fournisseurs, compactage du contexte. À la fin, un fil local travaille sans OpenFox.
-3. **Workflows, sous-agents, skills, commandes, MCP.**
-4. **Tableau des tâches, serveur de dev, processus, Git, diagnostics.** Puis le client OpenFox actuel
-   (`src/openfox.rs`) et le pont `openfox-acp` sont retirés.
+1. **L'onglet des abonnements et de leurs harnais.** Fait : les harnais sont modifiables à chaud.
+2. **Le cœur de l'agent.** Fait : client LLM local, boucle de l'agent, outils, agents, fournisseurs, compactage.
+3. **Workflows, sous-agents, skills, commandes, MCP.** Fait :
+   - l'onglet Plan d'un fil du moteur local est celui d'OpenFox (critères, tâches, constats, réflexion,
+     questions, file des messages, contexte, compactage) ;
+   - les sous-agents (explorer, verifier, code reviewer) travaillent dans un contexte à eux et rendent leur
+     valeur ; les skills et les commandes `/…` sont lus au format d'OpenFox ;
+   - les workflows suivent l'exécuteur d'OpenFox : étapes agent, sous-agent, shell, pour la personne,
+     parallèles (l'une après l'autre), transitions, variables `{{…}}`, sous-groupes ;
+   - les serveurs MCP (une commande sur le cœur, ou une adresse http du réseau privé) donnent leurs outils aux
+     agents ; leurs secrets restent sur le cœur ;
+   - la bibliothèque du moteur (agents, skills, commandes, workflows, serveurs MCP, outils) se règle depuis sa
+     fiche, avec les mêmes fenêtres que celle d'OpenFox.
+4. **Tableau des tâches, serveur de dev, processus, Git.** Fait :
+   - le dossier d'un fil reste sur le disque entre deux tours (réglage du moteur) ;
+   - tableau des tâches (`.openfox/tasks.json` dans le dossier : il voyage avec le fil), serveur de dev
+     (`.openfox/dev.json`, lancé par le cœur, `$PORT` tiré de son adresse), processus en arrière-plan de
+     l'agent, branches, instructions du projet ;
+   - **forges Git, réglées dans l'interface, rien dans le code** : autant qu'on veut, chacune GitHub ou
+     Forgejo/Gitea, son adresse web, le compte qui publie, son jeton (gardé sur le cœur, jamais réaffiché),
+     Git par SSH en option (`ssh://git@atelier:2222`, avec les clés du cœur), son API si elle n'est pas
+     l'habituelle. Depuis l'onglet Plan d'un fil : cloner un dépôt de la forge dans le dossier, puis pousser
+     la branche et ouvrir une pull request. C'est la doctrine de FH Coder : l'agent produit, la personne
+     publie ; le jeton ne passe jamais par les commandes du modèle ;
+   - OpenFox, le programme à part, reste utilisable comme harnais « héritage » pour qui le fait déjà tourner.
+     Le client (`src/openfox.rs`) n'est pas retiré : des postes s'en servent encore.
 
-## En attendant
+## Pour la forge de l'atelier
 
-Les postes tournent sur ce qui marche : le binaire du 28/10 à 18 h 47 (`2867d7d`) avec la configuration
-`openfox-acp` d'origine.
+Dans Réglages → Agents et abonnements → le moteur local → Forges Git : nom « Forgejo atelier », type
+« Forgejo ou Gitea », adresse web celle de la VM atelier (par exemple `http://atelier:3000`), le compte de
+publication et son jeton, et « Git par SSH » si les clones passent par le port SSH de la forge. « Tester »
+dit si le jeton est reconnu (« Connecté en tant que … »). GitHub s'ajoute de la même façon (adresse
+`https://github.com`).

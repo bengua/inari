@@ -69,6 +69,18 @@ pub struct ThreadState {
     pub compactions: u64,
     #[serde(default)]
     pub flow: Option<Flow>,
+    /// The forge and repository the thread's folder comes from or goes to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git: Option<GitLink>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct GitLink {
+    pub forge: String,
+    pub repo: String,
+    /// The last pull request opened from it.
+    #[serde(default)]
+    pub pull_request: Option<String>,
 }
 
 /// The statuses each known key takes.
