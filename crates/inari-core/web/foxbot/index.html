@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>fox</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    --bg: transparent;
+    --ink: #F3EFE9;
+    --muted: #9E9AA8;
+    --accent: #E48A46;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: transparent;
+    color: var(--ink);
+    overflow: hidden;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #stage {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  canvas {
+    display: block;
+    touch-action: none;
+    width: min(100vw, 100vh);
+    height: min(100vw, 100vh);
+  }
+  .quip {
+    position: fixed;
+    left: 50%;
+    top: max(12px, env(safe-area-inset-top));
+    transform: translateX(-50%);
+    z-index: 2;
+    max-width: min(86vw, 36ch);
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 7px 12px;
+    border-radius: 12px;
+    background: rgba(33, 31, 36, 0.92);
+    border: 1px solid #3A3640;
+    font: 12px/1.35 ui-monospace, "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    pointer-events: none;
+  }
+  .quip .dot {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+</style>
+<script>
+window.fox = { q: [] };
+for (const k of ["setHealth", "setLoad", "setReasons", "setMood", "setStale", "setOffline",
+                 "setReducedMotion", "setPet", "setActivity", "setHarness", "setEvent", "say", "pause", "resume"])
+  window.fox[k] = (...a) => window.fox.q.push([k, a]);
+window.fox.onTap = cb => { window.fox.q.push(["onTap", [cb]]); return () => {}; };
+</script>
+<script type="module" src="./js/sprite.js"></script>
+</head>
+<body>
+<div id="stage">
+  <canvas id="fox" width="512" height="512"></canvas>
+</div>
+<div id="quip" class="quip" hidden><span class="dot"></span><span id="quip-text"></span></div>
+<script src="sprite.js"></script>
+</body>
+</html>
