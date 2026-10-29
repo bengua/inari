@@ -393,3 +393,72 @@ async fn the_memory_lists_the_newest_first_reads_a_note_aloud_and_forgets_a_dele
     assert_eq!(left.len(), 1, "{left:?}");
     assert_eq!(left[0]["id"], voice);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_reminder_is_a_note_plus_a_rule_the_page_can_read_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = node(dir.path()).await;
+    let port = home.gateway_port;
+    let owner = "token=owner";
+
+    let (_, kept) = call(
+        port,
+        owner,
+        "POST",
+        "/api/kitsune",
+        Some(
+            json!({"action": "capture_text", "text": "Sortir les poubelles", "tags": ["reminder"]}),
+        ),
+    )
+    .await;
+    let note = kept["id"].as_i64().unwrap();
+    let at = 1_800_000_000.0;
+    let (_, made) = call(port, owner, "POST", "/api/kitsune",
+        Some(json!({"action": "create_trigger", "kind": "time", "spec": {"at": at, "every": 604800.0}, "next_at": at, "note_id": note}))).await;
+    let tid = made["id"].as_i64().unwrap();
+
+    let (_, list) = call(
+        port,
+        owner,
+        "POST",
+        "/api/kitsune",
+        Some(json!({"action": "list_triggers"})),
+    )
+    .await;
+    let t = list["triggers"][0].clone();
+    assert_eq!(t["id"], tid);
+    assert_eq!(t["note_id"], note);
+    assert_eq!(t["kind"], "time");
+    assert_eq!(t["spec"]["every"], 604800.0);
+    assert_eq!(t["next_at"], at);
+    assert_eq!(t["active"], true);
+    let (_, seen) = call(
+        port,
+        owner,
+        "POST",
+        "/api/kitsune",
+        Some(json!({"action": "get_note", "id": note})),
+    )
+    .await;
+    assert_eq!(seen["note"]["text"], "Sortir les poubelles");
+    assert_eq!(seen["note"]["tags"][0], "reminder");
+
+    let (_, gone) = call(
+        port,
+        owner,
+        "POST",
+        "/api/kitsune",
+        Some(json!({"action": "delete_trigger", "id": tid})),
+    )
+    .await;
+    assert_eq!(gone["removed"], true);
+    let (_, empty) = call(
+        port,
+        owner,
+        "POST",
+        "/api/kitsune",
+        Some(json!({"action": "list_triggers"})),
+    )
+    .await;
+    assert_eq!(empty["triggers"].as_array().unwrap().len(), 0);
+}

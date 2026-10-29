@@ -70,7 +70,6 @@
       <section class="glass kcard">
         <h2>Coming next</h2>
         <ul class="klist">
-          <li>Set reminders by time or by place.</li>
           <li>Point the core at your own speech and embedding servers.</li>
         </ul>
       </section>
@@ -85,6 +84,21 @@
       <p class="kmeta" id="kMemState" aria-live="polite"></p>
       <ul class="plist" id="kNotesList"></ul>
       <audio id="kPlayer" hidden></audio>
+    </section>
+    <section class="glass kcard" id="krem" aria-label="Reminders">
+      <h2>Reminders</h2>
+      <form class="kfind" id="kRemForm">
+        <input class="kfield" id="kRemWhat" type="text" placeholder="What should come back?" autocomplete="off" aria-label="What to be reminded of">
+        <input class="kfield kwhen" id="kRemWhen" type="datetime-local" aria-label="When">
+        <select class="kfield krep" id="kRemEvery" aria-label="How often">
+          <option value="0">once</option>
+          <option value="86400">every day</option>
+          <option value="604800">every week</option>
+        </select>
+        <button class="btn small go" id="kRemGo" type="submit">Keep it</button>
+      </form>
+      <p class="kmeta" id="kRemState" aria-live="polite"></p>
+      <ul class="plist" id="kTrigList"></ul>
     </section>
   </main>
 </div>
