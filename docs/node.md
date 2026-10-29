@@ -65,6 +65,18 @@ are all configuration, and every default is empty.
   `$OPENFOX_ACP_DIR`). OpenFox must be served over `http://` on the core's own machine: it works
   on the thread's files, which the core lays out locally. `prepare` and `update` work as for
   any harness. Providers are read without their API keys.
+  A thread's folder (`<data_dir>/work/<thread>`) stays on disk between turns unless the setting
+  `keep_folder` is off: OpenFox's dev server, its processes, its task board and a branch changed
+  between turns need it. It is put away into the thread at the end of each turn, after a branch
+  switch and before the thread leaves (`freeze`); the tree it was last in step with is kept beside
+  it (`work/<thread>.tree.json`), so the next turn only writes what changed in the thread since.
+  It is dropped when the thread goes (tombstoned, discarded) or arrives from another core.
+  OpenFox's library is read with `GET /api/openfox/library?node=&harness=&kind=&id=` (the owner's;
+  `kind` is `agents`, `skills`, `commands`, `workflows`, `mcp`, `tools` or `settings`) and changed
+  with the node's OpenFox actions (`item_save`, `item_duplicate`, `item_remove`, `skill_toggle`,
+  `mcp_add`, `mcp_test`, `mcp_toggle`, `mcp_tool`, `mcp_remove`, `setting`;
+  `src/openfox_library.rs`). An MCP server's environment and headers go to OpenFox and are never
+  read back, only their names.
 - **Getting a model ready.** A harness may name a command run before each turn of a thread
   whose model was chosen, with `{model}` replaced by the model id:
   `"prepare": ["load-model", "{model}"], "prepare_timeout": 600`. It is how a local model is

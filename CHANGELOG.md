@@ -9,6 +9,28 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Added
 
+- **OpenFox's work around the thread, in Inari.** An OpenFox thread's folder now stays on disk
+  between turns (Settings → OpenFox, on by default): it is still put away into the thread at the
+  end of every turn and before the thread leaves for another core, and at the next turn only what
+  changed in the thread since (an attachment, a return from another core) is brought in, so what
+  changed on disk meanwhile stays. On top of it:
+  - **Workflows.** The Plan tab launches one of OpenFox's workflows with the composer's message
+    and its parameters; a step that waits for the person shows as a card in the thread with its
+    branches; a workflow a stop broke off is carried on by the next message; it can be left.
+  - **The project's task board, dev server, processes and branch.** In the Plan tab: add a task,
+    start it (OpenFox works on it in a session of its own, in this thread's folder), mark it done,
+    remove it; set up the dev server, start, stop, restart it, read its log; stop a process OpenFox
+    started; switch to a branch or make one (the thread's files follow at once); the project's
+    instructions.
+  - **OpenFox's library**, in its sheet: agents, skills, commands and workflows (open, change,
+    duplicate OpenFox's own to change them, remove yours, turn a skill on or off); MCP servers
+    (add one, test it, turn it or one of its tools on or off, remove it; its environment and headers
+    go to OpenFox and only their names come back); the tools; the instructions for every project,
+    the language, the retry patterns and four switches.
+  A pass never launches a workflow, nor touches the task board, the dev server, the project's
+  instructions or the library: they run what its supervision does not see. A sheet taller than
+  the screen now scrolls.
+
 - **Choose your avatar.** Two discreet arrows beside the mascot go through the personas FoxBot
   publishes (the ones `<mascot_dir>/personas.json` names; the folders of `sprites_persona/` still
   in progress are never offered, and a choice of a persona taken down falls back to FoxBot); the

@@ -53,27 +53,27 @@ Légende : ✅ déjà dans Inari · 🟡 en partie · ❌ à ajouter
 | Fichiers du projet, visionneuse | `DirectoryBrowser` | ✅ onglets Artefacts / Visionneuse | — |
 | Différences (diff) | `DiffView`, `DiffViewer` | ✅ diff des éditions dans le résultat de l'outil (lot 2) | — |
 | Terminal | `TerminalDrawer`, `TerminalPane` | ✅ onglet Terminal | — |
-| Branche Git, état, espace de travail | `WorkspaceBranchSection`, `BranchModal`, `WorkspaceModal` | 🟡 branche et fichiers modifiés dans l'onglet Plan (lot 2). Changer de branche : non, voir plus bas | — |
-| Serveur de dev, journaux | `DevServerFooter`, `DevServerConfigModal`, `LogViewer` | ❌ | 3 |
-| Processus d'arrière-plan | `BackgroundProcesses` | ❌ | 3 |
-| Workflows (barre, lancement, paramètres) | `WorkflowBar`, `WorkflowParamModal`, `WorkflowStartedCard` | ❌ | 3 |
-| Tableau des tâches du projet | `TasksModal`, `TaskColumn`, `TaskCard`, `GatesEditor` | ❌ | 3 |
+| Branche Git, état, espace de travail | `WorkspaceBranchSection`, `BranchModal`, `WorkspaceModal` | ✅ branche et fichiers modifiés (lot 2), changer ou créer une branche (lot 3) dans l'onglet Plan ; espaces de travail séparés : non, voir plus bas | — |
+| Serveur de dev, journaux | `DevServerFooter`, `DevServerConfigModal`, `LogViewer` | ✅ onglet Plan : régler, démarrer, arrêter, redémarrer, son journal (lot 3) | — |
+| Processus d'arrière-plan | `BackgroundProcesses` | ✅ onglet Plan : la liste, « Arrêter » (lot 3) | — |
+| Workflows (barre, lancement, paramètres) | `WorkflowBar`, `WorkflowParamModal`, `WorkflowStartedCard` | ✅ onglet Plan : lancer avec le message et ses paramètres ; étape qui attend en carte dans le fil ; quitter (lot 3) | — |
+| Tableau des tâches du projet | `TasksModal`, `TaskColumn`, `TaskCard`, `GatesEditor` | ✅ onglet Plan : à faire, en cours, fait ; ajouter, démarrer, retirer (lot 3). Portes et tâches planifiées : non | — |
 | Vue partagée (plusieurs sessions) | `SplitView`, `SessionPane` | 🟡 un fil + l'établi | 4 |
-| Projets (créer, ouvrir, supprimer, réglages) | `CreateProjectModal`, `ProjectSettingsModal` | 🟡 un espace de travail par fil | 3 |
-| Serveurs MCP | `McpSelector`, `McpServerCard` | ❌ | 3 |
+| Projets (créer, ouvrir, supprimer, réglages) | `CreateProjectModal`, `ProjectSettingsModal` | 🟡 un projet par fil, fait par Inari ; ses instructions dans l'onglet Plan (lot 3) | — |
+| Serveurs MCP | `McpSelector`, `McpServerCard` | ✅ fiche OpenFox : ajouter, tester, activer, retirer, outil par outil ; les secrets ne vont qu'à OpenFox (lot 3). Choix par session : non | — |
 
 ## Les réglages (depuis l'interface, jamais en dur)
 
 | Élément d'OpenFox | Composant(s) OpenFox | Inari aujourd'hui | Lot |
 |---|---|---|---|
-| Adresse d'OpenFox, connexion (mot de passe) | `PasswordModal` | ❌ (fichier de `openfox-acp`) | 0 |
-| Mode de départ, durée max d'un tour | — | ❌ (en dur dans le pont) | 0 |
-| Fournisseur et modèle actifs | `ProviderSelector`, `model-list` | ❌ | 0 |
+| Adresse d'OpenFox, connexion (mot de passe) | `PasswordModal` | ✅ fiche OpenFox (lot 0) | — |
+| Mode de départ, durée max d'un tour, dossier gardé entre les tours | — | ✅ fiche OpenFox (lots 0 et 3) | — |
+| Fournisseur et modèle actifs | `ProviderSelector`, `model-list` | ✅ fiche OpenFox et puce modèle (lot 0) | — |
 | Gérer les fournisseurs (ajouter, tester) | `ManageProvidersModal` | ✅ fiche OpenFox : tester, ajouter (clé envoyée à OpenFox seulement), relire les modèles, retirer (lot 2) | — |
-| Agents, skills, commandes, instructions | `AgentsModal`, `SkillsModal`, `CommandsModal`, `InstructionsModal` | 🟡 commandes `/` listées | 3 |
-| Workflows (éditeur, diagramme) | `WorkflowsModal`, `FlowDiagram` | ❌ | 3 |
-| Outils et permissions | `ToolsTab` | ❌ | 3 |
-| Motifs de nouvelle tentative | `RetryPatternsEditor` | ❌ | 3 |
+| Agents, skills, commandes, instructions | `AgentsModal`, `SkillsModal`, `CommandsModal`, `InstructionsModal` | ✅ fiche OpenFox : ouvrir, modifier, dupliquer, retirer, activer un skill ; instructions pour tous les projets et langue (lot 3) | — |
+| Workflows (éditeur, diagramme) | `WorkflowsModal`, `FlowDiagram` | 🟡 fiche OpenFox : modifiés en JSON, dupliqués, retirés (lot 3) ; le diagramme : non | — |
+| Outils et permissions | `ToolsTab` | ✅ fiche OpenFox : la liste des outils, « Demander avant de changer de branche » (lot 3) | — |
+| Motifs de nouvelle tentative | `RetryPatternsEditor` | ✅ fiche OpenFox, « Instructions et réglages » (lot 3) | — |
 | Affichage, thème | `DisplayTab`, `ThemeEditor` | 🟡 thème clair/sombre, langue | 4 |
 | Raccourcis clavier | `KeybindingsTab` | 🟡 liste des raccourcis | 4 |
 | Notifications | `NotificationCenter`, `NotificationSettings` | 🟡 fil d'activité, notifications Android | 4 |
@@ -95,8 +95,11 @@ Légende : ✅ déjà dans Inari · 🟡 en partie · ❌ à ajouter
 - **Lot 2 : le confort du fil.** Fait (29/10/2026).
   - Diff, branche Git, statistiques par tour, historique des invites, `@` fichiers, recherche dans les messages,
     gestion des fournisseurs.
-- **Lot 3 : le travail du projet.**
-  - Workflows, tableau des tâches, serveur de dev et processus, MCP, agents, skills et instructions, outils.
+- **Lot 3 : le travail du projet.** Fait (29/10/2026).
+  - Le dossier d'un fil reste sur le disque entre deux tours (réglage, activé par défaut) : c'est ce qui permet le
+    reste. Il est toujours rangé dans le fil à la fin de chaque tour et avant un départ vers un autre cœur.
+  - Workflows, tableau des tâches, serveur de dev et processus, branches, MCP, agents, skills, commandes et
+    instructions, outils, motifs de nouvelle tentative.
 - **Lot 4 : la finition.**
   - Vue partagée, thème, raccourcis, notifications, plugins, premier lancement.
 
@@ -105,9 +108,14 @@ et poussé sur la branche avant le suivant.
 
 ## Ce qui n'est pas repris, et pourquoi
 
-- **Changer de branche Git, créer un espace de travail.** Inari ne sort le dossier d'un fil sur le disque que
-  pendant un tour, puis le range dans le fil (c'est ce qui permet de déplacer un fil d'un cœur à l'autre). Une
-  branche changée entre deux tours serait écrasée au tour suivant. L'onglet Plan montre la branche et les fichiers
-  modifiés tels qu'OpenFox les annonce ; pour changer de branche, le demander à l'agent dans le fil.
+- **Les espaces de travail séparés** (`WorkspaceModal`, un worktree Git par session) : Inari donne déjà un dossier à
+  chaque fil, et un fil se déplace d'un cœur à l'autre avec ses fichiers.
 - **Les courbes de statistiques** (`Sparkline`) : les totaux et le dernier tour suffisent ici.
-
+- **Le diagramme d'un workflow** (`FlowDiagram`) : un workflow se modifie en JSON dans la fiche d'OpenFox.
+- **Les portes et les tâches planifiées du tableau** (`GatesEditor`, planification) : une tâche s'ajoute, se démarre
+  et se retire ; ses portes et son calendrier se règlent encore dans OpenFox.
+- **Les serveurs MCP choisis par session** : les serveurs valent pour tous les fils d'un cœur.
+- **Ce que garde le dossier `.openfox/` d'un projet** (ses agents, workflows… propres) : visible dans la
+  bibliothèque, mais une modification va dans la bibliothèque de la personne.
+- **Une passe** (un invité) ne lance pas de workflow et ne touche ni au tableau des tâches, ni au serveur de dev, ni
+  aux instructions, ni à la bibliothèque : ce sont des commandes ou des sessions que sa supervision ne voit pas.

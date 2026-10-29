@@ -288,6 +288,14 @@ Ouvrir la webapp, puis :
 12. Dans la zone de saisie : ↑ reprend ton message précédent ; « @ » propose les fichiers du fil. Après une édition
     d'OpenFox, déplier l'outil montre le diff (lignes retirées et ajoutées en couleur). Réglages → OpenFox : la liste
     des fournisseurs, « Tester » une adresse, « Ajouter » un fournisseur.
+13. Dans un fil OpenFox, onglet « Plan » : « Workflow » propose les workflows d'OpenFox ; en choisir un, remplir ses
+    paramètres, écrire un message puis « Lancer ». Quand une étape attend, une carte « Le workflow … t'attend »
+    apparaît dans le fil avec ses choix. Plus bas : « Tableau des tâches » (ajouter, « Démarrer »), « Serveur de
+    dev » (« Le régler », « Démarrer », « Son journal »), « Processus », « Branche » (changer, créer), « Les
+    instructions de ce projet ».
+14. Réglages → OpenFox → « La bibliothèque d'OpenFox » : Agents, Skills, Commandes, Workflows, Serveurs MCP, Outils,
+    « Instructions et réglages ». Un serveur MCP ajouté avec une variable (ex. `GITHUB_TOKEN=…`) affiche seulement
+    « Ses secrets (GITHUB_TOKEN) restent chez OpenFox ».
 
 ## Étape 11 — Le compte rendu à envoyer à Ben
 
