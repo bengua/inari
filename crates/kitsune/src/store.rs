@@ -217,6 +217,30 @@ impl Store {
         Ok(())
     }
 
+    /// Every note that has a vector for this model, with that vector (for a meaning search).
+    pub fn embeddings_for_model(&self, model: &str) -> Result<Vec<(Note, Vec<f32>)>> {
+        let mut st = self.conn.prepare(&format!(
+            "SELECT {}, e.vector FROM embeddings e JOIN notes n ON n.id = e.note_id WHERE e.model = ?1",
+            NOTE_COLUMNS
+                .split(", ")
+                .map(|c| format!("n.{c}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))?;
+        let rows = st.query_map([model], |r| {
+            let note = note_of(r)?;
+            let blob: Vec<u8> = r.get(12)?;
+            let vector = blob
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|c| f32::from_le_bytes(*c))
+                .collect();
+            Ok((note, vector))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
     pub fn embedding(&self, note_id: i64, model: &str) -> Result<Option<Vec<f32>>> {
         let blob: Option<Vec<u8>> = self
             .conn

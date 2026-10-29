@@ -3,9 +3,11 @@
 //! whose schema moves forward and back by numbered migrations (`migrations/`).
 
 pub mod migrate;
+pub mod search;
 pub mod store;
 
 pub use migrate::{migrate_to, version, LATEST};
+pub use search::{cosine, haversine_m, Filters, Geo, Hit, SearchOptions};
 pub use store::{AudioRef, NewNote, Note, Store, Trigger};
 
 #[derive(Debug, thiserror::Error)]
