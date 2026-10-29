@@ -571,6 +571,7 @@ const AGENT_PRESETS = [
   { id: "codex", label: "ChatGPT (Codex)", name: "codex", command: "codex-acp", npm: "@zed-industries/codex-acp", hint: "Sign in once on this core: run codex login." },
   { id: "gemini", label: "Gemini (Gemini CLI)", name: "gemini", command: "gemini --acp", npm: "@google/gemini-cli", hint: "Sign in once on this core: run gemini and choose Login with Google." },
   { id: "kimi", label: "Kimi (Kimi CLI)", name: "kimi", command: "kimi --acp", npm: "", hint: "Install Kimi CLI on this core, then sign in once: run kimi and /login." },
+  { id: "local", label: "Local engine (Inari)", name: "inari", kind: "local", hint: "Inari's own agent for your local models: its model servers are set in its Settings, once added." },
   { id: "openfox", label: "OpenFox (local models)", name: "openfox", kind: "openfox", hint: "OpenFox's settings are then in Settings → OpenFox." },
   { id: "acp", label: "Another ACP agent", name: "", command: "", npm: "", hint: "Any agent that speaks the Agent Client Protocol: the command that starts it." },
 ];
@@ -581,11 +582,12 @@ async function harnessAct(node, action, extra, after) { const at = Math.floor(Da
   else toast(t("{name} did not answer", { name: node })); }
 function harnessSheet(node) { const n = snap.nodes.find((x) => x.node_id === node), caps = (n && n.capabilities) || {}, specs = caps.harness_specs || {}, models = caps.harnesses || {}, ups = caps.updates || {};
   const form = foxForm(), again = () => harnessSheet(node);
-  for (const [name, h] of Object.entries(specs)) { const preset = AGENT_PRESETS.find((p) => p.id === h.preset), count = (models[name] || []).length, up = ups[name] || {};
+  for (const [name, h] of Object.entries(specs)) { const preset = AGENT_PRESETS.find((p) => p.id === h.preset || (h.kind === "local" && p.id === "local")), count = (models[name] || []).length, up = ups[name] || {};
     const bits = [name, preset ? preset.label : h.kind === "openfox" ? "OpenFox" : h.command, h.default ? t("default") : "", !h.installed ? t("not installed") : count ? counted(count, "1 model", "{n} models") : "", up.available ? t("update available") : "", h.source === "configuration" ? t("from the configuration file") : ""].filter(Boolean).join(" · ");
     const btns = [foxBtn(t("Test"), () => harnessAct(node, "test", { name }))];
     if (h.npm && (!h.installed || up.available)) btns.push(foxBtn(h.installed ? t("Update") : t("Install"), () => { api("/api/update", { node, harness: name }); toast(t("Installing {name}… it can take a few minutes.", { name })); }, "go"));
     if (h.kind === "openfox") btns.push(foxBtn(t("Settings"), () => openfoxSheet(node, name)));
+    if (h.kind === "local") btns.push(foxBtn(t("Settings"), () => engineSheet(node, name), "go"));
     if (!h.default) { const del = foxBtn(t("Remove"), null); del.onclick = twice(del, t("Remove {name}?", { name }), () => harnessAct(node, "remove", { name }, again)); btns.push(del); }
     foxRow(form, bits, btns); }
   form.append(Object.assign(document.createElement("h3"), { textContent: t("Add a subscription or an agent") }));
@@ -595,11 +597,46 @@ function harnessSheet(node) { const n = snap.nodes.find((x) => x.node_id === nod
   const npm = foxField(form, t("Its npm package, to install and update it from here (optional)"), Object.assign(document.createElement("input"), { type: "text", spellcheck: false }));
   const hint = document.createElement("small"); hint.className = "empty"; form.append(hint);
   const fill = () => { const p = AGENT_PRESETS.find((x) => x.id === pick.value); name.value = p.name; command.value = p.command || ""; npm.value = p.npm || ""; hint.textContent = t(p.hint);
-    for (const x of [command, npm]) x.parentElement.hidden = p.kind === "openfox"; };
+    for (const x of [command, npm]) x.parentElement.hidden = !!p.kind; };
   pick.onchange = fill; fill();
   const body = () => { const p = AGENT_PRESETS.find((x) => x.id === pick.value); return { name: name.value.trim(), preset: p.id, kind: p.kind || "acp", command: command.value.trim(), npm: npm.value.trim() }; };
-  const row = document.createElement("div"); row.className = "row2"; row.append(foxBtn(t("Test"), () => harnessAct(node, "test", body())), foxBtn(t("Add"), () => harnessAct(node, "add", body(), again), "go")); form.append(row);
+  const row = document.createElement("div"); row.className = "row2"; const add = foxBtn(t("Add"), null, "go");
+  // a name already there is replaced only when asked twice
+  add.onclick = () => { const b = body(); if (specs[b.name] && add.dataset.sure !== b.name) { add.dataset.sure = b.name; add.textContent = t("Replace {name}?", { name: b.name }); return; } harnessAct(node, "add", b, again); };
+  name.oninput = () => { delete add.dataset.sure; add.textContent = t("Add"); };
+  row.append(foxBtn(t("Test"), () => harnessAct(node, "test", body())), add); form.append(row);
   sheet(t("Agents of {name}", { name: node }), [], t("A subscription is used through its own agent on this core. Added here, it serves from the next message; nothing to edit by hand."), form); }
+/* Inari's local engine on a core: its model servers (vLLM, Ollama, llama.cpp…), its default model and agent, its limits. */
+async function engineAct(node, harness, action, extra) { const at = Math.floor(Date.now() / 1000);
+  const r = await api("/api/engine", { node, harness, action, ...extra }); if (r.error) return;
+  toast(t("Sent to {name}…", { name: node }));
+  if (await until(() => ((snap.harness_results || {})[node] || {}).at >= at, 30000)) { const said = snap.harness_results[node], answers = (said.detail || "").match(/^It answers: (.*)$/);
+    toast(said.ok ? (answers ? t("It answers: {models}", { models: answers[1] }) : t("Done.")) : said.error); if (action !== "provider_test") setTimeout(() => engineSheet(node, harness), 2500); }
+  else toast(t("{name} did not answer", { name: node })); }
+function engineSheet(node, harness) { const n = snap.nodes.find((x) => x.node_id === node), st = (((n && n.capabilities) || {}).engine || {})[harness] || {}, form = foxForm();
+  const providers = st.providers || [], models = providers.flatMap((p) => (p.models || []).map((m) => `${p.id}/${m}`));
+  const model = foxField(form, t("Default model"), document.createElement("select")); model.append(new Option(models.length ? t("Choose a model") : t("Add a model server below first"), "", false, !st.model));
+  for (const m of models) model.append(new Option(m, m, false, m === st.model)); if (st.model && !models.includes(st.model)) model.append(new Option(st.model + " · " + t("not answering"), st.model, false, true));
+  const mode = foxField(form, t("Agent a new thread starts with"), document.createElement("select")); for (const m of st.modes || []) mode.append(new Option(`${m.name} — ${m.description}`, m.id, false, m.id === st.mode));
+  const win = foxField(form, t("The model's context, in tokens"), Object.assign(document.createElement("input"), { type: "number", min: 2048, value: st.context_window || 32768 }));
+  const steps = foxField(form, t("At most, model calls a turn"), Object.assign(document.createElement("input"), { type: "number", min: 1, max: 1000, value: st.max_steps || 100 }));
+  const limit = foxField(form, t("Longest turn"), document.createElement("select")); for (const m of [5, 15, 30, 60, 120, 240, 480]) limit.append(new Option(m < 60 ? t("{n} min", { n: m }) : t("{n} h", { n: m / 60 }), m * 60, false, m * 60 === st.turn_timeout));
+  const save = foxBtn(t("Save"), () => engineAct(node, harness, "set", { model: model.value, mode: mode.value, context_window: Number(win.value), max_steps: Number(steps.value), turn_timeout: Number(limit.value) }), "go"); form.append(save);
+  foxRow(form, t("Instructions for every thread") + (st.instructions ? " · " + (st.instructions.length > 60 ? st.instructions.slice(0, 60) + "…" : st.instructions) : ""), [foxBtn(t("Edit"), () => textSheet(t("Instructions for every thread"), st.instructions || "", t("Added to the system prompt of every thread of this engine."), (v) => engineAct(node, harness, "set", { instructions: v })))]);
+  form.append(Object.assign(document.createElement("h3"), { textContent: t("Model servers") }));
+  for (const p of providers) { const del = foxBtn(t("Remove"), null); del.onclick = twice(del, t("Remove {name}?", { name: p.name || p.id }), () => engineAct(node, harness, "provider_remove", { id: p.id }));
+    foxRow(form, [p.name || p.id, p.url, p.reachable ? counted((p.models || []).length, "1 model", "{n} models") : t("not answering"), p.key ? t("with a key") : ""].filter(Boolean).join(" · "), [del]);
+    if (!p.reachable && p.problem) form.append(Object.assign(document.createElement("p"), { className: "bad", textContent: p.problem })); }
+  if (!providers.length) form.append(Object.assign(document.createElement("p"), { className: "empty", textContent: t("None yet.") }));
+  form.append(Object.assign(document.createElement("h3"), { textContent: t("Add a model server") }));
+  const pname = foxField(form, t("Name"), Object.assign(document.createElement("input"), { type: "text", placeholder: "vLLM 5080" }));
+  const purl = foxField(form, t("Its address"), Object.assign(document.createElement("input"), { type: "text", placeholder: "http://127.0.0.1:8000/v1", spellcheck: false }));
+  const key = foxField(form, t("API key (if the server asks for one)"), Object.assign(document.createElement("input"), { type: "password", autocomplete: "off" }));
+  const note = document.createElement("small"); note.className = "empty"; note.textContent = t("The key stays on this core, readable by it only: Inari never shows it again."); form.append(note);
+  const idOf = () => (pname.value.trim() || purl.value.trim()).toLowerCase().replace(/^https?:\/\//, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "server";
+  const row = document.createElement("div"); row.className = "row2"; row.append(foxBtn(t("Test"), () => engineAct(node, harness, "provider_test", { url: purl.value.trim(), key: key.value })),
+    foxBtn(t("Add"), () => { engineAct(node, harness, "provider_add", { id: idOf(), name: pname.value.trim() || purl.value.trim(), url: purl.value.trim(), key: key.value }); key.value = ""; }, "go")); form.append(row);
+  sheet(t("Local engine of {name}", { name: node }), [], t("Inari's own agent: the model runs on your server, its tools in this core. Nothing else to start."), form); }
 /* ---------- the mascot: FoxBot when its folder is served, else the orb ---------- */
 let foxFrame = null, foxReady = false, foxLast = "";
 function fox(method, a) { try { const f = foxFrame && foxFrame.contentWindow && foxFrame.contentWindow.fox; if (!f) return false; if (method === "event") f.setEvent && f.setEvent(a); else if (method === "persona") { if (!f.setPersona) return false; f.setPersona(a); } else if (method === "state") { f.setHarness && f.setHarness(a.harness); f.setHealth && f.setHealth(a.health); f.setActivity && f.setActivity(a.activity); } return true; } catch (e) { return false; } }

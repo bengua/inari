@@ -245,7 +245,11 @@ fn error_of(status: u16, raw: &[u8]) -> String {
         .or_else(|| v.get("error"))
         .or_else(|| v.get("detail"))
         .or_else(|| v.get("message"))
-        .map(|e| e.as_str().map(String::from).unwrap_or_else(|| e.to_string()))
+        .map(|e| {
+            e.as_str()
+                .map(String::from)
+                .unwrap_or_else(|| e.to_string())
+        })
         .unwrap_or_else(|| String::from_utf8_lossy(&raw[..raw.len().min(300)]).to_string());
     format!("HTTP {status}: {said}")
 }
@@ -320,12 +324,16 @@ pub async fn chat(
         while let Some(i) = pending.find('\n') {
             let line = pending[..i].trim_end_matches('\r').to_string();
             pending.drain(..=i);
-            let Some(data) = line.strip_prefix("data:") else { continue };
+            let Some(data) = line.strip_prefix("data:") else {
+                continue;
+            };
             let data = data.trim();
             if data == "[DONE]" {
                 return Ok(reply);
             }
-            let Ok(v) = serde_json::from_str::<Value>(data) else { continue };
+            let Ok(v) = serde_json::from_str::<Value>(data) else {
+                continue;
+            };
             if let Some(e) = v.get("error") {
                 return Err(e
                     .get("message")
@@ -342,28 +350,37 @@ pub async fn chat(
 /// One streamed event into the reply.
 fn take(v: &Value, reply: &mut Reply, each: &mut impl FnMut(Piece<'_>)) {
     if let Some(u) = v.get("usage").filter(|u| u.is_object()) {
-        reply.prompt_tokens = u
-            .get("prompt_tokens")
-            .and_then(Value::as_u64)
-            .unwrap_or(0);
+        reply.prompt_tokens = u.get("prompt_tokens").and_then(Value::as_u64).unwrap_or(0);
         reply.completion_tokens = u
             .get("completion_tokens")
             .and_then(Value::as_u64)
             .unwrap_or(0);
     }
-    let Some(choice) = v.pointer("/choices/0") else { return };
+    let Some(choice) = v.pointer("/choices/0") else {
+        return;
+    };
     if let Some(f) = choice.get("finish_reason").and_then(Value::as_str) {
         reply.finish = f.to_string();
     }
-    let Some(delta) = choice.get("delta") else { return };
+    let Some(delta) = choice.get("delta") else {
+        return;
+    };
     for key in ["reasoning_content", "reasoning", "thinking"] {
-        if let Some(r) = delta.get(key).and_then(Value::as_str).filter(|r| !r.is_empty()) {
+        if let Some(r) = delta
+            .get(key)
+            .and_then(Value::as_str)
+            .filter(|r| !r.is_empty())
+        {
             reply.reasoning.push_str(r);
             each(Piece::Reasoning(r));
             break;
         }
     }
-    if let Some(c) = delta.get("content").and_then(Value::as_str).filter(|c| !c.is_empty()) {
+    if let Some(c) = delta
+        .get("content")
+        .and_then(Value::as_str)
+        .filter(|c| !c.is_empty())
+    {
         reply.text.push_str(c);
         each(Piece::Text(c));
     }
@@ -382,7 +399,11 @@ fn take(v: &Value, reply: &mut Reply, each: &mut impl FnMut(Piece<'_>)) {
             reply.calls.push(Call::default());
         }
         let call = &mut reply.calls[index];
-        if let Some(id) = tc.get("id").and_then(Value::as_str).filter(|i| !i.is_empty()) {
+        if let Some(id) = tc
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|i| !i.is_empty())
+        {
             call.id = id.to_string();
         }
         if let Some(f) = tc.get("function") {
@@ -429,14 +450,20 @@ mod tests {
                 arguments: "{\"path\": \"a\"}".into()
             }]
         );
-        assert_eq!((reply.finish.as_str(), reply.prompt_tokens), ("tool_calls", 12));
+        assert_eq!(
+            (reply.finish.as_str(), reply.prompt_tokens),
+            ("tool_calls", 12)
+        );
     }
 
     #[test]
     fn only_plain_http_is_spoken() {
         assert!(target("https://api.example.com/v1").is_err());
         let t = target("http://127.0.0.1:8000/v1").unwrap();
-        assert_eq!((t.host.as_str(), t.path.as_str()), ("127.0.0.1:8000", "/v1"));
+        assert_eq!(
+            (t.host.as_str(), t.path.as_str()),
+            ("127.0.0.1:8000", "/v1")
+        );
         assert_eq!(target("http://gpu-box/v1/").unwrap().host, "gpu-box:80");
     }
 }

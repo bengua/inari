@@ -1002,6 +1002,14 @@ pub(crate) fn primer(t: &Turn, prime_chars: usize) -> Result<String, String> {
 pub enum Harness {
     Acp(AcpHarness),
     OpenFox(crate::openfox::OpenFoxHarness),
+    /// Inari's own engine: the model on a local server, the tools in the core (crate::engine).
+    Local(crate::engine::LocalEngine),
+}
+
+impl From<crate::engine::LocalEngine> for Harness {
+    fn from(h: crate::engine::LocalEngine) -> Self {
+        Harness::Local(h)
+    }
 }
 
 impl From<AcpHarness> for Harness {
@@ -1022,6 +1030,7 @@ impl Harness {
         match self {
             Harness::Acp(h) => h.probe(cwd).await,
             Harness::OpenFox(h) => h.probe().await,
+            Harness::Local(h) => h.probe().await,
         }
     }
 
@@ -1039,6 +1048,7 @@ impl Harness {
             },
             Harness::Acp(h) => h.turn(t).await,
             Harness::OpenFox(h) => h.turn(t).await,
+            Harness::Local(h) => h.turn(t).await,
         }
     }
 
@@ -1046,7 +1056,15 @@ impl Harness {
     pub fn openfox(&self) -> Option<&crate::openfox::OpenFoxHarness> {
         match self {
             Harness::OpenFox(h) => Some(h),
-            Harness::Acp(_) => None,
+            _ => None,
+        }
+    }
+
+    /// Inari's local engine, when this is it.
+    pub fn local(&self) -> Option<&crate::engine::LocalEngine> {
+        match self {
+            Harness::Local(h) => Some(h),
+            _ => None,
         }
     }
 

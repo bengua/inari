@@ -1824,6 +1824,27 @@ impl Gateway {
                     .publish(&format!("agent.{}.openfox", s(d, "agent")), d.clone());
                 ok
             }
+            "/api/engine" => {
+                // a local engine's setting, a provider of it (its key goes to the core only)
+                let action = s(d, "action");
+                let node = s(d, "node");
+                if !need(&["node", "harness", "action"])
+                    || !["set", "provider_add", "provider_remove", "provider_test"]
+                        .contains(&action.as_str())
+                    || !node
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || "-_".contains(c))
+                {
+                    return bad;
+                }
+                let mut p = d.clone();
+                if let Some(o) = p.as_object_mut() {
+                    o.remove("node");
+                    o.remove("action");
+                }
+                self.bus.publish(&format!("node.{node}.engine.{action}"), p);
+                ok
+            }
             "/api/harnesses" => {
                 // a harness added, changed, taken away or tried on a core (Claude Code, Codex…)
                 let action = s(d, "action");

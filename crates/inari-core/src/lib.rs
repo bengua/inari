@@ -13,6 +13,7 @@ pub mod canon;
 pub mod capsule;
 pub mod demo;
 pub mod demo_agent;
+pub mod engine;
 pub mod enroll;
 pub mod gateway;
 pub mod host;

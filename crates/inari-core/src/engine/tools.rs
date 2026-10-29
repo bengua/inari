@@ -103,7 +103,7 @@ pub fn read_file(path: &Path, args: &Value) -> Result<String, String> {
     let meta = std::fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
     if meta.is_dir() {
         let mut lines = Vec::new();
-        list(path, path, 0, &mut lines);
+        list(path, 0, &mut lines);
         if lines.is_empty() {
             return Ok("(empty directory)".into());
         }
@@ -142,8 +142,10 @@ pub fn read_file(path: &Path, args: &Value) -> Result<String, String> {
     Ok(clip(&out.join("\n")))
 }
 
-fn list(root: &Path, dir: &Path, depth: usize, out: &mut Vec<String>) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+fn list(dir: &Path, depth: usize, out: &mut Vec<String>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     let mut entries: Vec<_> = entries.flatten().collect();
     entries.sort_by_key(|e| e.file_name());
     for e in entries {
@@ -157,7 +159,7 @@ fn list(root: &Path, dir: &Path, depth: usize, out: &mut Vec<String>) {
         if path.is_dir() {
             out.push(format!("{indent}{name}/"));
             if depth < 2 && ![".git", "node_modules", "target"].contains(&name.as_str()) {
-                list(root, &path, depth + 1, out);
+                list(&path, depth + 1, out);
             }
         } else {
             let size = e.metadata().map(|m| m.len()).unwrap_or(0);
@@ -225,7 +227,12 @@ pub fn edit_file(path: &Path, args: &Value) -> Result<String, String> {
 
 /// Run a command in `cwd`; the whole process group ends at the deadline. Under a pass the
 /// environment is a bare PATH; otherwise the core's own, as for any agent it runs.
-pub async fn run_command(cwd: &Path, command: &str, timeout: Duration, bare: bool) -> (bool, String) {
+pub async fn run_command(
+    cwd: &Path,
+    command: &str,
+    timeout: Duration,
+    bare: bool,
+) -> (bool, String) {
     let mut cmd = Command::new("/bin/sh");
     cmd.args(["-c", command])
         .current_dir(cwd)
@@ -261,7 +268,11 @@ pub async fn run_command(cwd: &Path, command: &str, timeout: Duration, bare: boo
                 code == 0,
                 clip(&format!(
                     "exit code {code} ({secs:.1} s)\n{}",
-                    if text.is_empty() { "(no output)" } else { &text }
+                    if text.is_empty() {
+                        "(no output)"
+                    } else {
+                        &text
+                    }
                 )),
             )
         }
@@ -299,7 +310,11 @@ mod tests {
         assert!(edit_file(&f, &json!({"old_string": "three", "new_string": "x"})).is_err());
         assert!(edit_file(&f, &json!({"old_string": "two", "new_string": "x"})).is_err());
         edit_file(&f, &json!({"old_string": "one", "new_string": "1"})).unwrap();
-        edit_file(&f, &json!({"old_string": "two", "new_string": "2", "replace_all": true})).unwrap();
+        edit_file(
+            &f,
+            &json!({"old_string": "two", "new_string": "2", "replace_all": true}),
+        )
+        .unwrap();
         assert_eq!(std::fs::read_to_string(&f).unwrap(), "1 2 2");
         let read = read_file(&f, &json!({})).unwrap();
         assert_eq!(read, "     1\t1 2 2");

@@ -9,6 +9,23 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Added
 
+- **Inari's local engine.** For local models, Inari no longer needs another program: a harness of
+  kind `local` is the OpenFox core inside the core. The model runs on any OpenAI-compatible
+  server on the machine or the private network (vLLM, SGLang, Ollama, llama.cpp, LM Studio),
+  streamed as it writes; its tools (read, write, edit a file, run a command) run in the thread's
+  folder and show in the thread as any agent's, with the diff of an edit. The builder and planner
+  agents and the prompts come from OpenFox (MIT, see THIRD-PARTY.md). A path outside the folder is
+  the person's to allow, and every write or command of a thread under a pass. Past 80 % of the
+  model's context, the conversation is summarised and the summary kept in the journal. It is added
+  from Settings → Agents and subscriptions (Local engine), and set in its own sheet: model servers
+  (tested, with a key kept on the core only), the default model and agent, the context, the
+  limits, instructions for every thread.
+- **Agents and subscriptions, from the interface.** Settings → Agents and subscriptions lists each
+  core's harnesses and adds one from presets (Claude Code, Codex, Gemini CLI, Kimi CLI, the local
+  engine, OpenFox, any ACP agent): try it, install or update it through npm, take it away. An agent
+  added serves from the next message, with no restart; the choices are kept in
+  `<data_dir>/harnesses.json` on top of the configuration.
+
 - **OpenFox's work around the thread, in Inari.** An OpenFox thread's folder now stays on disk
   between turns (Settings → OpenFox, on by default): it is still put away into the thread at the
   end of every turn and before the thread leaves for another core, and at the next turn only what

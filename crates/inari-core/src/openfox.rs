@@ -3098,7 +3098,7 @@ impl From<&proto::ContextState> for ContextView {
 
 /// What an edit or a write changes, as diff lines under a `@@ path` header (at most DIFF_LINES):
 /// the thread shows it with the tool's result.
-fn edit_diff(tool: &str, args: &Value) -> Option<String> {
+pub(crate) fn edit_diff(tool: &str, args: &Value) -> Option<String> {
     let path = args.get("path").and_then(Value::as_str).unwrap_or("");
     let lines = |text: &str, mark: char| -> Vec<String> {
         text.lines().map(|l| format!("{mark} {l}")).collect()

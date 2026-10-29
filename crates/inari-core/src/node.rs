@@ -206,6 +206,14 @@ fn merged_specs(cfg: &NodeConfig) -> Vec<(String, HarnessSpec)> {
 
 /// A harness as its spec says: OpenFox driven natively, or an agent spoken to over ACP.
 fn build_harness(cfg: &NodeConfig, name: &str, spec: &HarnessSpec) -> Harness {
+    if spec.kind == "local" {
+        // Inari's own engine: its settings are the interface's, in the data folder
+        let mut h = crate::engine::LocalEngine::new(cfg.data_dir.join("engine").join(name));
+        h.extra_env = spec.env.clone();
+        h.prepare = spec.prepare.clone();
+        h.prepare_timeout = Duration::from_secs_f64(spec.prepare_timeout.max(1.0));
+        return Harness::from(h);
+    }
     if spec.kind == "openfox" {
         // OpenFox driven natively: its settings are the interface's, in the data folder
         let mut h = OpenFoxHarness::new(cfg.data_dir.join("openfox").join(name));
@@ -697,6 +705,91 @@ impl Node {
         );
     }
 
+    /// How each local engine is (by harness name), for its sheet.
+    async fn engine_status(&self) -> Map<String, Value> {
+        let mut out = Map::new();
+        if let Some(r) = &self.runner {
+            for (name, h) in r.harness_list() {
+                if let Some(e) = h.local() {
+                    out.insert(name, e.status().await);
+                }
+            }
+        }
+        out
+    }
+
+    /// A local engine's setting changed from the interface; the result said on the bus.
+    async fn engine_action(&self, action: &str, p: &Value) {
+        let name = s(p, "harness");
+        let held = self.runner.as_ref().and_then(|r| r.harness(&name));
+        let mut detail = String::new();
+        let result = match held.as_deref().and_then(Harness::local) {
+            None => Err(format!("no local engine {name:?} on this core")),
+            Some(e) => match action {
+                "set" => {
+                    let mut next = e.settings();
+                    let text = |k: &str| p.get(k).and_then(Value::as_str);
+                    if let Some(m) = text("model") {
+                        next.model = m.to_string();
+                    }
+                    if let Some(m) = text("mode") {
+                        next.mode = m.to_string();
+                    }
+                    if let Some(i) = text("instructions") {
+                        next.instructions = i.to_string();
+                    }
+                    if let Some(n) = p.get("context_window").and_then(Value::as_u64) {
+                        next.context_window = n;
+                    }
+                    if let Some(n) = p.get("max_steps").and_then(Value::as_u64) {
+                        next.max_steps = n.min(u32::MAX as u64) as u32;
+                    }
+                    if let Some(n) = p.get("turn_timeout").and_then(Value::as_u64) {
+                        next.turn_timeout = n;
+                    }
+                    if let Some(t) = p.get("temperature") {
+                        next.temperature = t.as_f64();
+                    }
+                    e.set_settings(next)
+                }
+                "provider_add" => {
+                    let id = s(p, "id");
+                    let mut next = e.settings();
+                    next.providers.retain(|x| x.id != id);
+                    next.providers.push(crate::engine::Provider {
+                        id: id.clone(),
+                        name: s(p, "name"),
+                        url: s(p, "url").trim().trim_end_matches('/').to_string(),
+                    });
+                    e.set_settings(next)
+                        .and_then(|()| e.set_key(&id, s(p, "key").trim()))
+                }
+                "provider_remove" => {
+                    let id = s(p, "id");
+                    let mut next = e.settings();
+                    next.providers.retain(|x| x.id != id);
+                    e.set_settings(next).and_then(|()| e.set_key(&id, ""))
+                }
+                "provider_test" => {
+                    crate::engine::LocalEngine::test(&s(p, "url"), s(p, "key").trim())
+                        .await
+                        .map(|models| detail = format!("It answers: {}", models.join(", ")))
+                }
+                other => Err(format!("unknown engine action {other:?}")),
+            },
+        };
+        self.refresh
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        let (ok, error) = match result {
+            Ok(()) => (true, String::new()),
+            Err(e) => (false, e),
+        };
+        self.bus.publish(
+            &format!("node.{}.harness.result", self.cfg.node_id),
+            json!({"node": self.cfg.node_id, "action": format!("engine_{action}"), "name": name, "ok": ok, "error": error, "detail": detail}),
+        );
+    }
+
     /// The harnesses as the page shows them: where each comes from, what it runs, whether its
     /// program is on this machine.
     fn harness_view(&self) -> Map<String, Value> {
@@ -707,7 +800,8 @@ impl Node {
             .enumerate()
             .map(|(i, (name, spec))| {
                 let program = spec.command.first().cloned().unwrap_or_default();
-                let installed = spec.kind == "openfox" || find_program(&program).is_some();
+                let installed = ["openfox", "local"].contains(&spec.kind.as_str())
+                    || find_program(&program).is_some();
                 (
                     name.clone(),
                     json!({"kind": if spec.kind.is_empty() { "acp" } else { spec.kind.as_str() },
@@ -755,10 +849,10 @@ impl Node {
                     .all(|c| c.is_ascii_alphanumeric() || "_-".contains(c))
         };
         let spec_of = |p: &Value| -> Result<HarnessSpec, String> {
-            let kind = if s(p, "kind") == "openfox" {
-                "openfox"
-            } else {
-                "acp"
+            let kind = match s(p, "kind").as_str() {
+                "openfox" => "openfox",
+                "local" => "local",
+                _ => "acp",
             };
             let command: Vec<String> = s(p, "command")
                 .split_whitespace()
@@ -824,7 +918,7 @@ impl Node {
                         .ok_or_else(|| format!("no harness {name:?} on this core"))?,
                     _ => spec_of(p)?,
                 };
-                if spec.kind != "openfox" {
+                if spec.kind == "acp" || spec.kind.is_empty() {
                     let program = spec.command.first().cloned().unwrap_or_default();
                     if find_program(&program).is_none() {
                         return Err(format!("{program} is not installed on this core"));
@@ -960,6 +1054,13 @@ impl Node {
             }
             if forced || openfox_at.is_none_or(|t| t.elapsed() > Duration::from_secs(60)) {
                 // how each natively driven OpenFox is, for its settings in the interface
+                let engines = self.engine_status().await;
+                if engines.is_empty() {
+                    info.capabilities.remove("engine");
+                } else {
+                    info.capabilities
+                        .insert("engine".into(), Value::Object(engines));
+                }
                 let status = self.openfox_status().await;
                 if status.is_empty() {
                     info.capabilities.remove("openfox");
@@ -1410,6 +1511,14 @@ impl Node {
                 &format!("node.{me}.openfox.{action}"),
                 move |n, m| async move {
                     n.openfox_action(action, &m.payload).await;
+                },
+            );
+        }
+        for action in ["set", "provider_add", "provider_remove", "provider_test"] {
+            self.on(
+                &format!("node.{me}.engine.{action}"),
+                move |n, m| async move {
+                    tokio::spawn(async move { n.engine_action(action, &m.payload).await });
                 },
             );
         }

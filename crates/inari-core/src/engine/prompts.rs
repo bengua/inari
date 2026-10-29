@@ -158,7 +158,8 @@ pub fn small_reminder(a: &Agent) -> String {
     )
 }
 
-pub const COMPACTION: &str = "You are a helpful AI assistant tasked with summarizing conversations for continuation.
+pub const COMPACTION: &str =
+    "You are a helpful AI assistant tasked with summarizing conversations for continuation.
 
 Summarize the conversation history concisely, preserving:
 1. What was done and what is currently being worked on

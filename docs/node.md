@@ -77,6 +77,20 @@ are all configuration, and every default is empty.
   `mcp_add`, `mcp_test`, `mcp_toggle`, `mcp_tool`, `mcp_remove`, `setting`;
   `src/openfox_library.rs`). An MCP server's environment and headers go to OpenFox and are never
   read back, only their names.
+- **Inari's local engine.** `"inari": {"kind": "local"}` runs the agent in the core itself: the
+  model on an OpenAI-compatible server (plain `http://`, on the machine or the private network),
+  the tools (read_file, write_file, edit_file, run_command) in the thread's folder
+  (`src/engine/`). Its settings are the interface's, in `<data_dir>/engine/<harness>/settings.json`
+  (`providers`, `model` as `<provider>/<model>`, `mode` builder or planner, `context_window`,
+  `max_steps`, `turn_timeout`, `temperature`, `instructions`); a provider's key is kept apart in
+  `keys.json` (mode 600) and never sent back. Actions: `node.<id>.engine.{set, provider_add,
+  provider_remove, provider_test}` (`POST /api/engine`, owner only); its state is
+  `capabilities.engine`.
+- **Harnesses from the interface.** `node.<id>.harness.{add, remove, test}` (`POST /api/harnesses`,
+  owner only) add, replace, take away or try a harness while the node runs; the interface's choices
+  are kept in `<data_dir>/harnesses.json` (a spec by name, or null for one of the configuration's
+  taken away) and read on top of the configuration at start. `capabilities.harness_specs` lists
+  them with where each comes from and whether its program is installed.
 - **Getting a model ready.** A harness may name a command run before each turn of a thread
   whose model was chosen, with `{model}` replaced by the model id:
   `"prepare": ["load-model", "{model}"], "prepare_timeout": 600`. It is how a local model is
