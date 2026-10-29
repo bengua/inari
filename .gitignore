@@ -10,3 +10,4 @@ __pycache__/
 /uv.lock
 /src/
 /tests/
+/target-musl/
