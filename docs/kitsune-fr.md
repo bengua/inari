@@ -68,7 +68,21 @@ parle à vLLM.
 La façade `Kitsune` (le cerveau derrière une seule porte) ouvre le store, le coffre audio et lit
 ses réglages dans `config.json` ; c'est ce qu'un cœur tient et ce que la GUI configure.
 
-Ce qui suit (voix de synthèse, intégration au cœur et à la page du téléphone) arrive incrément par
+## La voix de synthèse (incrément 5)
+
+`Kitsune::speak` dit un texte à voix haute : il le fait **synthétiser** par un serveur de voix
+local (Qwen3-TTS, CSM, Kokoro…) joint en HTTP sur son endpoint `POST /audio/speech` compatible
+OpenAI, **scelle** l'audio reçu (coffre du chiffrement) et le range, lié à une note. L'outil MCP
+`synthesize_speech` l'expose au réseau agentique, et n'apparaît que lorsqu'un serveur de voix est
+réglé.
+
+Le serveur, la voix, le modèle et le format sont des **réglages de la GUI, jamais en dur** ; il
+tourne sur la machine ou le réseau privé, donc la voix ne sort pas de la maison. **Le choix du
+moteur et le test d'écoute A/B en français restent sur tes postes**, là où le modèle est servi :
+le cœur n'est que le fil jusqu'à lui (même patron HTTP que l'ASR et le moteur local). La fidélité
+prime côté serveur ; Inari ne décide pas du modèle à ta place.
+
+Ce qui suit (intégration au cœur et à la page du téléphone) arrive incrément par
 incrément
 
 Ce qui suit (voix de synthèse…) arrive incrément par incrément, chacun testé avant le
