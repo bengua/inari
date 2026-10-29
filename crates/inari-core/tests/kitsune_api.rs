@@ -462,3 +462,68 @@ async fn a_reminder_is_a_note_plus_a_rule_the_page_can_read_back() {
     .await;
     assert_eq!(empty["triggers"].as_array().unwrap().len(), 0);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_owner_points_the_core_at_its_own_servers_and_the_page_reads_them_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = node(dir.path()).await;
+    let port = home.gateway_port;
+    let owner = "token=owner";
+
+    // nothing set at first
+    let (st, status) = call(port, owner, "GET", "/api/kitsune", None).await;
+    assert_eq!(st, 200);
+    assert_eq!(
+        (status["asr_ready"].as_bool(), status["tts_ready"].as_bool()),
+        (Some(false), Some(false))
+    );
+    assert_eq!(status["settings"]["embed_model"], "");
+
+    // the page sends the whole settings back, so what it does not know survives
+    let settings = json!({
+        "asr": {"url": "http://127.0.0.1:8080/v1", "model": "whisper-1", "language": "fr", "timeout": 60},
+        "tts": {"url": "http://127.0.0.1:8880/v1", "model": "kokoro", "voice": "fr_FR-siwis-medium",
+                "format": "wav", "timeout": 60},
+        "embed_model": "bge-m3",
+        "mcp": {"token": "brain", "tools": ["keep"], "embed_model": "bge-m3"}
+    });
+    let (st, saved) = call(
+        port,
+        owner,
+        "POST",
+        "/api/kitsune",
+        Some(json!({"action": "set_settings", "settings": settings})),
+    )
+    .await;
+    assert_eq!((st, saved["ok"].as_bool()), (200, Some(true)));
+
+    let (st, status) = call(port, owner, "GET", "/api/kitsune", None).await;
+    assert_eq!(st, 200);
+    assert_eq!(
+        (status["asr_ready"].as_bool(), status["tts_ready"].as_bool()),
+        (Some(true), Some(true))
+    );
+    assert_eq!(status["settings"]["asr"]["model"], "whisper-1");
+    assert_eq!(status["settings"]["asr"]["language"], "fr");
+    assert_eq!(status["settings"]["tts"]["voice"], "fr_FR-siwis-medium");
+    assert_eq!(status["settings"]["embed_model"], "bge-m3");
+    assert_eq!(status["settings"]["mcp"]["token"], "brain");
+
+    // kept on disk, so a restart finds the same servers
+    let raw = std::fs::read_to_string(dir.path().join("home/kitsune/config.json")).unwrap();
+    let on_disk: Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(on_disk["asr"]["url"], "http://127.0.0.1:8080/v1");
+    assert_eq!(on_disk["tts"]["url"], "http://127.0.0.1:8880/v1");
+
+    // and it says no, plainly, to a shape it cannot read
+    let (st, bad) = call(
+        port,
+        owner,
+        "POST",
+        "/api/kitsune",
+        Some(json!({"action": "set_settings", "settings": {"asr": "no"}})),
+    )
+    .await;
+    assert_eq!(st, 400);
+    assert!(bad["error"].as_str().unwrap_or("").contains("bad settings"));
+}

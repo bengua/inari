@@ -147,15 +147,57 @@ function text(el, value) {
 }
 
 function render() {
-  const s = state.settings || {}, asr = s.asr || {}, tts = s.tts || {};
   chip($("kAsr"), state.asrReady, "ASR");
   chip($("kTts"), state.ttsReady, "TTS");
   $("kNotes").textContent = String(state.notes);
   $("kTriggers").textContent = String(state.triggers);
-  text($("kAsrUrl"), asr.url);
-  text($("kTtsUrl"), tts.url);
-  text($("kEmbed"), s.embed_model);
 }
+
+/* Settings: the servers this core talks to. Filled from the core, never overwritten under the
+   caret, and sent back whole so nothing the page does not know about is lost. */
+function setFill() {
+  const s = state.settings || {}, asr = s.asr || {}, tts = s.tts || {};
+  const put = (id, v) => {
+    const el = $(id);
+    if (el && document.activeElement !== el) el.value = v || "";
+  };
+  put("kSetAsrUrl", asr.url);
+  put("kSetAsrModel", asr.model);
+  put("kSetAsrLang", asr.language);
+  put("kSetTtsUrl", tts.url);
+  put("kSetTtsVoice", tts.voice);
+  put("kSetEmbed", s.embed_model);
+}
+
+async function setSave() {
+  const s = JSON.parse(JSON.stringify(state.settings || {}));
+  s.asr = s.asr || {};
+  s.tts = s.tts || {};
+  s.asr.url = $("kSetAsrUrl").value.trim();
+  s.asr.model = $("kSetAsrModel").value.trim();
+  s.asr.language = $("kSetAsrLang").value.trim();
+  s.tts.url = $("kSetTtsUrl").value.trim();
+  s.tts.voice = $("kSetTtsVoice").value.trim();
+  s.embed_model = $("kSetEmbed").value.trim();
+  $("kSetState").textContent = "Saving…";
+  const d = await api("/api/kitsune", { action: "set_settings", settings: s });
+  if (!d || d.error) {
+    $("kSetState").textContent = d && d.error ? "The core refused it: " + d.error : "The core did not answer.";
+    return;
+  }
+  await load();
+  const on = [];
+  if (s.asr.url) on.push("speech to text");
+  if (s.tts.url) on.push("text to speech");
+  if (s.embed_model) on.push("embeddings");
+  $("kSetState").textContent = on.length ? "Saved. " + on.join(", ") + " on." : "Saved. No server set.";
+  say("Settings kept.");
+}
+
+$("kSet").addEventListener("submit", (ev) => {
+  ev.preventDefault();
+  setSave();
+});
 
 async function load() {
   const d = await api("/api/kitsune");
@@ -170,6 +212,7 @@ async function load() {
   state.triggers = Number(d.triggers) || 0;
   state.mascot = !!d.mascot;
   render();
+  setFill();
   const missing = [];
   if (!state.asrReady) missing.push("speech to text");
   if (!state.ttsReady) missing.push("text to speech");
