@@ -5,6 +5,7 @@
 pub mod migrate;
 pub mod search;
 pub mod store;
+pub mod triggers;
 
 pub use migrate::{migrate_to, version, LATEST};
 pub use search::{cosine, haversine_m, Filters, Geo, Hit, SearchOptions};
