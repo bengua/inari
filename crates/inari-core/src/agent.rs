@@ -169,6 +169,12 @@ impl Turn {
     pub(crate) fn emit(&self, e: &TimelineEvent) {
         self.runner.emit(&self.agent, e);
     }
+    /// Journal an event and show it at once (a turn that cannot go on says why in the thread).
+    pub(crate) fn note(&self, kind: EventKind, data: Value) {
+        if let Some(e) = self.append(kind, data) {
+            self.emit(&e);
+        }
+    }
     pub(crate) fn phase(&self, phase: &str) {
         self.runner.set_phase(&self.agent, phase);
     }
@@ -478,7 +484,7 @@ impl AcpHarness {
 
     pub async fn turn(&self, t: &Turn) -> RunSummary {
         if let Err(e) = self.make_ready(t).await {
-            t.append(
+            t.note(
                 EventKind::Checkpoint,
                 json!({"reason": "model_unavailable", "detail": e}),
             );
@@ -491,11 +497,16 @@ impl AcpHarness {
         let mut child = match self.spawn(&t.workdir, &t.pass) {
             Ok(c) => c,
             Err(e) => {
+                let error = format!("cannot start the agent: {e}");
+                t.note(
+                    EventKind::Checkpoint,
+                    json!({"reason": "harness_error", "detail": error}),
+                );
                 return RunSummary {
                     stopped: "error".into(),
-                    error: format!("cannot start the agent: {e}"),
+                    error,
                     ..Default::default()
-                }
+                };
             }
         };
         let result = tokio::time::timeout(self.timeout, self.conversation(&mut child, t)).await;
@@ -503,7 +514,7 @@ impl AcpHarness {
         match result {
             Ok(s) => s,
             Err(_) => {
-                t.append(EventKind::Checkpoint, json!({"reason": "harness_timeout"}));
+                t.note(EventKind::Checkpoint, json!({"reason": "harness_timeout"}));
                 RunSummary {
                     stopped: "error".into(),
                     error: format!(
@@ -556,7 +567,7 @@ impl AcpHarness {
                 {
                     Ok(_) => known = Some(t.model.clone()),
                     Err(e) => {
-                        t.append(
+                        t.note(
                             EventKind::Checkpoint,
                             json!({"reason": "model_refused", "detail": e}),
                         );
@@ -590,7 +601,7 @@ impl AcpHarness {
                             .insert(sid.clone(), t.mode.clone());
                     }
                     Err(e) => {
-                        t.append(
+                        t.note(
                             EventKind::Checkpoint,
                             json!({"reason": "mode_refused", "detail": e}),
                         );
@@ -602,7 +613,7 @@ impl AcpHarness {
         let (sid, primed, caps) = match setup.await {
             Ok(x) => x,
             Err(e) => {
-                t.append(
+                t.note(
                     EventKind::Checkpoint,
                     json!({"reason": "harness_error", "detail": e}),
                 );
@@ -1644,10 +1655,26 @@ impl Runner {
             },
             (_, None) => RunSummary {
                 stopped: "error".into(),
-                error: format!("no harness {harness_name:?}"),
+                error: format!("no harness {harness_name:?} on this core"),
                 ..Default::default()
             },
         };
+        if summary.stopped == "error" && !summary.error.is_empty() {
+            // said in the thread, not only in the activity feed: a turn never fails silently
+            let shown = io::load(&path).ok().is_some_and(|c| {
+                c.timeline
+                    .ordered()
+                    .last()
+                    .is_some_and(|e| e.kind == EventKind::Checkpoint)
+            });
+            if !shown {
+                let _ = self.journal(
+                    agent,
+                    EventKind::Checkpoint,
+                    json!({"reason": "harness_error", "detail": summary.error}),
+                );
+            }
+        }
         let was_stopped = self.cancels.lock().expect("not poisoned").remove(agent);
         if was_stopped || summary.stopped == "cancelled" {
             let _ = self.journal(agent, EventKind::Checkpoint, json!({"reason": "stopped"}));

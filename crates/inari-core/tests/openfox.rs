@@ -1538,3 +1538,38 @@ async fn the_library_is_read_and_changed_and_mcp_secrets_only_reach_openfox() {
     assert_eq!(settings["llm.dynamicSystemPrompt"], true);
     assert_eq!(settings["agent.autoContinueOnBoot"], false);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_openfox_that_does_not_answer_is_said_in_the_thread() {
+    let dir = tempfile::tempdir().unwrap();
+    std::env::set_var("OPENFOX_ACP_DIR", dir.path().join("no-openfox-acp"));
+    let h = OpenFoxHarness::new(dir.path().join("openfox"));
+    let free = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = free.local_addr().unwrap().port();
+    drop(free); // nothing listens there
+    let mut s = h.settings();
+    s.url = format!("http://127.0.0.1:{port}");
+    h.set_settings(s).unwrap();
+    let host = Arc::new(CapsuleHost::new("n1", &dir.path().join("node")).unwrap());
+    let said: Arc<Mutex<Vec<Value>>> = Arc::default();
+    let kept = Arc::clone(&said);
+    let publish: inari_core::agent::Publisher = Arc::new(move |subject: &str, payload: Value| {
+        if subject.ends_with(".event") {
+            kept.lock().unwrap().push(payload);
+        }
+    });
+    let runner = Runner::new(host, vec![("openfox".to_string(), h)], Some(publish), None);
+    let agent = runner.create("t1", "", "a title").unwrap();
+    let out = runner.run(&agent, "hello", vec![]).await;
+    assert_eq!(out.stopped, "error");
+    assert!(out.error.contains("is it running?"), "{}", out.error);
+    let shown = said.lock().unwrap().clone();
+    assert!(
+        shown.iter().any(|e| e["kind"] == "checkpoint"
+            && e["text"]
+                .as_str()
+                .unwrap_or("")
+                .starts_with("harness_error: OpenFox does not answer")),
+        "the page is told why: {shown:?}"
+    );
+}

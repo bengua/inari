@@ -267,6 +267,12 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Fixed
 
+- **A turn that cannot run says why, in the thread.** When an agent could not start or answer
+  (OpenFox not running, a wrong address, a missing sign-in, a model refused), the reason was only
+  written to the thread's journal and a line of the activity feed: the message seemed to go
+  nowhere. It now shows in the thread at once ("The agent stopped — OpenFox does not answer at
+  http://…: is it running?"), and OpenFox's errors say what to do (Settings → OpenFox).
+
 - **The workbench tabs can be clicked.** The handle that resizes the workbench took the panes'
   340 px minimum width and lay over the tabs (Artifacts, Terminal, Viewer, Journal); it is 8 px
   again, and still resizes.

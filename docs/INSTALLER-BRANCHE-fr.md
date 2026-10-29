@@ -228,7 +228,7 @@ sleep 5
 systemctl --user is-active inari-core.service
 journalctl --user -u inari-core.service -n 20 --no-pager | grep -i "openfox" || echo "aucune erreur OpenFox"
 ```
-Attendu : `active`, puis `aucune erreur OpenFox`. Une ligne `openfox: … HTTP 401` veut dire que le jeton manque :
+Attendu : `active`, puis `aucune erreur OpenFox`. Une ligne `openfox: OpenFox asks this core to sign in` veut dire que le jeton manque :
 Ben se connecte depuis l'interface (étape 10, point 10). Toute autre erreur `openfox:` : envoie-la à Ben.
 
 **Retour en arrière** (seulement si quelque chose ne va pas) :
