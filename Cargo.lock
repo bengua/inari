@@ -342,6 +342,7 @@ dependencies = [
  "ed25519-dalek",
  "getrandom 0.2.17",
  "hmac",
+ "kitsune",
  "libc",
  "serde",
  "serde_json",

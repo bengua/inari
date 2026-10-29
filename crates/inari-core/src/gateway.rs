@@ -233,6 +233,8 @@ pub struct Gateway {
     sessions: crate::session::Sessions,
     /// The persona each person chose for the mascot.
     personas: crate::personas::Choices,
+    /// The voice second brain this core holds (None when it could not be opened).
+    kitsune: Option<Arc<std::sync::Mutex<kitsune::Kitsune>>>,
 }
 
 /// An OpenFox thread's panel, as an SSE event of its own (`panel`).
@@ -462,6 +464,13 @@ impl Gateway {
             usage_interval: Duration::from_secs(60),
             sessions: crate::session::Sessions::open(data_dir),
             personas: crate::personas::Choices::open(data_dir),
+            kitsune: match kitsune::Kitsune::open(&data_dir.join("kitsune")) {
+                Ok(k) => Some(Arc::new(std::sync::Mutex::new(k))),
+                Err(e) => {
+                    eprintln!("kitsune: {e}");
+                    None
+                }
+            },
         });
         g.subscribe();
         g
@@ -1120,6 +1129,12 @@ impl Gateway {
         if r.method == "POST" && r.path == "/api/session" {
             return self.sign_in(&r, w).await;
         }
+        if r.path == "/api/kitsune/mcp" && r.method == "POST" {
+            // the agentic network's door: the owner, or a caller with the brain's own MCP token.
+            // Handled before the gateway's own access gate so a token-bearing guest is not turned
+            // away at 401; the brain checks its token itself.
+            return self.kitsune_mcp(&r, w).await;
+        }
         if r.method == "POST" && r.path == "/api/logout" {
             let end = crate::session::set_cookie(None, r.https());
             return send_with(w, 200, "application/json", b"{}", &end).await;
@@ -1228,6 +1243,13 @@ impl Gateway {
         }
         if get && r.path.starts_with("/api/logo/") {
             return self.logo(w, r.path.rsplit('/').next().unwrap_or("")).await;
+        }
+        if r.path.starts_with("/api/kitsune") {
+            // the brain's own data: the core's owner only
+            if !matches!(access, Access::Owner) {
+                return send_json(w, 403, &json!({"error": "the core's owner sees this"})).await;
+            }
+            return self.kitsune_api(&r, w).await;
         }
         if get && r.path == "/api/search" {
             let q = r.query.get("q").cloned().unwrap_or_default();
@@ -2004,6 +2026,253 @@ impl Gateway {
     }
 
     /// Provider logos live on the usage source's server: fetched once, served from here.
+    /// Run something on the brain off the async runtime (it does blocking I/O: sqlite, and HTTP to
+    /// the voice servers). None when this core holds no brain.
+    async fn with_kitsune<T, F>(&self, f: F) -> Option<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut kitsune::Kitsune) -> T + Send + 'static,
+    {
+        let k = self.kitsune.clone()?;
+        tokio::task::spawn_blocking(move || f(&mut k.lock().expect("not poisoned")))
+            .await
+            .ok()
+    }
+
+    /// The brain's door for the agentic network: a JSON-RPC MCP request. The owner may always use
+    /// it; another caller (n8n, Home Assistant) needs the brain's own MCP token, which it carries
+    /// as a Bearer header or an `_auth` argument — the brain checks it, so no owner pass is needed.
+    async fn kitsune_mcp(&self, r: &Request, w: &mut TcpStream) -> std::io::Result<()> {
+        let Some(request) = serde_json::from_slice::<Value>(&r.body)
+            .ok()
+            .filter(Value::is_object)
+        else {
+            return send_json(w, 400, &json!({"jsonrpc": "2.0", "id": null, "error": {"code": -32700, "message": "not JSON"}})).await;
+        };
+        let owner = matches!(self.access(r), Some(Access::Owner));
+        // put the Bearer token (if any) where the brain's handler looks for it
+        let mut request = request;
+        if !owner {
+            let bearer = r
+                .headers
+                .get("authorization")
+                .and_then(|a| a.strip_prefix("Bearer "))
+                .map(str::to_string);
+            if let Some(tok) = bearer {
+                if let Some(args) = request
+                    .pointer_mut("/params/arguments")
+                    .and_then(Value::as_object_mut)
+                {
+                    args.entry("_auth").or_insert(json!(tok));
+                }
+            }
+        }
+        let reply = self
+            .with_kitsune(move |k| {
+                // a guest may only reach the brain when it has a token set (else the owner only)
+                if !owner && k.settings().mcp.token.is_empty() {
+                    return Some(json!({"jsonrpc": "2.0", "id": request.get("id").cloned().unwrap_or(Value::Null), "error": {"code": -32001, "message": "this core's Kitsune is not open to the network"}}));
+                }
+                k.mcp(&request)
+            })
+            .await;
+        match reply {
+            Some(Some(v)) => send_json(w, 200, &v).await,
+            Some(None) => send(w, 204, "application/json", b"").await, // a notification: no reply
+            None => send_json(w, 503, &json!({"error": "this core holds no Kitsune"})).await,
+        }
+    }
+
+    /// The owner's own door to the brain: its settings, a note kept or found, a reminder, the
+    /// voice. Everything configurable, nothing assumed.
+    async fn kitsune_api(&self, r: &Request, w: &mut TcpStream) -> std::io::Result<()> {
+        if self.kitsune.is_none() {
+            return send_json(w, 503, &json!({"error": "this core holds no Kitsune"})).await;
+        }
+        let b64 = base64::engine::general_purpose::STANDARD;
+        // GET /api/kitsune → how it is; GET /api/kitsune/audio?path= → the sealed audio, opened
+        if r.method == "GET" && r.path == "/api/kitsune/audio" {
+            let rel = r.query.get("path").cloned().unwrap_or_default();
+            let got = self
+                .with_kitsune(move |k| k.vault().get(&rel).map(|b| (b,)))
+                .await;
+            return match got {
+                Some(Ok((bytes,))) => send(w, 200, "application/octet-stream", &bytes).await,
+                _ => send_json(w, 404, &json!({"error": "no such audio"})).await,
+            };
+        }
+        if r.method == "GET" {
+            let status = self
+                .with_kitsune(|k| {
+                    let s = k.settings();
+                    json!({"settings": s, "asr_ready": s.asr.ready(), "tts_ready": s.tts.ready(),
+                           "notes": k.store().notes_between(0.0, f64::MAX).map(|n| n.len()).unwrap_or(0),
+                           "triggers": k.store().list_triggers().map(|t| t.len()).unwrap_or(0)})
+                })
+                .await
+                .unwrap_or(json!({}));
+            return send_json(w, 200, &status).await;
+        }
+        // POST /api/kitsune {action, …}
+        let d: Value = serde_json::from_slice(if r.body.is_empty() { b"{}" } else { &r.body })
+            .unwrap_or(Value::Null);
+        let action = s(&d, "action");
+        let result: Option<std::result::Result<Value, String>> = match action.as_str() {
+            "set_settings" => {
+                let settings: std::result::Result<kitsune::Settings, _> =
+                    serde_json::from_value(d.get("settings").cloned().unwrap_or(Value::Null));
+                match settings {
+                    Ok(settings) => {
+                        self.with_kitsune(move |k| {
+                            k.set_settings(settings)
+                                .map(|_| json!({"ok": true}))
+                                .map_err(|e| e.to_string())
+                        })
+                        .await
+                    }
+                    Err(e) => Some(Err(format!("bad settings: {e}"))),
+                }
+            }
+            "capture_text" => {
+                let text = s(&d, "text");
+                let tags: Vec<String> = d
+                    .get("tags")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(String::from)
+                    .collect();
+                self.with_kitsune(move |k| {
+                    k.capture_text(&text, tags)
+                        .map(|id| json!({"id": id}))
+                        .map_err(|e| e.to_string())
+                })
+                .await
+            }
+            "ingest_voice" => {
+                let audio = b64.decode(s(&d, "audio")).unwrap_or_default();
+                let place = s(&d, "place");
+                let at = match (
+                    d.get("lat").and_then(Value::as_f64),
+                    d.get("lon").and_then(Value::as_f64),
+                ) {
+                    (Some(la), Some(lo)) => Some((la, lo)),
+                    _ => None,
+                };
+                if audio.is_empty() {
+                    Some(Err("no audio (base64 in the audio field)".into()))
+                } else {
+                    self.with_kitsune(move |k| {
+                        k.ingest_voice(&audio, &place, at)
+                            .map(|id| json!({"id": id}))
+                            .map_err(|e| e.to_string())
+                    })
+                    .await
+                }
+            }
+            "search" => {
+                let query = s(&d, "query");
+                let opts = kitsune::SearchOptions {
+                    k: d.get("k")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(10)
+                        .clamp(1, 100) as usize,
+                    filters: serde_json::from_value(d.get("filters").cloned().unwrap_or(json!({})))
+                        .unwrap_or_default(),
+                    ..Default::default()
+                };
+                self.with_kitsune(move |k| {
+                    let model = k.settings().embed_model.clone();
+                    k.store()
+                        .search(&query, None, &model, &opts)
+                        .map(|hits| json!({"hits": hits}))
+                        .map_err(|e| e.to_string())
+                })
+                .await
+            }
+            "speak" => {
+                let text = s(&d, "text");
+                let note_id = d.get("note_id").and_then(Value::as_i64);
+                self.with_kitsune(move |k| {
+                    k.speak(&text, note_id)
+                        .map(|(audio, mime, path)| json!({"path": path, "mime": mime, "audio": base64::engine::general_purpose::STANDARD.encode(audio)}))
+                        .map_err(|e| e.to_string())
+                })
+                .await
+            }
+            "create_trigger" => {
+                let kind = s(&d, "kind");
+                let spec = d.get("spec").cloned().unwrap_or(json!({}));
+                let note_id = d.get("note_id").and_then(Value::as_i64);
+                let next_at = d.get("next_at").and_then(Value::as_f64);
+                self.with_kitsune(move |k| {
+                    k.store()
+                        .create_trigger(&kind, note_id, &spec, next_at)
+                        .map(|id| json!({"id": id}))
+                        .map_err(|e| e.to_string())
+                })
+                .await
+            }
+            "list_triggers" => {
+                self.with_kitsune(|k| {
+                    k.store()
+                        .list_triggers()
+                        .map(|t| json!({"triggers": t}))
+                        .map_err(|e| e.to_string())
+                })
+                .await
+            }
+            "delete_trigger" => {
+                let id = d.get("id").and_then(Value::as_i64).unwrap_or(-1);
+                self.with_kitsune(move |k| {
+                    k.store()
+                        .delete_trigger(id)
+                        .map(|gone| json!({"removed": gone}))
+                        .map_err(|e| e.to_string())
+                })
+                .await
+            }
+            "get_note" => {
+                let id = d.get("id").and_then(Value::as_i64).unwrap_or(-1);
+                self.with_kitsune(move |k| {
+                    k.store()
+                        .get_note(id)
+                        .map(|n| json!({"note": n}))
+                        .map_err(|e| e.to_string())
+                })
+                .await
+            }
+            "correct_note" => {
+                let id = d.get("id").and_then(Value::as_i64).unwrap_or(-1);
+                let text = s(&d, "text");
+                self.with_kitsune(move |k| {
+                    k.store()
+                        .correct_note(id, &text)
+                        .map(|ok| json!({"ok": ok}))
+                        .map_err(|e| e.to_string())
+                })
+                .await
+            }
+            "delete_note" => {
+                let id = d.get("id").and_then(Value::as_i64).unwrap_or(-1);
+                self.with_kitsune(move |k| {
+                    k.store()
+                        .delete_note(id)
+                        .map(|gone| json!({"removed": gone}))
+                        .map_err(|e| e.to_string())
+                })
+                .await
+            }
+            other => Some(Err(format!("unknown Kitsune action {other:?}"))),
+        };
+        match result {
+            Some(Ok(v)) => send_json(w, 200, &v).await,
+            Some(Err(e)) => send_json(w, 400, &json!({"error": e})).await,
+            None => send_json(w, 503, &json!({"error": "this core holds no Kitsune"})).await,
+        }
+    }
+
     async fn logo(&self, w: &mut TcpStream, family: &str) -> std::io::Result<()> {
         let (cached, url) = {
             let st = self.state.lock().expect("not poisoned");
