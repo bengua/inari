@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/inari-core"]
+members = ["crates/inari-core", "crates/kitsune"]
 resolver = "2"
 
 [workspace.package]
