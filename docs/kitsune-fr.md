@@ -51,7 +51,26 @@ La base elle-même (notes, embeddings) est protégée au repos par le **chiffrem
 et sa build C OpenSSL, qui fragiliserait le binaire statique musl ; il est cohérent avec le reste
 du cœur, qui n'a aucune dépendance crypto en C.
 
-Ce qui suit (capture, transcription, voix,
-déclencheurs) arrive incrément par incrément, chacun testé avant le
+## La capture vocale (incrément 2)
+
+Le téléphone capte l'audio ; le cœur le reçoit, le **scelle** (coffre du chiffrement), le fait
+**transcrire** par un serveur de reconnaissance vocale local, puis range la note liée à son audio.
+Si le serveur ne répond pas ou renvoie une erreur, l'audio est gardé et la note passe en
+`needs_review` : **rien de ce qui a été dit n'est perdu**.
+
+Le serveur de transcription (whisper.cpp, faster-whisper, LocalAI…) est joint en HTTP sur son
+endpoint `POST /audio/transcriptions` compatible OpenAI. Son adresse, son modèle et la langue sont
+des **réglages de la GUI, jamais en dur** ; il tourne sur la machine ou le réseau privé, donc rien
+ne sort de la maison. Ce choix — parler à un serveur local en HTTP plutôt que compiler Whisper en
+dur dans le binaire — garde le cœur **pur Rust et statique**, exactement comme le moteur local
+parle à vLLM.
+
+La façade `Kitsune` (le cerveau derrière une seule porte) ouvre le store, le coffre audio et lit
+ses réglages dans `config.json` ; c'est ce qu'un cœur tient et ce que la GUI configure.
+
+Ce qui suit (voix de synthèse, intégration au cœur et à la page du téléphone) arrive incrément par
+incrément
+
+Ce qui suit (voix de synthèse…) arrive incrément par incrément, chacun testé avant le
 suivant. Le choix du moteur de voix et le test d'écoute à l'aveugle se font sur les
 postes, là où les modèles peuvent être servis.
