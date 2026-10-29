@@ -201,3 +201,61 @@ async fn a_guest_is_turned_away_unless_the_brain_has_a_network_token() {
         .unwrap()
         .contains("secret du coffre"));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_voice_capture_bigger_than_the_usual_body_cap_waits_for_a_review_then_is_corrected() {
+    use base64::Engine;
+    let dir = tempfile::tempdir().unwrap();
+    let home = node(dir.path()).await;
+    let port = home.gateway_port;
+    let owner = "token=owner";
+
+    // half a megabyte of wav: far past MAX_BODY, about sixteen seconds of 16 kHz mono
+    let wav = vec![7u8; 512 * 1024];
+    let audio = base64::engine::general_purpose::STANDARD.encode(&wav);
+    let (st, kept) = call(
+        port,
+        owner,
+        "POST",
+        "/api/kitsune",
+        Some(json!({"action": "ingest_voice", "audio": audio, "place": "kitchen"})),
+    )
+    .await;
+    assert_eq!(st, 200, "{kept}");
+    let id = kept["id"].as_i64().unwrap();
+
+    // no speech server is set, so the audio is kept and the note asks for a review
+    let (_, got) = call(port, owner, "GET", "/api/kitsune", None).await;
+    assert_eq!(got["notes"], 1);
+    let (_, note) = call(
+        port,
+        owner,
+        "POST",
+        "/api/kitsune",
+        Some(json!({"action": "get_note", "id": id})),
+    )
+    .await;
+    assert_eq!(note["note"]["status"], "needs_review");
+    assert_eq!(note["note"]["text"], "");
+
+    // the owner writes what was said; the note stops asking
+    let (st, fixed) = call(
+        port,
+        owner,
+        "POST",
+        "/api/kitsune",
+        Some(json!({"action": "correct_note", "id": id, "text": "Rappeler le dentiste"})),
+    )
+    .await;
+    assert_eq!((st, fixed["ok"].as_bool()), (200, Some(true)));
+    let (_, note) = call(
+        port,
+        owner,
+        "POST",
+        "/api/kitsune",
+        Some(json!({"action": "get_note", "id": id})),
+    )
+    .await;
+    assert_eq!(note["note"]["status"], "ok");
+    assert_eq!(note["note"]["text"], "Rappeler le dentiste");
+}

@@ -89,6 +89,8 @@ fn page_version() -> &'static str {
     })
 }
 const MAX_BODY: usize = 64 * 1024;
+/// A voice capture, base64 included: three minutes of 16 kHz mono wav in one request.
+const MAX_VOICE_BODY: usize = 8 * 1024 * 1024;
 /// One part of an upload, base64 included (the page sends 512 KiB of file per part).
 const MAX_PART_BODY: usize = 1024 * 1024;
 const MAX_UPLOAD: u64 = 25 * 1024 * 1024;
@@ -1075,6 +1077,8 @@ impl Gateway {
             .unwrap_or(0);
         let limit = if path == "/api/upload" {
             MAX_PART_BODY
+        } else if path == "/api/kitsune" {
+            MAX_VOICE_BODY
         } else {
             MAX_BODY
         };
