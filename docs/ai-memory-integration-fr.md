@@ -136,3 +136,46 @@ But : au début d'un fil du moteur local, injecter un bref `memory_briefing` dan
 
 A (préréglage MCP) → B (service géré + fiche GUI) → C (harnais frontier) → D (briefing) → E (docs).
 A seul apporte déjà l'essentiel : les agents du moteur local utilisent AI-Memory.
+
+---
+
+# Intégrer des « agent skills » depuis GitHub (Karpathy, Graphify, security-audit…)
+
+Au-delà d'AI-Memory, Ben veut intégrer des **skills d'agent** publiées sur GitHub. Ce sont des
+bundles au format `SKILL.md` (parfois avec des scripts). Inari a déjà tout pour les accueillir :
+le **moteur local lit une bibliothèque de skills** (`crates/kitsune`… non — `crates/inari-core/src/engine/defs.rs`,
+fonction `skills()`, charge `<engine>/skills/<id>/SKILL.md`), et la fiche MCP/bibliothèque de
+l'engine sait déjà créer/éditer des skills (`engine/library.rs`, actions `item_save` etc.).
+
+## Approche (cohérente, à coder)
+
+Un mécanisme **« Installer une skill depuis GitHub »** dans la bibliothèque de skills du moteur :
+- champ URL d'un dépôt (ou `owner/repo[@ref][:sous-dossier]`) ;
+- le cœur récupère le `SKILL.md` (et le dossier de la skill) via l'API GitHub ou un `git clone`
+  peu profond, et l'écrit dans `<engine>/skills/<id>/` ;
+- l'id vient du front-matter du `SKILL.md` ou du nom du dépôt ; rien en dur.
+- Vérifie la licence du dépôt (MIT/Apache attendu) et affiche-la ; ne récupère pas de secret.
+- Les frontier (Claude Code, Codex…) ont leur propre dossier de skills ; prévois d'y copier la
+  skill aussi (ou documente `install` par harnais), selon leur format.
+
+Côté GUI : dans `foxLibrary(node, harness, "skills")` (app.js), un bouton « Installer depuis
+GitHub » (champ URL → action node `openfox.library`/engine `library` « skill_install_git »).
+Côté Rust : une action dans `engine/library.rs` qui fait le fetch et l'écriture, testée contre un
+faux dépôt servi en local (pas d'accès réseau requis pour le test).
+
+## Les dépôts demandés (à confirmer / préciser)
+
+- **security-audit** → **`cloudflare/security-audit-skill`** (confirmé) : audit de sécurité
+  multi-phase, findings vérifiés et lisibles machine. Licence à vérifier (afficher).
+- **graphify** → *à préciser par Ben* : plusieurs dépôts « graphify » existent (ex.
+  `PabloViniegra/setup-graphify`, `devxit/graphify-me`, l'écosystème Hermes/LLM-Wiki). Demander
+  l'URL exacte.
+- **skills de Karpathy** → *à préciser par Ben* : aucun dépôt « skill » trouvé sous `owner:karpathy` ;
+  demander l'URL exacte (peut-être un dépôt d'un autre auteur « d'après Karpathy », ou un nom sans
+  le mot « skill »).
+
+## Rappels
+
+Local-first, rien en dur, licences MIT/Apache, esthétique inchangée, `./verify.sh` vert, un PR par
+étape, tests contre de faux serveurs/dépôts. Les skills installées deviennent disponibles aux
+agents du moteur local (et, selon C ci-dessus, aux harnais frontier).
