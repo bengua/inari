@@ -21,6 +21,8 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast;
 
 const INDEX: &str = include_str!("../web/index.html");
+/// The Kitsune page: the voice notebook, served beside the shell and sharing its palette.
+const KITSUNE_INDEX: &str = include_str!("../web/kitsune.html");
 
 /// What the page loads besides itself, under `/assets/`: its style, its script, its fonts.
 /// Public like the page (they hold no data), and cached: their URLs carry the page's version.
@@ -39,6 +41,16 @@ const ASSETS: &[(&str, &str, &[u8])] = &[
         "i18n.js",
         "text/javascript; charset=utf-8",
         include_bytes!("../web/i18n.js"),
+    ),
+    (
+        "kitsune.css",
+        "text/css; charset=utf-8",
+        include_bytes!("../web/kitsune.css"),
+    ),
+    (
+        "kitsune.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../web/kitsune.js"),
     ),
     (
         "fonts/ibm_plex_sans.woff2",
@@ -69,6 +81,7 @@ fn page_version() -> &'static str {
     static V: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     V.get_or_init(|| {
         let mut all = INDEX.as_bytes().to_vec();
+        all.extend_from_slice(KITSUNE_INDEX.as_bytes());
         for (_, _, body) in ASSETS {
             all.extend_from_slice(body);
         }
@@ -1111,6 +1124,10 @@ impl Gateway {
             let page = INDEX.replace("__INARI_PAGE__", page_version());
             return send(w, 200, "text/html; charset=utf-8", page.as_bytes()).await;
         }
+        if get && r.path == "/kitsune" {
+            let page = KITSUNE_INDEX.replace("__INARI_PAGE__", page_version());
+            return send(w, 200, "text/html; charset=utf-8", page.as_bytes()).await;
+        }
         if get && r.path.starts_with("/assets/") {
             let rel = r.path.trim_start_matches("/assets/");
             return match ASSETS.iter().find(|(name, _, _)| *name == rel) {
@@ -2102,12 +2119,14 @@ impl Gateway {
             };
         }
         if r.method == "GET" {
+            let mascot = self.mascot_dir.is_some();
             let status = self
-                .with_kitsune(|k| {
+                .with_kitsune(move |k| {
                     let s = k.settings();
                     json!({"settings": s, "asr_ready": s.asr.ready(), "tts_ready": s.tts.ready(),
                            "notes": k.store().notes_between(0.0, f64::MAX).map(|n| n.len()).unwrap_or(0),
-                           "triggers": k.store().list_triggers().map(|t| t.len()).unwrap_or(0)})
+                           "triggers": k.store().list_triggers().map(|t| t.len()).unwrap_or(0),
+                           "mascot": mascot})
                 })
                 .await
                 .unwrap_or(json!({}));

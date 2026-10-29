@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kitsune — Inari</title>
+<meta name="inari-page" content="__INARI_PAGE__">
+<link rel="preload" href="/assets/fonts/ibm_plex_sans.woff2?v=__INARI_PAGE__" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/app.css?v=__INARI_PAGE__">
+<link rel="stylesheet" href="/assets/kitsune.css?v=__INARI_PAGE__">
+<script src="/assets/kitsune.js?v=__INARI_PAGE__" defer></script>
+</head>
+<body class="kit">
+<div id="login" class="glass" hidden>
+  <h2>Kitsune</h2>
+  <label for="tokenInput">Access token or pass</label>
+  <small id="loginWhy" class="empty"></small>
+  <input id="tokenInput" type="password" autocomplete="current-password">
+  <button class="btn go" id="tokenGo">Connect</button>
+</div>
+
+<div id="kapp" hidden>
+  <header id="kbar">
+    <div class="kbrand"><h1>Kitsune</h1><small>your voice notebook, on your own core</small></div>
+    <span class="sp"></span>
+    <span class="state" id="kAsr" title="Speech to text">ASR</span>
+    <span class="state" id="kTts" title="Text to speech">TTS</span>
+    <a class="btn small" href="/" title="Back to Inari">Inari</a>
+  </header>
+  <main id="kmain">
+    <section id="kstage" class="glass" aria-label="FoxBot">
+      <div id="kfox"></div>
+      <p id="ksay" role="status" aria-live="polite"></p>
+    </section>
+    <aside id="kside">
+      <section class="glass kcard">
+        <h2>Memory</h2>
+        <dl class="kgrid">
+          <dt>Notes</dt><dd id="kNotes">—</dd>
+          <dt>Reminders</dt><dd id="kTriggers">—</dd>
+        </dl>
+      </section>
+      <section class="glass kcard">
+        <h2>Local servers</h2>
+        <dl class="kgrid">
+          <dt>Speech to text</dt><dd id="kAsrUrl">—</dd>
+          <dt>Text to speech</dt><dd id="kTtsUrl">—</dd>
+          <dt>Embeddings</dt><dd id="kEmbed">—</dd>
+        </dl>
+      </section>
+      <section class="glass kcard">
+        <h2>What this page will do</h2>
+        <ul class="klist">
+          <li>Hold the talk button and speak: the note is stored and written out on this core.</li>
+          <li>Search what you said, read it back aloud, correct or delete it.</li>
+          <li>Set reminders by time or by place.</li>
+          <li>Point the core at your own speech and embedding servers.</li>
+        </ul>
+      </section>
+    </aside>
+  </main>
+</div>
+<div id="toast" class="glass" role="status" aria-live="polite"></div>
+</body>
+</html>
