@@ -99,7 +99,7 @@ fn fts_query(q: &str) -> String {
 }
 
 pub struct Store {
-    conn: Connection,
+    pub(crate) conn: Connection,
 }
 
 impl Store {
