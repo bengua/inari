@@ -2194,6 +2194,20 @@ impl Gateway {
                     .await
                 }
             }
+            "list_notes" => {
+                let limit = d
+                    .get("limit")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(20)
+                    .clamp(1, 200) as usize;
+                self.with_kitsune(move |k| {
+                    k.store()
+                        .recent_notes(limit)
+                        .map(|notes| json!({"notes": notes}))
+                        .map_err(|e| e.to_string())
+                })
+                .await
+            }
             "search" => {
                 let query = s(&d, "query");
                 let opts = kitsune::SearchOptions {
@@ -2259,10 +2273,9 @@ impl Gateway {
             "get_note" => {
                 let id = d.get("id").and_then(Value::as_i64).unwrap_or(-1);
                 self.with_kitsune(move |k| {
-                    k.store()
-                        .get_note(id)
-                        .map(|n| json!({"note": n}))
-                        .map_err(|e| e.to_string())
+                    let note = k.store().get_note(id).map_err(|e| e.to_string())?;
+                    let audio = k.store().audio_of(id).map_err(|e| e.to_string())?;
+                    Ok(json!({"note": note, "audio": audio}))
                 })
                 .await
             }

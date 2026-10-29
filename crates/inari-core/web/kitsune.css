@@ -45,4 +45,16 @@ textarea.kfield { resize:vertical; min-height:56px; }
 .kmore .kfield, .kmore .btn { margin-top:8px; }
 #kReview { margin-top:14px; padding-top:12px; border-top:1px solid var(--hair); }
 #kReview .btn { margin-top:8px; }
+#kmem { grid-column:1 / -1; }
+.kfind { display:flex; align-items:center; gap:8px; }
+.kfind .kfield { flex:1; min-width:0; }
+#kNotesList { margin:10px 0 0; }
+.knote { padding:10px 12px; border:1px solid var(--hair); border-radius:11px; background:var(--bg); }
+.knote + .knote { margin-top:8px; }
+.knote-text { margin:0; font-size:14px; line-height:1.45; overflow-wrap:anywhere; }
+.knote-text.waiting { color:var(--faint); font-style:italic; }
+.knote .kmeta { margin-top:5px; }
+.knote-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:9px; }
+.knote-fix { margin-top:9px; }
+.knote-fix .btn { margin-top:8px; margin-right:6px; }
 @media (max-width:820px) { #kmain { grid-template-columns:minmax(0,1fr); } #kstage { min-height:46vh; } }

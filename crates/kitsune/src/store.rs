@@ -202,6 +202,16 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
+    /// The newest notes first, however many are asked for: what the memory shows when nobody
+    /// typed a word.
+    pub fn recent_notes(&self, limit: usize) -> Result<Vec<Note>> {
+        let mut st = self.conn.prepare(&format!(
+            "SELECT {NOTE_COLUMNS} FROM notes ORDER BY created_at DESC, id DESC LIMIT ?1"
+        ))?;
+        let rows = st.query_map(params![limit as i64], note_of)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
     /// Keep a note's vector for a model (replacing the one it had).
     pub fn set_embedding(&self, note_id: i64, model: &str, vector: &[f32]) -> Result<()> {
         if model.is_empty() || vector.is_empty() {
