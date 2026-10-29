@@ -549,6 +549,8 @@ async function foxMcp(node, harness) { const data = await foxRead(node, harness,
   const url = foxField(form, t("Its address"), Object.assign(document.createElement("input"), { type: "text", placeholder: "https://example.com/mcp", spellcheck: false }));
   const headers = foxField(form, t("Its headers, one Name: value a line"), document.createElement("textarea")); headers.rows = 2; headers.spellcheck = false;
   const show = () => { const http = kind.value === "http"; for (const [x, on] of [[command, !http], [env, !http], [url, http], [headers, http]]) x.parentElement.hidden = !on; }; kind.onchange = show; show();
+  // a preset: AI-Memory (akitaonrails/ai-memory), long-term shared memory for the agents, over its MCP bridge
+  form.append(foxBtn(t("AI-Memory (shared agent memory)"), () => { name.value = "ai-memory"; kind.value = "stdio"; command.value = "ai-memory mcp-bridge"; show(); name.focus(); }));
   form.append(Object.assign(document.createElement("small"), { className: "empty", textContent: t("The values go to OpenFox and nowhere else: Inari neither keeps nor shows them.") }));
   const body = () => ({ name: name.value.trim(), transport: kind.value, command: command.value, env: env.value, url: url.value, headers: headers.value });
   const row = document.createElement("div"); row.className = "row2"; row.append(foxBtn(t("Test"), () => foxNodeAct(node, harness, "mcp_test", body())), foxBtn(t("Add"), () => { act("mcp_add", body()); env.value = ""; headers.value = ""; }, "go")); form.append(row);
