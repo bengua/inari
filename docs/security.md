@@ -61,6 +61,26 @@ signed again.
 Archives are extracted with traversal protection; the workspace restore refuses
 paths that leave the target directory.
 
+## The web page
+
+- **Sessions.** A page signs in once (`POST /api/session` with the owner's token or a pass) and
+  holds a cookie its script cannot read (`HttpOnly`) and another site never sends
+  (`SameSite=Strict`; `Secure` when the gate says the page came over HTTPS). The cookie is signed
+  with a key kept in the gateway's data directory (`session.key`) and names what opened it by a
+  hash only: a new owner token ends every owner session, a revoked pass ends its session at the
+  next request. `POST /api/logout` clears it. API clients may still send the token in an
+  `Authorization: Bearer` header; `?token=` is still read for older clients and should not be
+  used (a URL ends up in histories and logs).
+- **Wrong secrets** make the address wait: five are answered, then each next attempt waits
+  twice as long as the one before, up to five minutes (`429` with `retry_after`).
+- **Cross-site requests.** Every write is a JSON `POST`: another site can neither send the
+  cookie (`SameSite=Strict`) nor post JSON without a preflight the gateway never grants.
+- **Content policy.** `script-src 'self'` (no inline script: the page's script is a file),
+  `frame-ancestors 'none'`, `base-uri 'none'`, `object-src 'none'`, `Referrer-Policy:
+  no-referrer`. Inline style attributes remain allowed.
+- **Limits.** At most 512 connections at once (beyond that a connection is closed at once), and
+  a request must arrive whole within 60 seconds.
+
 ## Not covered
 
 Encryption of links (the TCP transport authenticates and signs every frame but does

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # What must be true of this repository, by hand and in CI alike: the license is
-# whole, the Rust core and the Python reference build and pass their tests, and the
-# two speak the same bytes (the interoperability tests run the Rust binary).
+# whole, and the Rust core is formatted, lint-clean, tested and builds. Rust only:
+# nothing else is installed or run.
 set -u
 FAIL() { echo "$1"; echo "FAILED"; exit 1; }
 DIR=$(cd "$(dirname "$0")" && pwd)
@@ -23,15 +23,7 @@ cargo fmt --all -- --check || FAIL "rustfmt"
 cargo clippy --all-targets --quiet -- -D warnings || FAIL "clippy"
 cargo test --quiet || FAIL "cargo test"
 cargo build --quiet || FAIL "cargo build"
-export INARI_RS_BIN="$DIR/target/debug/inari-core-rs"
 echo "OK  rust: rustfmt, clippy, tests, build"
-
-# Python reference: lint and tests, the Rust/Python interoperability included.
-command -v uv >/dev/null || FAIL "uv absent: install it (https://docs.astral.sh/uv/)"
-uv sync --all-extras -q || FAIL "uv sync failed"
-uv run ruff check . || FAIL "ruff"
-timeout 300 uv run pytest -q || FAIL "pytest"
-echo "OK  python: ruff, pytest"
 
 # English throughout, when english-check is installed (required where the CI says so:
 # REQUIRE_ENGLISH_CHECK=1, or a CI image that carries it). Legitimately non-English

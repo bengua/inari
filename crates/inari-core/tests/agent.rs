@@ -1,4 +1,4 @@
-//! The ACP harness against the scripted fake agent shared with the Python tests.
+//! The ACP harness against the scripted fake agent (`inari-core-rs fake-agent`).
 
 use inari_core::agent::{AcpHarness, Approver, Runner};
 use inari_core::capsule::attach::Attached;
@@ -19,9 +19,9 @@ struct Lab {
 }
 
 fn fake(log: &Path, sessions: &Path, images: bool) -> AcpHarness {
-    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fake_acp.py");
+    let script = env!("CARGO_BIN_EXE_inari-core-rs");
     let mut h = AcpHarness::new(
-        vec!["python3".into(), script.display().to_string()],
+        vec![script.to_string(), "fake-agent".into()],
         sessions.to_path_buf(),
     );
     h.extra_env
@@ -551,4 +551,165 @@ async fn a_thread_under_a_pass_is_never_in_auto_mode() {
         out.final_text.contains("permission result: deny"),
         "{out:?}"
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_streamed_answer_does_not_flood_the_mesh_with_its_phase() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("acp.log");
+    let host = Arc::new(CapsuleHost::new("n1", &dir.path().join("node")).unwrap());
+    let harness = fake(&log, &dir.path().join("sessions.json"), false);
+    let sent: Arc<std::sync::Mutex<Vec<(String, Value)>>> = Arc::default();
+    let seen = Arc::clone(&sent);
+    let publish: inari_core::agent::Publisher = Arc::new(move |subject: &str, payload: Value| {
+        seen.lock().unwrap().push((subject.to_string(), payload));
+    });
+    let runner = Runner::new(host, vec![("fake".into(), harness)], Some(publish), None);
+    let agent = runner.create("t1", "", "a title").unwrap();
+    let out = runner.run(&agent, "please stream", vec![]).await;
+    assert!(
+        out.final_text.starts_with("w0 w1 ") && out.final_text.ends_with("w399"),
+        "{}",
+        out.final_text
+    );
+    let phases: Vec<String> = sent
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(s, _)| s == &format!("agent.{agent}.state"))
+        .map(|(_, p)| p["phase"].as_str().unwrap_or("").to_string())
+        .collect();
+    let inference = phases.iter().filter(|p| *p == "inference").count();
+    assert!(
+        (1..=3).contains(&inference),
+        "400 pieces, {inference} announcements: {phases:?}"
+    );
+    assert_eq!(
+        phases.last().map(String::as_str),
+        Some("idle"),
+        "the end of the turn always goes out"
+    );
+    // the answer so far goes to the pages as it comes, a few times, never once per piece; empty at the end
+    let drafts: Vec<String> = sent
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(s, _)| s == &format!("draft.{agent}"))
+        .map(|(_, p)| p["text"].as_str().unwrap_or("").to_string())
+        .collect();
+    assert!(
+        drafts.len() >= 2 && drafts.len() < 50,
+        "{} drafts",
+        drafts.len()
+    );
+    assert!(drafts[0].starts_with("w0 "), "{:?}", drafts[0]);
+    assert_eq!(
+        drafts.last().map(String::as_str),
+        Some(""),
+        "the answer is journaled: the draft ends"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_sent_during_a_turn_is_read_at_the_next_step() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("acp.log");
+    let host = Arc::new(CapsuleHost::new("n1", &dir.path().join("node")).unwrap());
+    let mut harness = fake(&log, &dir.path().join("sessions.json"), false);
+    harness.steer = true; // this harness lets a message in at the next step
+    let runner = Runner::new(host, vec![("fake".into(), harness)], None, None);
+    let agent = runner.create("t1", "", "a title").unwrap();
+    let l = Lab {
+        _dir: dir,
+        log,
+        runner,
+        agent,
+    };
+    let (runner, agent) = (Arc::clone(&l.runner), l.agent.clone());
+    let started = std::time::Instant::now();
+    let first =
+        tokio::spawn(async move { runner.run(&agent, "please do the steps", vec![]).await });
+    tokio::time::sleep(std::time::Duration::from_millis(400)).await; // step 0 is running
+    let second = l.runner.run(&l.agent, "change of plan", vec![]).await;
+    let first = first.await.unwrap();
+    assert_eq!(
+        first.stopped,
+        "steered",
+        "{} / {} / {:?}",
+        first.error,
+        first.final_text,
+        started.elapsed()
+    );
+    assert!(
+        first.final_text.starts_with("stopped after step"),
+        "{}",
+        first.final_text
+    );
+    assert!(
+        !first.final_text.contains("step 5"),
+        "it did not run to the end: {}",
+        first.final_text
+    );
+    assert!(
+        second.final_text.contains("change of plan"),
+        "{}",
+        second.final_text
+    );
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(4),
+        "{:?}",
+        started.elapsed()
+    );
+    let kinds: Vec<(String, Value)> = journal(&l);
+    let steered = kinds
+        .iter()
+        .position(|(k, d)| k == "checkpoint" && d["reason"] == "steered")
+        .expect("the stop is in the journal");
+    let read = kinds
+        .iter()
+        .position(|(k, d)| k == "user_message" && d["text"] == "change of plan")
+        .expect("the message is in the journal");
+    assert!(steered < read, "stopped, then read: {kinds:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_answer_without_steps_is_not_cut_for_a_message() {
+    let l = lab(false, None);
+    let (runner, agent) = (Arc::clone(&l.runner), l.agent.clone());
+    let first = tokio::spawn(async move { runner.run(&agent, "please stream", vec![]).await });
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await; // the first turn holds the thread
+    let second = l.runner.run(&l.agent, "next one", vec![]).await;
+    let first = first.await.unwrap();
+    assert_eq!(first.stopped, "done");
+    assert!(
+        first.final_text.ends_with("w399"),
+        "the whole answer: {}",
+        first.final_text
+    );
+    assert!(
+        second.final_text.contains("next one"),
+        "{}",
+        second.final_text
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn without_steer_the_agent_finishes_its_turn_before_the_message() {
+    let l = lab(false, None); // steer is off unless the harness asks for it (OpenFox's own way of working)
+    let (runner, agent) = (Arc::clone(&l.runner), l.agent.clone());
+    let first =
+        tokio::spawn(async move { runner.run(&agent, "please do the steps", vec![]).await });
+    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+    let second = l.runner.run(&l.agent, "change of plan", vec![]).await;
+    let first = first.await.unwrap();
+    assert_eq!(first.stopped, "done");
+    assert_eq!(first.final_text, "all six steps done");
+    assert!(
+        second.final_text.contains("change of plan"),
+        "{}",
+        second.final_text
+    );
+    assert!(!journal(&l)
+        .iter()
+        .any(|(k, d)| k == "checkpoint" && d["reason"] == "steered"));
 }

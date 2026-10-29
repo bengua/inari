@@ -1,5 +1,4 @@
-//! Discovery, liveness and telemetry, as the Python reference (`inari_core.mesh`):
-//! nodes announce and heartbeat, the registry keeps the live ones, the coordinator
+//! Discovery, liveness and telemetry: nodes announce and heartbeat, the registry keeps the live ones, the coordinator
 //! answers teleport requests, and the mascot is a pure function of the telemetry.
 
 use crate::bus::Bus;

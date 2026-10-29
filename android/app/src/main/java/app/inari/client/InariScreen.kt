@@ -29,6 +29,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -57,6 +59,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 
 /**
@@ -76,6 +79,28 @@ object InariHost {
         if (a.scheme != "https" || b.scheme != "https" || a.host == null) return false
         fun port(u: java.net.URI) = if (u.port == -1) 443 else u.port
         return a.host.equals(b.host, ignoreCase = true) && port(a) == port(b)
+    }
+
+    /**
+     * The text the page asks to share ("inari-share:" then the text, percent-encoded): a WebView has
+     * no share sheet of its own, so the page asks the app for Android's. Null for any other address.
+     */
+    fun sharedText(url: String): String? {
+        if (!url.startsWith(SHARE)) return null
+        return runCatching { java.net.URLDecoder.decode(url.removePrefix(SHARE), "UTF-8") }
+            .getOrNull()?.takeIf { it.isNotBlank() }
+    }
+
+    private const val SHARE = "inari-share:"
+
+    /** What to tell the person when the page does not load: a step they can take, by cause. */
+    fun hint(why: String): Int = when {
+        why == "certificate" -> R.string.inari_hint_certificate
+        listOf("NAME_NOT_RESOLVED", "ADDRESS_UNREACHABLE", "INTERNET_DISCONNECTED", "NETWORK_CHANGED")
+            .any { why.contains(it) } -> R.string.inari_hint_network
+        listOf("CONNECTION_REFUSED", "CONNECTION_RESET", "TIMED_OUT", "CONNECTION_CLOSED", "EMPTY_RESPONSE")
+            .any { why.contains(it) } -> R.string.inari_hint_core
+        else -> R.string.inari_hint_other
     }
 }
 
@@ -108,11 +133,13 @@ fun InariScreen(onMenu: () -> Unit, shared: Handoff? = null, sharedTaken: () -> 
         view.evaluateJavascript("typeof window.inariKeyboard === 'function'") { pageRidesKeyboard = it == "true" }
     }
     val imeInsets = WindowInsets.ime
+    val navInsets = WindowInsets.navigationBars
     val density = LocalDensity.current
     LaunchedEffect(pageRidesKeyboard, webView) {
         val view = webView
         if (!pageRidesKeyboard || view == null) return@LaunchedEffect
-        snapshotFlow { imeInsets.getBottom(density) }.collect { px ->
+        // the view already stands above the navigation bar: the page is told only what the keyboard adds
+        snapshotFlow { (imeInsets.getBottom(density) - navInsets.getBottom(density)).coerceAtLeast(0) }.collect { px ->
             view.evaluateJavascript("window.inariKeyboard && window.inariKeyboard(${px / density.density})", null)
         }
     }
@@ -144,7 +171,9 @@ fun InariScreen(onMenu: () -> Unit, shared: Handoff? = null, sharedTaken: () -> 
     BackHandler { if (canGoBack) webView?.goBack() else onMenu() }
 
     val keyboard = if (pageRidesKeyboard) Modifier else Modifier.imePadding()
-    Box(Modifier.fillMaxSize().background(Fox.Graphite).statusBarsPadding().then(keyboard)) {
+    // Edge to edge (forced from Android 15): the page stays clear of the status and navigation bars;
+    // the keyboard padding comes after, so it adds only what the navigation bar does not cover.
+    Box(Modifier.fillMaxSize().background(Fox.Graphite).statusBarsPadding().navigationBarsPadding().then(keyboard)) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
@@ -192,6 +221,16 @@ fun InariScreen(onMenu: () -> Unit, shared: Handoff? = null, sharedTaken: () -> 
                     webViewClient = object : WebViewClient() {
                         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                             if (InariHost.sameOrigin(settings.inariUrl, request.url.toString())) return false
+                            InariHost.sharedText(request.url.toString())?.let { text ->
+                                runCatching {
+                                    val send = android.content.Intent(android.content.Intent.ACTION_SEND)
+                                        .setType("text/plain")
+                                        .putExtra(android.content.Intent.EXTRA_TEXT, text)
+                                    ctx.startActivity(android.content.Intent.createChooser(send, null)
+                                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                                }
+                                return true
+                            }
                             runCatching {
                                 ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, request.url)
                                     .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -242,7 +281,8 @@ fun InariScreen(onMenu: () -> Unit, shared: Handoff? = null, sharedTaken: () -> 
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(stringResource(R.string.inari_unreachable), color = Fox.Ink)
-                Text("$base: $why", color = Fox.InkDim, modifier = Modifier.padding(top = 8.dp))
+                Text(stringResource(InariHost.hint(why)), color = Fox.InkDim, modifier = Modifier.padding(top = 8.dp))
+                Text("$base · $why", color = Fox.InkDim, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
                 Button(
                     onClick = { failure = null; triedStored = false; webView?.loadUrl(settings.inariUrl) },
                     modifier = Modifier.padding(top = 16.dp),
@@ -287,6 +327,18 @@ fun InariScreen(onMenu: () -> Unit, shared: Handoff? = null, sharedTaken: () -> 
 /** The largest file the share sheet hands to the page (the core takes 25 MB). */
 private const val SHARE_LIMIT = 20L * 1024 * 1024
 
+/** Up to [max] bytes of the stream (InputStream.readNBytes needs API 33; the app runs from 29). */
+private fun java.io.InputStream.readNBytesCompat(max: Int): ByteArray {
+    val out = java.io.ByteArrayOutputStream()
+    val buf = ByteArray(64 * 1024)
+    while (out.size() < max) {
+        val n = read(buf, 0, minOf(buf.size, max - out.size()))
+        if (n < 0) break
+        out.write(buf, 0, n)
+    }
+    return out.toByteArray()
+}
+
 /**
  * What the page's `window.inariShare` receives: `{text, files: [{name, mime, b64}]}`,
  * as a JSON literal. A file too large or unreadable is left out, its name said in the text.
@@ -301,9 +353,15 @@ fun sharePayload(context: Context, shared: Handoff): String {
                 if (it.moveToFirst()) it.getString(0) else null
             }
         }.getOrNull() ?: ("shared." + shared.mime.substringAfter('/'))
-        val bytes = runCatching {
+        val size = runCatching {
+            context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use {
+                if (it.moveToFirst() && !it.isNull(0)) it.getLong(0) else null
+            }
+        }.getOrNull()
+        // read at most one byte past the limit: a provider that does not say its size cannot fill memory either
+        val bytes = if (size != null && size > SHARE_LIMIT) null else runCatching {
             context.contentResolver.openInputStream(uri)?.use { input ->
-                val data = input.readBytes()
+                val data = input.readNBytesCompat(SHARE_LIMIT.toInt() + 1)
                 data.takeIf { it.size <= SHARE_LIMIT }
             }
         }.getOrNull()

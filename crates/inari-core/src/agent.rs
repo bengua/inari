@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{mpsc, oneshot};
@@ -40,7 +40,7 @@ pub type Approver =
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct RunSummary {
-    pub stopped: String, // done | frozen | error
+    pub stopped: String, // done | frozen | error | cancelled | steered (stopped for a message sent meanwhile)
     pub final_text: String,
     pub error: String,
 }
@@ -150,28 +150,32 @@ pub struct Turn {
     pub mode: String,
     /// The pass this thread runs under (empty: the owner's own thread).
     pub pass: String,
+    /// No new message: the agent takes up its last turn again (Runner::resume).
+    pub resume: bool,
+    /// A workflow this message launches, or the waiting run it takes up (OpenFox only).
+    pub workflow: Option<crate::openfox::Launch>,
 }
 
 impl Turn {
-    fn path(&self) -> PathBuf {
+    pub(crate) fn path(&self) -> PathBuf {
         self.runner.host.agents.join(&self.agent)
     }
-    fn append(&self, kind: EventKind, data: Value) -> Option<TimelineEvent> {
+    pub(crate) fn append(&self, kind: EventKind, data: Value) -> Option<TimelineEvent> {
         let author = format!("{}@{}", self.runner.host.node_id, self.agent);
         io::append_event(&self.path(), &author, kind, data, now())
             .ok()
             .and_then(|c| c.timeline.ordered().last().cloned().cloned())
     }
-    fn emit(&self, e: &TimelineEvent) {
+    pub(crate) fn emit(&self, e: &TimelineEvent) {
         self.runner.emit(&self.agent, e);
     }
-    fn phase(&self, phase: &str) {
+    pub(crate) fn phase(&self, phase: &str) {
         self.runner.set_phase(&self.agent, phase);
     }
-    fn running(&self) -> bool {
+    pub(crate) fn running(&self) -> bool {
         self.runner.host.status(&self.agent) == "running"
     }
-    fn cancelled(&self) -> bool {
+    pub(crate) fn cancelled(&self) -> bool {
         self.runner
             .cancels
             .lock()
@@ -225,6 +229,10 @@ pub struct AcpHarness {
     /// pass id): a HOME of its own, so the agent reads none of the owner's instructions,
     /// tools or credentials. Empty: pass threads share the owner's environment.
     pub pass_env: BTreeMap<String, String>,
+    /// Stop the agent's step at the next tool boundary to read a message sent during its turn
+    /// (session/cancel, then the message). Off: the message waits for the turn to end, as ACP
+    /// has it, and the agent's own way of working (OpenFox's, say) is never interrupted.
+    pub steer: bool,
     models_set: Mutex<HashMap<String, String>>,
     modes_set: Mutex<HashMap<String, String>>,
 }
@@ -287,6 +295,7 @@ impl AcpHarness {
             prepare: Vec::new(),
             prepare_timeout: Duration::from_secs(600),
             pass_env: BTreeMap::new(),
+            steer: false,
             models_set: Mutex::default(),
             modes_set: Mutex::default(),
         }
@@ -464,60 +473,7 @@ impl AcpHarness {
 
     /// Make the chosen model ready before the agent asks it anything.
     async fn make_ready(&self, t: &Turn) -> Result<(), String> {
-        if self.prepare.is_empty() || t.model.is_empty() {
-            return Ok(());
-        }
-        t.phase("loading");
-        let args: Vec<String> = self
-            .prepare
-            .iter()
-            .map(|a| a.replace("{model}", &t.model))
-            .collect();
-        let mut cmd = Command::new(&args[0]);
-        cmd.args(&args[1..])
-            .current_dir(&t.workdir)
-            .env_clear()
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .process_group(0)
-            .kill_on_drop(true);
-        for k in ENV_KEEP {
-            if let Ok(v) = std::env::var(k) {
-                cmd.env(k, v);
-            }
-        }
-        cmd.envs(&self.extra_env);
-        let child = cmd
-            .spawn()
-            .map_err(|e| format!("cannot start the model preparation: {e}"))?;
-        let pid = child.id();
-        match tokio::time::timeout(self.prepare_timeout, child.wait_with_output()).await {
-            Ok(Ok(out)) if out.status.success() => Ok(()),
-            Ok(Ok(out)) => {
-                let mut why = String::from_utf8_lossy(&out.stderr).trim().to_string();
-                if why.is_empty() {
-                    why = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                }
-                Err(format!(
-                    "the model {} could not be made ready: {}",
-                    t.model,
-                    why.chars().take(400).collect::<String>()
-                ))
-            }
-            Ok(Err(e)) => Err(e.to_string()),
-            Err(_) => {
-                if let Some(pid) = pid {
-                    // SAFETY: signalling the process group spawn() created.
-                    unsafe { libc::kill(-(pid as i32), libc::SIGKILL) };
-                }
-                Err(format!(
-                    "the model {} was not ready within {}s",
-                    t.model,
-                    self.prepare_timeout.as_secs()
-                ))
-            }
-        }
+        prepare_model(&self.prepare, self.prepare_timeout, &self.extra_env, t).await
     }
 
     pub async fn turn(&self, t: &Turn) -> RunSummary {
@@ -680,11 +636,20 @@ impl AcpHarness {
         let mut tick = tokio::time::interval(Duration::from_millis(500));
         let mut cancelled = false;
         let mut grace = 0u32;
+        // steps the agent finished (tool results), and how many it had when a message came meanwhile
+        let (mut finished, mut steer_from) = (0usize, None::<usize>);
         loop {
             tokio::select! {
                 biased;
                 Some(msg) = incoming.recv() => match msg {
-                    Incoming::Update(u) => self.on_update(t, &u, &mut text, &mut open_calls, &mut summary),
+                    Incoming::Update(u) => {
+                        if u.get("sessionUpdate").and_then(Value::as_str) == Some("tool_call_update")
+                            && matches!(u.get("status").and_then(Value::as_str), Some("completed" | "failed"))
+                        {
+                            finished += 1;
+                        }
+                        acp_update(t, &u, &mut text, &mut open_calls, &mut summary)
+                    }
                     Incoming::Request(id, method, params) => {
                         let reply = if method == "session/request_permission" {
                             let title = params.pointer("/toolCall/title").and_then(Value::as_str).unwrap_or("an action").to_string();
@@ -732,106 +697,26 @@ impl AcpHarness {
                         let _ = rpc.send(&json!({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": sid}})).await;
                         cancelled = true;
                         summary.stopped = "frozen".into();
+                    } else if self.steer && t.runner.waited_on(&t.agent) {
+                        // The person sent a message during the turn, and this harness lets it in (steer).
+                        // ACP takes one prompt at a time, so at the next step boundary (a step finished
+                        // since, none running) this one stops, keeping what it did, and the message goes
+                        // to the same session right after. An answer written without tools is not cut.
+                        let from = *steer_from.get_or_insert(finished);
+                        if finished > from && open_calls.is_empty() {
+                            let _ = rpc.send(&json!({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": sid}})).await;
+                            cancelled = true;
+                            summary.stopped = "steered".into();
+                        }
                     }
                 }
             }
         }
         while let Ok(Incoming::Update(u)) = incoming.try_recv() {
-            self.on_update(t, &u, &mut text, &mut open_calls, &mut summary);
+            acp_update(t, &u, &mut text, &mut open_calls, &mut summary);
         }
-        self.flush(t, &mut text, &mut summary);
+        flush_answer(t, &mut text, &mut summary);
         summary
-    }
-
-    fn flush(&self, t: &Turn, text: &mut String, summary: &mut RunSummary) {
-        let body = text.trim().to_string();
-        text.clear();
-        if !body.is_empty() {
-            if let Some(e) = t.append(EventKind::AssistantMessage, json!({"text": body})) {
-                t.emit(&e);
-            }
-            summary.final_text = body;
-        }
-    }
-
-    fn on_update(
-        &self,
-        t: &Turn,
-        u: &Value,
-        text: &mut String,
-        open: &mut HashMap<String, bool>,
-        summary: &mut RunSummary,
-    ) {
-        match u.get("sessionUpdate").and_then(Value::as_str) {
-            Some("agent_message_chunk") => {
-                let chunk = content_text(u.get("content").unwrap_or(&Value::Null));
-                // Gemini announces a mode change as message text: that is a notice, not its answer
-                if chunk.trim_start().starts_with("[MODE_UPDATE]") {
-                    return;
-                }
-                text.push_str(&chunk);
-                t.phase("inference");
-            }
-            Some("usage_update") => {
-                let n = |k: &str| u.get(k).and_then(Value::as_u64).unwrap_or(0);
-                let cost = u.pointer("/cost/amount").and_then(Value::as_f64);
-                t.runner.set_usage(&t.agent, n("used"), n("size"), cost);
-            }
-            Some("tool_call") => {
-                self.flush(t, text, summary);
-                let call_id = u
-                    .get("toolCallId")
-                    .map(|v| {
-                        v.as_str()
-                            .map(String::from)
-                            .unwrap_or_else(|| v.to_string())
-                    })
-                    .unwrap_or_default();
-                let name = u
-                    .get("title")
-                    .or_else(|| u.get("kind"))
-                    .and_then(Value::as_str)
-                    .unwrap_or("tool");
-                let data = json!({"call_id": call_id, "name": name, "arguments": {"kind": u.get("kind"), "input": u.get("rawInput")}});
-                if let Some(e) = t.append(EventKind::ToolCall, data) {
-                    t.emit(&e);
-                }
-                open.insert(call_id, true);
-            }
-            Some("tool_call_update") => {
-                let status = u.get("status").and_then(Value::as_str).unwrap_or("");
-                if status != "completed" && status != "failed" {
-                    return;
-                }
-                let call_id = u
-                    .get("toolCallId")
-                    .map(|v| {
-                        v.as_str()
-                            .map(String::from)
-                            .unwrap_or_else(|| v.to_string())
-                    })
-                    .unwrap_or_default();
-                if open.remove(&call_id).is_some() {
-                    let mut output = content_text(u.get("content").unwrap_or(&Value::Null));
-                    if output.is_empty() {
-                        output = u
-                            .get("rawOutput")
-                            .map(|v| {
-                                v.as_str()
-                                    .map(String::from)
-                                    .unwrap_or_else(|| v.to_string())
-                            })
-                            .unwrap_or_default();
-                    }
-                    let output: String = output.chars().take(20_000).collect();
-                    let data = json!({"call_id": call_id, "output": output, "is_error": status == "failed"});
-                    if let Some(e) = t.append(EventKind::ToolResult, data) {
-                        t.emit(&e);
-                    }
-                }
-            }
-            _ => {} // thoughts and plans are the agent's own: not journaled
-        }
     }
 
     /// The prompt: optional priming, the user's text with the attachments named, then
@@ -891,60 +776,295 @@ impl AcpHarness {
             .ok_or("the agent gave no session id")?
             .to_string();
         self.remember(&t.agent, &sid);
-        let capsule = io::load(&t.path()).map_err(|e| e.to_string())?;
-        let mut events: Vec<&TimelineEvent> = capsule
-            .timeline
-            .ordered()
-            .into_iter()
-            .filter(|e| e.kind != EventKind::Checkpoint)
-            .collect();
-        if events
-            .last()
-            .is_some_and(|e| e.kind == EventKind::UserMessage)
-        {
-            events.pop(); // this turn's message is sent as the prompt
-        }
-        if events.iter().all(|e| e.kind == EventKind::System) {
-            return Ok((sid, String::new()));
-        }
-        let mut lines: Vec<String> = Vec::new();
-        let mut used = 0;
-        for e in events.iter().rev() {
-            let s: String = summary(e).chars().take(500).collect();
-            if s.is_empty() {
-                continue;
-            }
-            let line = format!("[{}] {s}", e.kind.as_str());
-            if used + line.len() > self.prime_chars {
-                lines.push(format!(
-                    "[…] {} earlier events omitted",
-                    events.len() - lines.len()
-                ));
-                break;
-            }
-            used += line.len();
-            lines.push(line);
-        }
-        lines.reverse();
-        Ok((
-            sid,
-            format!(
-            "You are continuing a conversation that started elsewhere (another machine or model). \
-             Earlier journal, oldest first:\n{}\n\nNew message from the user:",
-            lines.join("\n")
-        ),
-        ))
+        Ok((sid, primer(t, self.prime_chars)?))
     }
 }
+
+/// The answer written so far, journaled as one message (and the pages' draft ended).
+pub(crate) fn flush_answer(t: &Turn, text: &mut String, summary: &mut RunSummary) {
+    let body = text.trim().to_string();
+    let drafted = !text.is_empty();
+    text.clear();
+    if !body.is_empty() {
+        if let Some(e) = t.append(EventKind::AssistantMessage, json!({"text": body})) {
+            t.emit(&e);
+        }
+        summary.final_text = body;
+    }
+    if drafted {
+        t.runner.draft(&t.agent, "", true); // the pages swap their draft for the message
+    }
+}
+
+/// One ACP session update, into the journal: the answer's text, tool calls and their results,
+/// the context use. The native OpenFox harness speaks the same updates (crate::openfox).
+pub(crate) fn acp_update(
+    t: &Turn,
+    u: &Value,
+    text: &mut String,
+    open: &mut HashMap<String, bool>,
+    summary: &mut RunSummary,
+) {
+    match u.get("sessionUpdate").and_then(Value::as_str) {
+        Some("agent_message_chunk") => {
+            let chunk = content_text(u.get("content").unwrap_or(&Value::Null));
+            // Gemini announces a mode change as message text: that is a notice, not its answer
+            if chunk.trim_start().starts_with("[MODE_UPDATE]") {
+                return;
+            }
+            text.push_str(&chunk);
+            t.runner.draft(&t.agent, text, false);
+            t.phase("inference");
+        }
+        Some("usage_update") => {
+            let n = |k: &str| u.get(k).and_then(Value::as_u64).unwrap_or(0);
+            let cost = u.pointer("/cost/amount").and_then(Value::as_f64);
+            t.runner.set_usage(&t.agent, n("used"), n("size"), cost);
+        }
+        Some("tool_call") => {
+            flush_answer(t, text, summary);
+            let call_id = u
+                .get("toolCallId")
+                .map(|v| {
+                    v.as_str()
+                        .map(String::from)
+                        .unwrap_or_else(|| v.to_string())
+                })
+                .unwrap_or_default();
+            let name = u
+                .get("title")
+                .or_else(|| u.get("kind"))
+                .and_then(Value::as_str)
+                .unwrap_or("tool");
+            let data = json!({"call_id": call_id, "name": name, "arguments": {"kind": u.get("kind"), "input": u.get("rawInput")}});
+            if let Some(e) = t.append(EventKind::ToolCall, data) {
+                t.emit(&e);
+            }
+            open.insert(call_id, true);
+        }
+        Some("tool_call_update") => {
+            let status = u.get("status").and_then(Value::as_str).unwrap_or("");
+            if status != "completed" && status != "failed" {
+                return;
+            }
+            let call_id = u
+                .get("toolCallId")
+                .map(|v| {
+                    v.as_str()
+                        .map(String::from)
+                        .unwrap_or_else(|| v.to_string())
+                })
+                .unwrap_or_default();
+            if open.remove(&call_id).is_some() {
+                let mut output = content_text(u.get("content").unwrap_or(&Value::Null));
+                if output.is_empty() {
+                    output = u
+                        .get("rawOutput")
+                        .map(|v| {
+                            v.as_str()
+                                .map(String::from)
+                                .unwrap_or_else(|| v.to_string())
+                        })
+                        .unwrap_or_default();
+                }
+                let output: String = output.chars().take(20_000).collect();
+                let data =
+                    json!({"call_id": call_id, "output": output, "is_error": status == "failed"});
+                if let Some(e) = t.append(EventKind::ToolResult, data) {
+                    t.emit(&e);
+                }
+            }
+        }
+        _ => {} // thoughts and plans are the agent's own: not journaled
+    }
+}
+
+/// Run the harness's `prepare` command for the thread's model, `{model}` replaced by its id: what
+/// makes the model ready (load it on a GPU, say). Nothing to do without one or without a model.
+pub(crate) async fn prepare_model(
+    prepare: &[String],
+    prepare_timeout: Duration,
+    extra_env: &BTreeMap<String, String>,
+    t: &Turn,
+) -> Result<(), String> {
+    if prepare.is_empty() || t.model.is_empty() {
+        return Ok(());
+    }
+    t.phase("loading");
+    let args: Vec<String> = prepare
+        .iter()
+        .map(|a| a.replace("{model}", &t.model))
+        .collect();
+    let mut cmd = Command::new(&args[0]);
+    cmd.args(&args[1..])
+        .current_dir(&t.workdir)
+        .env_clear()
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .process_group(0)
+        .kill_on_drop(true);
+    for k in ENV_KEEP {
+        if let Ok(v) = std::env::var(k) {
+            cmd.env(k, v);
+        }
+    }
+    cmd.envs(extra_env);
+    let child = cmd
+        .spawn()
+        .map_err(|e| format!("cannot start the model preparation: {e}"))?;
+    let pid = child.id();
+    match tokio::time::timeout(prepare_timeout, child.wait_with_output()).await {
+        Ok(Ok(out)) if out.status.success() => Ok(()),
+        Ok(Ok(out)) => {
+            let mut why = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            if why.is_empty() {
+                why = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            }
+            Err(format!(
+                "the model {} could not be made ready: {}",
+                t.model,
+                why.chars().take(400).collect::<String>()
+            ))
+        }
+        Ok(Err(e)) => Err(e.to_string()),
+        Err(_) => {
+            if let Some(pid) = pid {
+                // SAFETY: signalling the process group spawn() created.
+                unsafe { libc::kill(-(pid as i32), libc::SIGKILL) };
+            }
+            Err(format!(
+                "the model {} was not ready within {}s",
+                t.model,
+                prepare_timeout.as_secs()
+            ))
+        }
+    }
+}
+
+/// For a thread new to the agent's session (it came from elsewhere): the journal so far, as
+/// a preface to the message, within `prime_chars`; empty when there is nothing to tell.
+pub(crate) fn primer(t: &Turn, prime_chars: usize) -> Result<String, String> {
+    let capsule = io::load(&t.path()).map_err(|e| e.to_string())?;
+    let mut events: Vec<&TimelineEvent> = capsule
+        .timeline
+        .ordered()
+        .into_iter()
+        .filter(|e| e.kind != EventKind::Checkpoint)
+        .collect();
+    if events
+        .last()
+        .is_some_and(|e| e.kind == EventKind::UserMessage)
+    {
+        events.pop(); // this turn's message is sent as the prompt
+    }
+    if events.iter().all(|e| e.kind == EventKind::System) {
+        return Ok(String::new());
+    }
+    let mut lines: Vec<String> = Vec::new();
+    let mut used = 0;
+    for e in events.iter().rev() {
+        let s: String = summary(e).chars().take(500).collect();
+        if s.is_empty() {
+            continue;
+        }
+        let line = format!("[{}] {s}", e.kind.as_str());
+        if used + line.len() > prime_chars {
+            lines.push(format!(
+                "[…] {} earlier events omitted",
+                events.len() - lines.len()
+            ));
+            break;
+        }
+        used += line.len();
+        lines.push(line);
+    }
+    lines.reverse();
+    Ok(format!(
+        "You are continuing a conversation that started elsewhere (another machine or model). \
+         Earlier journal, oldest first:\n{}\n\nNew message from the user:",
+        lines.join("\n")
+    ))
+}
+
+/// A thread's harness: an agent spoken to over ACP, or OpenFox driven natively (crate::openfox).
+pub enum Harness {
+    Acp(AcpHarness),
+    OpenFox(crate::openfox::OpenFoxHarness),
+}
+
+impl From<AcpHarness> for Harness {
+    fn from(h: AcpHarness) -> Self {
+        Harness::Acp(h)
+    }
+}
+
+impl From<crate::openfox::OpenFoxHarness> for Harness {
+    fn from(h: crate::openfox::OpenFoxHarness) -> Self {
+        Harness::OpenFox(h)
+    }
+}
+
+impl Harness {
+    /// What the agent announces: its models, modes and commands.
+    pub async fn probe(&self, cwd: &Path) -> Probe {
+        match self {
+            Harness::Acp(h) => h.probe(cwd).await,
+            Harness::OpenFox(h) => h.probe().await,
+        }
+    }
+
+    /// The model ids the agent offers.
+    pub async fn list_models(&self, cwd: &Path) -> Vec<String> {
+        self.probe(cwd).await.models
+    }
+
+    pub async fn turn(&self, t: &Turn) -> RunSummary {
+        match self {
+            // an ACP agent never runs a turn again of its own: nothing to follow
+            Harness::Acp(_) if t.resume => RunSummary {
+                stopped: "done".into(),
+                ..Default::default()
+            },
+            Harness::Acp(h) => h.turn(t).await,
+            Harness::OpenFox(h) => h.turn(t).await,
+        }
+    }
+
+    /// The native OpenFox harness, when this is one.
+    pub fn openfox(&self) -> Option<&crate::openfox::OpenFoxHarness> {
+        match self {
+            Harness::OpenFox(h) => Some(h),
+            Harness::Acp(_) => None,
+        }
+    }
+
+    /// Whether a thread's folder stays on disk between its turns (OpenFox's dev server, its
+    /// processes and its task board need it; an ACP agent finds it afresh each turn).
+    pub fn keeps_folder(&self) -> bool {
+        self.openfox().is_some_and(|h| h.settings().keep_folder)
+    }
+}
+
+/// How often a thread repeats the phase it is already in (Runner::announce_state).
+const ANNOUNCE_EVERY: Duration = Duration::from_secs(1);
+/// How often the answer so far goes out while a model streams it (Runner::draft).
+const DRAFT_EVERY: Duration = Duration::from_millis(120);
 
 /// Drives the agents a node holds: one turn at a time per agent.
 pub struct Runner {
     pub host: Arc<CapsuleHost>,
-    pub harnesses: BTreeMap<String, AcpHarness>,
+    pub harnesses: BTreeMap<String, Harness>,
     pub default_harness: String,
     publish: Option<Publisher>,
     approver: Option<Approver>,
     pub phases: Mutex<HashMap<String, String>>,
+    /// The phase each agent last announced, and when (announce_state).
+    announced: Mutex<HashMap<String, (String, Instant)>>,
+    /// When each agent's answer so far last went out (draft).
+    drafted: Mutex<HashMap<String, Instant>>,
+    /// How many messages wait for each agent's running turn to end (run).
+    waiting: Mutex<HashMap<String, usize>>,
     /// Threads whose running turn a person asked to stop.
     pub cancels: Mutex<std::collections::HashSet<String>>,
     /// The last context use each agent reported.
@@ -953,20 +1073,26 @@ pub struct Runner {
 }
 
 impl Runner {
-    pub fn new(
+    pub fn new<H: Into<Harness>>(
         host: Arc<CapsuleHost>,
-        harnesses: Vec<(String, AcpHarness)>,
+        harnesses: Vec<(String, H)>,
         publish: Option<Publisher>,
         approver: Option<Approver>,
     ) -> Arc<Self> {
         let default_harness = harnesses.first().map(|h| h.0.clone()).unwrap_or_default();
         Arc::new(Self {
             host,
-            harnesses: harnesses.into_iter().collect(),
+            harnesses: harnesses
+                .into_iter()
+                .map(|(name, h)| (name, h.into()))
+                .collect(),
             default_harness,
             publish,
             approver,
             phases: Mutex::default(),
+            announced: Mutex::default(),
+            drafted: Mutex::default(),
+            waiting: Mutex::default(),
             cancels: Mutex::default(),
             usage: Mutex::default(),
             locks: Mutex::default(),
@@ -993,6 +1119,75 @@ impl Runner {
         }
     }
 
+    /// The native OpenFox harness this thread runs on, if it runs on one.
+    pub fn openfox_of(&self, agent: &str) -> Option<&crate::openfox::OpenFoxHarness> {
+        self.harnesses
+            .get(&self.harness_of(agent))
+            .and_then(Harness::openfox)
+    }
+
+    /// Whether this thread's folder stays on disk between its turns (Harness::keeps_folder).
+    pub fn keeps_folder(&self, agent: &str) -> bool {
+        self.harnesses
+            .get(&self.harness_of(agent))
+            .is_some_and(Harness::keeps_folder)
+    }
+
+    /// A kept folder changed outside a turn (a branch switched, say): the thread's files follow
+    /// it now, unless a turn runs (its end does it).
+    pub fn put_away(&self, agent: &str) {
+        let lock = self.lock(agent);
+        let Ok(_guard) = lock.try_lock() else { return };
+        if let Err(e) = self.host.put_away(agent) {
+            eprintln!("putting {agent}'s folder away failed: {e}");
+        }
+    }
+
+    /// The harness that thinks for this thread: its own, else the node's default.
+    fn harness_of(&self, agent: &str) -> String {
+        self.labels(agent)
+            .get("harness")
+            .and_then(Value::as_str)
+            .filter(|h| self.harnesses.contains_key(*h))
+            .unwrap_or(&self.default_harness)
+            .to_string()
+    }
+
+    /// Say something on the bus (a harness's live state for the pages, say).
+    pub(crate) fn tell(&self, subject: &str, payload: Value) {
+        if let Some(p) = &self.publish {
+            p(subject, payload);
+        }
+    }
+
+    /// Whether a message waits for this agent's running turn to end.
+    fn waited_on(&self, agent: &str) -> bool {
+        self.waiting
+            .lock()
+            .expect("not poisoned")
+            .get(agent)
+            .is_some_and(|n| *n > 0)
+    }
+
+    /// The answer so far, for the pages to show as the model writes it (`draft.<agent>`). It is
+    /// not journaled (the whole answer is, once it ends) and not durable (`draft.` is outside
+    /// `agent.>`): a draft that arrives late is worth nothing. It goes out at most every
+    /// DRAFT_EVERY, unless `now`; empty, it tells the pages the answer is in the journal now.
+    fn draft(&self, agent: &str, text: &str, now: bool) {
+        let Some(p) = &self.publish else { return };
+        {
+            let mut last = self.drafted.lock().expect("not poisoned");
+            if !now && last.get(agent).is_some_and(|at| at.elapsed() < DRAFT_EVERY) {
+                return;
+            }
+            last.insert(agent.into(), Instant::now());
+        }
+        p(
+            &format!("draft.{agent}"),
+            json!({"agent": agent, "text": text}),
+        );
+    }
+
     fn set_phase(&self, agent: &str, phase: &str) {
         // a thread deleted while a turn was still running must not come back as a phantom
         if matches!(self.host.status(agent).as_str(), "deleted" | "absent") {
@@ -1006,7 +1201,22 @@ impl Runner {
     }
 
     /// Tell the mesh the thread's phase, with how full its context is when the agent says.
+    ///
+    /// A model streams its answer in many small pieces, each one setting the phase again. A new
+    /// phase goes out at once; the same phase again at most every ANNOUNCE_EVERY (with the
+    /// context use as it is then). Without this, each piece of an answer crossed the mesh and
+    /// sent every open page a whole new snapshot, dozens of times a second: the faster the model,
+    /// the slower Inari.
     fn announce_state(&self, agent: &str, phase: &str) {
+        {
+            let mut last = self.announced.lock().expect("not poisoned");
+            if let Some((p, at)) = last.get(agent) {
+                if p == phase && at.elapsed() < ANNOUNCE_EVERY {
+                    return;
+                }
+            }
+            last.insert(agent.into(), (phase.into(), Instant::now()));
+        }
         if let Some(p) = &self.publish {
             let mut m = json!({"agent": agent, "node": self.host.node_id, "phase": phase});
             if let Some(u) = self.usage.lock().expect("not poisoned").get(agent) {
@@ -1039,7 +1249,7 @@ impl Runner {
         self.announce_state(agent, &phase);
     }
 
-    async fn approve(&self, agent: &str, command: &str) -> bool {
+    pub(crate) async fn approve(&self, agent: &str, command: &str) -> bool {
         // Auto mode: the owner chose to let this thread act without asking. It never applies to a
         // thread under a core pass (a child's thread is followed and approved by the parent).
         let labels = self.labels(agent);
@@ -1244,12 +1454,11 @@ impl Runner {
         if self.host.status(agent) != "running" {
             return json!({"ok": false, "output": "this node does not run the agent", "code": -1});
         }
-        let path = self.host.agents.join(agent);
-        let workdir = self.host.root.join("work").join(agent);
-        let _ = std::fs::remove_dir_all(&workdir);
-        if let Err(e) = io::materialize(&path, &workdir) {
-            return json!({"ok": false, "output": e.to_string(), "code": -1});
-        }
+        let keep = self.keeps_folder(agent);
+        let workdir = match self.host.open_workdir(agent, keep) {
+            Ok(w) => w,
+            Err(e) => return json!({"ok": false, "output": e.to_string(), "code": -1}),
+        };
         let call_id = crate::wire::random_hex(6);
         let args = json!({"cmd": cmd, "by": "user"});
         let _ = self.journal(
@@ -1267,10 +1476,9 @@ impl Runner {
             EventKind::ToolResult,
             json!({"call_id": call_id, "output": output, "is_error": code != 0}),
         );
-        if let Err(e) = io::update_snapshot(&path, &workdir) {
+        if let Err(e) = self.host.close_workdir(agent, keep) {
             eprintln!("snapshot of {agent} failed: {e}");
         }
-        let _ = std::fs::remove_dir_all(&workdir);
         json!({"ok": code == 0, "output": output, "code": code, "timed_out": timed_out})
     }
 
@@ -1298,8 +1506,62 @@ impl Runner {
         text: &str,
         attachments: Vec<Attached>,
     ) -> RunSummary {
+        // OpenFox takes a message during a turn into its own queue, and slips it in at its next step
+        if attachments.is_empty() {
+            if let Some(h) = self
+                .harnesses
+                .get(&self.harness_of(agent))
+                .and_then(Harness::openfox)
+            {
+                if h.join(agent, text).await {
+                    return RunSummary {
+                        stopped: "joined".into(),
+                        ..Default::default()
+                    };
+                }
+            }
+        }
+        self.take_turn(agent, text, attachments, false, None).await
+    }
+
+    /// Follow a turn the agent runs again of its own (OpenFox retrying after a model's failure):
+    /// the same turn as `run`, with no new message from the person.
+    pub async fn resume(self: &Arc<Self>, agent: &str) -> RunSummary {
+        self.take_turn(agent, "", Vec::new(), true, None).await
+    }
+
+    /// A turn that launches an OpenFox workflow, or takes up the one waiting, with the message
+    /// that goes with it (if any). It waits for a turn already running instead of joining it.
+    pub async fn launch(
+        self: &Arc<Self>,
+        agent: &str,
+        text: &str,
+        attachments: Vec<Attached>,
+        launch: crate::openfox::Launch,
+    ) -> RunSummary {
+        self.take_turn(agent, text, attachments, false, Some(launch))
+            .await
+    }
+
+    async fn take_turn(
+        self: &Arc<Self>,
+        agent: &str,
+        text: &str,
+        attachments: Vec<Attached>,
+        resume: bool,
+        workflow: Option<crate::openfox::Launch>,
+    ) -> RunSummary {
         let lock = self.lock(agent);
+        *self
+            .waiting
+            .lock()
+            .expect("not poisoned")
+            .entry(agent.into())
+            .or_default() += 1;
         let _guard = lock.lock().await;
+        if let Some(n) = self.waiting.lock().expect("not poisoned").get_mut(agent) {
+            *n = n.saturating_sub(1);
+        }
         if self.host.status(agent) != "running" {
             return RunSummary {
                 stopped: "frozen".into(),
@@ -1308,20 +1570,17 @@ impl Runner {
             };
         }
         let labels = self.labels(agent);
-        let harness_name = labels
-            .get("harness")
-            .and_then(Value::as_str)
-            .filter(|h| self.harnesses.contains_key(*h))
-            .unwrap_or(&self.default_harness)
-            .to_string();
+        let harness_name = self.harness_of(agent);
         let model = labels
             .get("model")
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
         let path = self.host.agents.join(agent);
-        let workdir = self.host.root.join("work").join(agent);
-        let _ = std::fs::remove_dir_all(&workdir);
+        let keep = self
+            .harnesses
+            .get(&harness_name)
+            .is_some_and(Harness::keeps_folder);
         self.set_phase(agent, "listening");
         let files: Vec<Value> = attachments
             .iter()
@@ -1331,7 +1590,16 @@ impl Runner {
         if !files.is_empty() {
             data["attachments"] = Value::Array(files);
         }
-        if let Ok(c) = io::append_event(
+        if let Some(l) = &workflow {
+            if text.trim().is_empty() {
+                data["text"] = json!(l.shown());
+            }
+            data["workflow"] =
+                json!({"id": l.id, "label": l.label, "resume": l.resume, "choice": l.choice});
+        }
+        if resume {
+            // nothing new from the person: the agent takes up its last turn again
+        } else if let Ok(c) = io::append_event(
             &path,
             &format!("{}@{agent}", self.host.node_id),
             EventKind::UserMessage,
@@ -1343,16 +1611,16 @@ impl Runner {
             }
         }
         let summary = match (
-            io::materialize(&path, &workdir),
+            self.host.open_workdir(agent, keep),
             self.harnesses.get(&harness_name),
         ) {
-            (Ok(()), Some(h)) => {
+            (Ok(workdir), Some(h)) => {
                 let turn = Turn {
                     runner: Arc::clone(self),
                     agent: agent.into(),
                     text: text.into(),
                     attachments,
-                    workdir: workdir.clone(),
+                    workdir,
                     model,
                     mode: labels
                         .get("mode")
@@ -1364,6 +1632,8 @@ impl Runner {
                         .and_then(Value::as_str)
                         .unwrap_or("")
                         .to_string(),
+                    resume,
+                    workflow,
                 };
                 h.turn(&turn).await
             }
@@ -1381,11 +1651,12 @@ impl Runner {
         let was_stopped = self.cancels.lock().expect("not poisoned").remove(agent);
         if was_stopped || summary.stopped == "cancelled" {
             let _ = self.journal(agent, EventKind::Checkpoint, json!({"reason": "stopped"}));
+        } else if summary.stopped == "steered" {
+            let _ = self.journal(agent, EventKind::Checkpoint, json!({"reason": "steered"}));
         }
-        if let Err(e) = io::update_snapshot(&path, &workdir) {
+        if let Err(e) = self.host.close_workdir(agent, keep) {
             eprintln!("snapshot of {agent} failed: {e}");
         }
-        let _ = std::fs::remove_dir_all(&workdir);
         self.set_phase(
             agent,
             if summary.stopped == "error" {

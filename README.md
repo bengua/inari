@@ -14,8 +14,9 @@ supervises without computing, machines that keep working when the network does n
 
 - **Home-made, end to end.** The capsule format, the teleport protocol, the mesh, the
   core (one static Rust binary of about 5 MB, about 6 MB of memory) and the web interface
-  were written for this project. The Python package in `src/inari_core` is the reference
-  implementation; its tests are the specification the Rust core is checked against.
+  were written for this project, in Rust only: one binary, `inari-core-rs`, and nothing
+  else to install. Capsules written by the earlier Python reference are test fixtures, read
+  hash for hash.
 - **Every agent harness through one protocol.** Claude Code (through
   `claude-agent-acp`), Gemini CLI and OpenFox all speak the Agent Client Protocol, so a
   thread can change harness or model without losing its history.
@@ -64,31 +65,31 @@ cost-conscious, hybrid and family-sized — under the MIT license. Thank you, Da
 
 ## What is here
 
+Everything is in the crate `crates/inari-core` (binary `inari-core-rs`).
+
 | Piece | Where | State |
 |---|---|---|
-| Session State Capsule (SSC) format, schemas, verifier | `src/inari_core/capsule`, `schema/`, [docs/ssc.md](docs/ssc.md) | implemented, tested |
-| Provider handover (neutral journal → Anthropic / OpenAI shapes, compaction) | `src/inari_core/handover` | implemented, tested |
-| Teleportation: two-phase commit with a fencing epoch, rollback, in-doubt resolution | `src/inari_core/teleport`, [docs/teleport.md](docs/teleport.md) | implemented, tested with injected faults |
-| Mesh: embedded bus, durable links, discovery, coordinator, telemetry → mascot | `src/inari_core/mesh`, [docs/mesh.md](docs/mesh.md) | implemented, tested |
-| BYOK secrets, signed one-gesture approvals | `secrets.py`, `approvals.py`, [docs/security.md](docs/security.md) | implemented, tested |
-| Gateway (HTTP/SSE) and the web client: spatial graph, orb, approvals, phone layout | `gateway.py`, `demo.py`, `web/`, [docs/ux.md](docs/ux.md) | implemented; drag-to-teleport checked in a real browser |
-| Authenticated TCP transport (bus links, remote endpoints), sandbox runtimes | `src/inari_core/transport`, `sandbox.py` | implemented, tested on loopback |
-| Agent driver (OpenAI-compatible and Anthropic providers, tools, loop), node daemon, fork/merge/search | `agent/`, `node.py`, [docs/node.md](docs/node.md) | implemented; two-node mesh tested over TCP |
-| Capsule signatures (Ed25519), approvals over the bus | `signature.py`, `approval_bus.py` | implemented, tested |
-| NATS / Zenoh adapters | — | not written: same two seams (`Link`, `Endpoint`) |
+| Session State Capsule (SSC) format, verifier, archives, attachments, fork/merge | `src/capsule/`, `schema/`, [docs/ssc.md](docs/ssc.md) | implemented, tested; capsules of the retired Python reference read hash for hash |
+| Teleportation: two-phase commit with a fencing epoch, rollback, in-doubt resolution | `src/teleport.rs`, `src/host.rs`, `src/rpc.rs`, [docs/teleport.md](docs/teleport.md) | implemented, tested with injected faults |
+| Mesh: embedded bus, durable TCP links, discovery, coordinator, telemetry → mascot | `src/bus.rs`, `src/buslink.rs`, `src/mesh.rs`, [docs/mesh.md](docs/mesh.md) | implemented, tested |
+| Agents through their harnesses (ACP: Claude Code, Gemini CLI, OpenFox), node daemon, enrolment | `src/agent.rs`, `src/node.rs`, `src/enroll.rs`, [docs/node.md](docs/node.md) | implemented; multi-node mesh tested over TCP |
+| Gateway (HTTP/SSE), sessions, core passes, and the web interface (EN/FR) | `src/gateway.rs`, `src/session.rs`, `src/passes.rs`, `web/`, [docs/ux.md](docs/ux.md) | implemented; checked in a real browser |
+| Signed one-gesture approvals, capsule signatures (Ed25519) | `src/approvals.rs`, `src/signature.rs`, [docs/security.md](docs/security.md) | implemented, tested |
+| Demo: three nodes in one process and a demo agent | `src/demo.rs`, `src/demo_agent.rs` | implemented |
+| Android client (a thin WebView app) | `android/` | see [android/README.md](android/README.md) |
 
-Read [docs/architecture.md](docs/architecture.md) first. The running core is the Rust crate
-(`crates/inari-core`, binary `inari-core-rs`), byte-compatible with the Python reference:
-see [docs/rust-port.md](docs/rust-port.md) and [docs/node.md](docs/node.md).
+Read [docs/architecture.md](docs/architecture.md) first; [docs/rust-port.md](docs/rust-port.md)
+tells how the core moved from the Python reference to Rust.
 
 ## Try it
 
-    uv sync --all-extras
-    uv run pytest
-    uv run inari-core schema schema      # regenerate the JSON Schemas
-    uv run inari-core verify  some.ssc   # check any capsule, directory or archive
-    uv run inari-core inspect some.ssc
-    uv run inari-core demo               # simulated mesh + web interface on :8787
+    cargo build --release
+    target/release/inari-core-rs demo                    # three nodes + the interface on :8787
+    target/release/inari-core-rs demo --mascot path/to/fox   # with FoxBot
+    target/release/inari-core-rs verify  some.ssc        # check any capsule, directory or archive
+    target/release/inari-core-rs inspect some.ssc
+    target/release/inari-core-rs keygen me && target/release/inari-core-rs sign capsule/ --key me.key
+    ./verify.sh                                          # everything CI checks
 
 A capsule is a plain tar of JSON and Markdown files: `tar xf some.ssc` and read it
 with any editor.

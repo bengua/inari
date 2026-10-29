@@ -1,7 +1,7 @@
-//! HTTP/SSE gateway between a browser (desktop or phone) and the bus, as the Python
-//! reference (`inari_core.gateway`): it gathers the mesh into one snapshot, pushes it
-//! as server-sent events, serves the web interface, and turns the person's actions
-//! into bus messages. It holds the approval key; browsers present a bearer token.
+//! HTTP/SSE gateway between a browser (desktop or phone) and the bus: it gathers the mesh
+//! into one snapshot, pushes it as server-sent events, serves the web interface (`web/`,
+//! built into the binary), and turns the person's actions into bus messages. It holds the
+//! approval key; pages sign in for a session cookie (`session`), tools send a bearer token.
 //! Files from the phone arrive in parts (`upload_id`, `offset`, `total`), so a photo
 //! or a PDF of several megabytes needs no large request.
 
@@ -20,19 +20,69 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast;
 
-const INDEX: &str = include_str!("../../../src/inari_core/web/index.html");
+const INDEX: &str = include_str!("../web/index.html");
 
-/// The page's version: a hash of what this binary serves. A page that sees another
-/// version in the snapshot (the core was updated) reloads itself — a phone's app keeps
-/// its page open for days.
+/// What the page loads besides itself, under `/assets/`: its style, its script, its fonts.
+/// Public like the page (they hold no data), and cached: their URLs carry the page's version.
+const ASSETS: &[(&str, &str, &[u8])] = &[
+    (
+        "app.css",
+        "text/css; charset=utf-8",
+        include_bytes!("../web/app.css"),
+    ),
+    (
+        "app.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../web/app.js"),
+    ),
+    (
+        "i18n.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../web/i18n.js"),
+    ),
+    (
+        "fonts/ibm_plex_sans.woff2",
+        "font/woff2",
+        include_bytes!("../web/fonts/ibm_plex_sans.woff2"),
+    ),
+    (
+        "fonts/ibm_plex_mono_regular.woff2",
+        "font/woff2",
+        include_bytes!("../web/fonts/ibm_plex_mono_regular.woff2"),
+    ),
+    (
+        "fonts/ibm_plex_mono_medium.woff2",
+        "font/woff2",
+        include_bytes!("../web/fonts/ibm_plex_mono_medium.woff2"),
+    ),
+    (
+        "fonts/bricolage_grotesque.woff2",
+        "font/woff2",
+        include_bytes!("../web/fonts/bricolage_grotesque.woff2"),
+    ),
+];
+
+/// The page's version: a hash of what this binary serves (the page and its assets). A page
+/// that sees another version in the snapshot (the core was updated) reloads itself — a
+/// phone's app keeps its page open for days.
 fn page_version() -> &'static str {
     static V: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    V.get_or_init(|| crate::canon::sha256_hex(INDEX.as_bytes())[..12].to_string())
+    V.get_or_init(|| {
+        let mut all = INDEX.as_bytes().to_vec();
+        for (_, _, body) in ASSETS {
+            all.extend_from_slice(body);
+        }
+        crate::canon::sha256_hex(&all)[..12].to_string()
+    })
 }
 const MAX_BODY: usize = 64 * 1024;
 /// One part of an upload, base64 included (the page sends 512 KiB of file per part).
 const MAX_PART_BODY: usize = 1024 * 1024;
 const MAX_UPLOAD: u64 = 25 * 1024 * 1024;
+/// Connections served at once (each open page holds one for its event stream).
+const MAX_CONNECTIONS: usize = 512;
+/// A request must arrive whole within this time, an upload part included.
+const REQUEST_DEADLINE: Duration = Duration::from_secs(60);
 
 #[derive(Default)]
 struct State {
@@ -51,6 +101,12 @@ struct State {
     update_jobs: BTreeMap<String, Value>,
     /// The core passes the hub keeps (each known by the hash of its token).
     passes: Vec<Value>,
+    /// Each thread's answer so far, while its model writes it (`draft.<agent>`).
+    drafts: HashMap<String, String>,
+    /// The last OpenFox setting changed from the interface, by "node/harness": done or why not.
+    openfox_results: BTreeMap<String, Value>,
+    /// What each OpenFox thread shows beside its conversation (`panel.<agent>`).
+    panels: HashMap<String, Value>,
 }
 
 /// A clone onto a harness the thread's core lacks: fork it there, teleport the copy to a
@@ -97,6 +153,23 @@ async fn clone_across(
     if moved.await.unwrap_or(false) {
         bus.publish(&format!("agent.{new}.harness"), json!({"harness": harness}));
     }
+}
+
+/// A thread's journal for a page that already holds it up to event `after`: only what came
+/// since, with `from` (where it starts) and `count` (the whole length) so the page can tell
+/// a plain continuation from a journal that changed under it and ask for all of it again.
+/// An unknown or empty `after` answers the whole journal (`from` 0).
+pub fn timeline_since(log: Vec<Value>, after: &str) -> Value {
+    let count = log.len();
+    let from = if after.is_empty() {
+        0
+    } else {
+        log.iter()
+            .position(|e| e.get("id").and_then(Value::as_str) == Some(after))
+            .map_or(0, |i| i + 1)
+    };
+    let events: Vec<Value> = log.into_iter().skip(from).collect();
+    json!({"events": events, "from": from, "count": count})
 }
 
 /// Who is asking: the core's owner, or the holder of a pass (only its own threads).
@@ -150,7 +223,30 @@ pub struct Gateway {
     uploads: Option<UploadStore>,
     state: Mutex<State>,
     clients: broadcast::Sender<()>,
+    /// Answers so far, as they come (agent, text): sent to the pages on their own, not in snapshots.
+    drafts: broadcast::Sender<(String, String)>,
+    /// OpenFox panels as they change (agent, panel), sent on their own like the drafts.
+    panels: broadcast::Sender<(String, Value)>,
     pub usage_interval: Duration,
+    sessions: crate::session::Sessions,
+    /// The persona each person chose for the mascot.
+    personas: crate::personas::Choices,
+}
+
+/// An OpenFox thread's panel, as an SSE event of its own (`panel`).
+fn panel_frame(agent: &str, panel: &Value) -> String {
+    format!(
+        "event: panel\ndata: {}\n\n",
+        json!({"agent": agent, "panel": panel})
+    )
+}
+
+/// A thread's answer so far, as an SSE event of its own (`draft`); empty text: it is journaled now.
+fn draft_frame(agent: &str, text: &str) -> String {
+    format!(
+        "event: draft\ndata: {}\n\n",
+        json!({"agent": agent, "text": text})
+    )
 }
 
 fn s(p: &Value, k: &str) -> String {
@@ -160,6 +256,18 @@ fn s(p: &Value, k: &str) -> String {
         Some(other) => other.to_string(),
     }
 }
+
+/// OpenFox panel actions a pass may not do: they run commands, or OpenFox sessions outside the
+/// thread (a task), that the pass's supervision does not see.
+const OWNER_ONLY: [&str; 7] = [
+    "task_add",
+    "task_move",
+    "task_remove",
+    "dev_config",
+    "dev_start",
+    "dev_restart",
+    "instructions",
+];
 
 fn percent_decode(text: &str) -> String {
     let bytes = text.as_bytes();
@@ -249,14 +357,55 @@ struct Request {
     body: Vec<u8>,
     /// The connection comes from this machine.
     loopback: bool,
+    /// The address on the other end (the gate's, behind one): sign-in attempts are counted by it.
+    peer: Option<std::net::IpAddr>,
 }
 
+impl Request {
+    /// Reached over HTTPS: the gate in front says so. A session cookie is then `Secure`.
+    fn https(&self) -> bool {
+        self.headers
+            .get("x-forwarded-proto")
+            .is_some_and(|p| p.eq_ignore_ascii_case("https"))
+    }
+}
+
+/// What a page may load and where it may talk: its own origin only, no inline script, no
+/// framing by another site. Inline styles stay allowed (the page sets a few attributes).
+const CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
+    img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; frame-src 'self'; \
+    frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'";
+
 async fn send(w: &mut TcpStream, status: u16, ctype: &str, body: &[u8]) -> std::io::Result<()> {
+    send_with(w, status, ctype, body, "").await
+}
+
+/// [`send`] with extra header lines (each ending in CRLF), such as a `Set-Cookie`.
+async fn send_with(
+    w: &mut TcpStream,
+    status: u16,
+    ctype: &str,
+    body: &[u8],
+    extra: &str,
+) -> std::io::Result<()> {
     let head = format!(
         "HTTP/1.1 {status} {}\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nCache-Control: no-store\r\n\
-         X-Content-Type-Options: nosniff\r\nContent-Security-Policy: default-src 'self' 'unsafe-inline'; \
-         img-src 'self' data:; connect-src 'self'\r\nConnection: close\r\n\r\n",
+         X-Content-Type-Options: nosniff\r\nContent-Security-Policy: {CSP}\r\nReferrer-Policy: no-referrer\r\n\
+         {extra}Connection: close\r\n\r\n",
         reason(status),
+        body.len()
+    );
+    w.write_all(head.as_bytes()).await?;
+    w.write_all(body).await?;
+    w.flush().await
+}
+
+/// A file of the page: the same headers as [`send`], cached for a day (its URL carries the
+/// page's version, so an update is never hidden by the cache).
+async fn send_asset(w: &mut TcpStream, ctype: &str, body: &[u8]) -> std::io::Result<()> {
+    let head = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nCache-Control: public, max-age=86400\r\n\
+         X-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n",
         body.len()
     );
     w.write_all(head.as_bytes()).await?;
@@ -287,6 +436,8 @@ impl Gateway {
         } = o;
         let (usage, data_dir) = (&usage[..], &data_dir);
         let (clients, _) = broadcast::channel(50); // a slow client loses old frames, not the stream
+        let (drafts, _) = broadcast::channel(256);
+        let (panels, _) = broadcast::channel(256);
         let mut full_ui = Map::new();
         full_ui.insert("footer".into(), json!(""));
         full_ui.extend(ui);
@@ -301,7 +452,11 @@ impl Gateway {
             uploads: UploadStore::new(data_dir.join("uploads"), MAX_UPLOAD).ok(),
             state: Mutex::default(),
             clients,
+            drafts,
+            panels,
             usage_interval: Duration::from_secs(60),
+            sessions: crate::session::Sessions::open(data_dir),
+            personas: crate::personas::Choices::open(data_dir),
         });
         g.subscribe();
         g
@@ -322,6 +477,38 @@ impl Gateway {
     }
 
     fn subscribe(self: &Arc<Self>) {
+        // an OpenFox thread's panel: kept for a page that opens later, passed on without a snapshot
+        let mut prx = self.bus.subscribe("panel.*");
+        let me = Arc::clone(self);
+        tokio::spawn(async move {
+            while let Some(m) = prx.recv().await {
+                let agent = s(&m.payload, "agent");
+                let panel = m.payload.get("panel").cloned().unwrap_or(Value::Null);
+                me.state
+                    .lock()
+                    .expect("not poisoned")
+                    .panels
+                    .insert(agent.clone(), panel.clone());
+                let _ = me.panels.send((agent, panel));
+            }
+        });
+        // an answer so far: kept for a page that opens meanwhile, and passed on without a snapshot
+        let mut rx = self.bus.subscribe("draft.*");
+        let me = Arc::clone(self);
+        tokio::spawn(async move {
+            while let Some(m) = rx.recv().await {
+                let (agent, text) = (s(&m.payload, "agent"), s(&m.payload, "text"));
+                {
+                    let mut st = me.state.lock().expect("not poisoned");
+                    if text.is_empty() {
+                        st.drafts.remove(&agent);
+                    } else {
+                        st.drafts.insert(agent.clone(), text.clone());
+                    }
+                }
+                let _ = me.drafts.send((agent, text));
+            }
+        });
         self.on("mesh.nodes", |_, st, m| {
             st.nodes = m
                 .payload
@@ -365,6 +552,15 @@ impl Gateway {
                 .retain(|n| n.get("node_id").and_then(Value::as_str) != Some(node.as_str()));
         });
         self.on("teleport.result", |_, st, m| st.results.push(m.payload));
+        self.on("node.*.openfox.result", |_, st, m| {
+            let key = format!("{}/{}", s(&m.payload, "node"), s(&m.payload, "harness"));
+            let mut r = m.payload;
+            r["at"] = json!(std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0));
+            st.openfox_results.insert(key, r);
+        });
         self.on("mesh.passes", |_, st, m| {
             st.passes = m
                 .payload
@@ -470,6 +666,7 @@ impl Gateway {
             "ui": ui,
             "approvals": st.approvals.values().cloned().collect::<Vec<_>>(),
             "update_jobs": st.update_jobs,
+            "openfox_results": st.openfox_results,
         })
     }
 
@@ -483,6 +680,8 @@ impl Gateway {
     /// token hashes); for a pass, its own threads, the cores and its allowed harnesses only.
     pub fn snapshot_for(&self, access: &Access) -> Value {
         let mut snap = self.snapshot();
+        // the mascot this person chose, on every device they open
+        snap["ui"]["persona"] = json!(self.persona_of(access));
         let passes: Vec<Value> = self
             .state
             .lock()
@@ -565,7 +764,7 @@ impl Gateway {
                                            "harness_modes": modes, "harness_commands": commands});
             }
         }
-        for k in ["moves", "update_jobs"] {
+        for k in ["moves", "update_jobs", "openfox_results"] {
             snap[k] = json!({});
         }
         snap["results"] = json!([]);
@@ -639,10 +838,27 @@ impl Gateway {
         let listener = TcpListener::bind((host, port)).await?;
         let bound = listener.local_addr()?.port();
         let me = Arc::clone(self);
+        let slots = Arc::new(tokio::sync::Semaphore::new(MAX_CONNECTIONS));
         tokio::spawn(async move {
-            while let Ok((stream, _)) = listener.accept().await {
-                let me = Arc::clone(&me);
-                tokio::spawn(async move { me.serve(stream).await });
+            // One failed accept (out of file descriptors, a reset) must not stop the page for good.
+            loop {
+                match listener.accept().await {
+                    Ok((stream, _)) => {
+                        // past the limit, a new connection is closed at once rather than queued
+                        let Ok(slot) = Arc::clone(&slots).try_acquire_owned() else {
+                            continue;
+                        };
+                        let me = Arc::clone(&me);
+                        tokio::spawn(async move {
+                            me.serve(stream).await;
+                            drop(slot);
+                        });
+                    }
+                    Err(e) => {
+                        eprintln!("gateway: accept failed: {e}");
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    }
+                }
             }
         });
         if !self.sources.is_empty() {
@@ -710,6 +926,8 @@ impl Gateway {
         owner.then_some(Access::Owner)
     }
 
+    /// Who the request comes from, in this order: a pass it presents (a guest or nothing), the
+    /// owner's token it presents, its session cookie, then a page this machine opened itself.
     fn access(&self, r: &Request) -> Option<Access> {
         let pass = r
             .headers
@@ -717,13 +935,45 @@ impl Gateway {
             .or_else(|| r.query.get("pass"))
             .map(String::as_str)
             .filter(|t| !t.is_empty());
-        self.access_of(pass, pass.is_none() && self.authorized(r))
+        if pass.is_some() {
+            return self.access_of(pass, false);
+        }
+        if self.token_given(r) {
+            return Some(Access::Owner);
+        }
+        let session = r
+            .headers
+            .get("cookie")
+            .and_then(|c| crate::session::from_header(c))
+            .and_then(|c| self.session_access(c));
+        if session.is_some() {
+            return session;
+        }
+        self.local_page(r).then_some(Access::Owner)
     }
 
-    fn authorized(&self, r: &Request) -> bool {
-        if self.local_page(r) {
-            return true;
+    /// What a session cookie opens: the owner's access while the token it was opened with is
+    /// still the token; a pass's while that pass is still valid (revoking it ends the session).
+    fn session_access(&self, cookie: &str) -> Option<Access> {
+        use crate::session::Kind;
+        let (kind, hash) = self.sessions.read(cookie)?;
+        match kind {
+            Kind::Owner => (!self.token.is_empty()
+                && hash == crate::session::owner_hash(&self.token))
+            .then_some(Access::Owner),
+            Kind::Pass => {
+                let st = self.state.lock().expect("not poisoned");
+                st.passes
+                    .iter()
+                    .find(|p| p["token_sha"] == hash.as_str() && crate::passes::valid(p))
+                    .cloned()
+                    .map(Access::Guest)
+            }
         }
+    }
+
+    /// The owner's token, given in the `Authorization` header (or, for old clients, `?token=`).
+    fn token_given(&self, r: &Request) -> bool {
         let header = r
             .headers
             .get("authorization")
@@ -792,19 +1042,21 @@ impl Gateway {
             body.extend_from_slice(&chunk[..n]);
         }
         body.truncate(size);
-        let loopback = stream.peer_addr().is_ok_and(|a| a.ip().is_loopback());
+        let peer = stream.peer_addr().ok().map(|a| a.ip());
         Some(Ok(Request {
             method,
             path,
             query,
             headers,
             body,
-            loopback,
+            loopback: peer.is_some_and(|ip| ip.is_loopback()),
+            peer,
         }))
     }
 
     async fn serve(self: Arc<Self>, mut stream: TcpStream) {
-        let r = match Self::read_request(&mut stream).await {
+        let read = tokio::time::timeout(REQUEST_DEADLINE, Self::read_request(&mut stream));
+        let r = match read.await.ok().flatten() {
             None => return,
             Some(Err(status)) => {
                 let _ = send(&mut stream, status, "text/plain", reason(status).as_bytes()).await;
@@ -818,8 +1070,15 @@ impl Gateway {
     async fn route(&self, r: Request, w: &mut TcpStream) -> std::io::Result<()> {
         let get = r.method == "GET";
         if get && r.path == "/" {
-            let page = INDEX.replacen("__INARI_PAGE__", page_version(), 1);
+            let page = INDEX.replace("__INARI_PAGE__", page_version());
             return send(w, 200, "text/html; charset=utf-8", page.as_bytes()).await;
+        }
+        if get && r.path.starts_with("/assets/") {
+            let rel = r.path.trim_start_matches("/assets/");
+            return match ASSETS.iter().find(|(name, _, _)| *name == rel) {
+                Some((_, ctype, body)) => send_asset(w, ctype, body).await,
+                None => send_json(w, 404, &json!({"error": "not found"})).await,
+            };
         }
         if get && r.path.starts_with("/fox/") {
             if let Some(dir) = &self.mascot_dir {
@@ -829,12 +1088,38 @@ impl Gateway {
                     .await;
             }
         }
+        if r.method == "POST" && r.path == "/api/session" {
+            return self.sign_in(&r, w).await;
+        }
+        if r.method == "POST" && r.path == "/api/logout" {
+            let end = crate::session::set_cookie(None, r.https());
+            return send_with(w, 200, "application/json", b"{}", &end).await;
+        }
         let Some(access) = self.access(&r) else {
             return send_json(w, 401, &json!({"error": "unauthorized"})).await;
         };
         let parts: Vec<&str> = r.path.split('/').collect(); // "", "api", "agent", id, what
         if get && r.path == "/events" {
             return self.events(w, access).await;
+        }
+        if get && r.path == "/api/personas" {
+            let list = self
+                .mascot_dir
+                .as_deref()
+                .map(crate::personas::list)
+                .unwrap_or_default();
+            let current = self.persona_of(&access);
+            return send_json(w, 200, &json!({"personas": list, "current": current})).await;
+        }
+        if r.method == "POST" && r.path == "/api/persona" {
+            if !r
+                .headers
+                .get("content-type")
+                .is_some_and(|c| c.starts_with("application/json"))
+            {
+                return send_json(w, 400, &json!({"error": "JSON only"})).await;
+            }
+            return self.choose_persona(&access, &r, w).await;
         }
         if get && r.path == "/api/whoami" {
             let me = match &access {
@@ -850,7 +1135,7 @@ impl Gateway {
             }
             return match parts[4] {
                 "timeline" => {
-                    let events = self
+                    let log = self
                         .state
                         .lock()
                         .expect("not poisoned")
@@ -858,7 +1143,8 @@ impl Gateway {
                         .get(&agent)
                         .cloned()
                         .unwrap_or_default();
-                    send_json(w, 200, &json!({"events": events})).await
+                    let after = r.query.get("after").map(String::as_str).unwrap_or("");
+                    send_json(w, 200, &timeline_since(log, after)).await
                 }
                 "files" => {
                     let reply = self
@@ -883,6 +1169,33 @@ impl Gateway {
                 }
                 _ => send_json(w, 404, &json!({"error": "not found"})).await,
             };
+        }
+        if get && r.path == "/api/openfox/library" {
+            // part of a core's OpenFox library: its agents, skills, MCP servers… (the owner's)
+            if !matches!(access, Access::Owner) {
+                return send_json(w, 403, &json!({"error": "the core's owner sees this"})).await;
+            }
+            let q = |k: &str| r.query.get(k).cloned().unwrap_or_default();
+            if !q("node")
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "-_".contains(c))
+                || q("node").is_empty()
+            {
+                return send_json(w, 400, &json!({"error": "bad request"})).await;
+            }
+            let reply = self
+                .ask(
+                    &format!("node.{}.openfox.library", q("node")),
+                    json!({"harness": q("harness"), "kind": q("kind"), "id": q("id")}),
+                    Duration::from_secs(15),
+                )
+                .await;
+            return send_json(
+                w,
+                200,
+                &reply.unwrap_or(json!({"ok": false, "error": "the core did not answer"})),
+            )
+            .await;
         }
         if get && r.path.starts_with("/api/logo/") {
             return self.logo(w, r.path.rsplit('/').next().unwrap_or("")).await;
@@ -925,6 +1238,113 @@ impl Gateway {
             }
         }
         send_json(w, 404, &json!({"error": "not found"})).await
+    }
+
+    /// Who a preference belongs to: the owner, or a pass by its id.
+    fn who(access: &Access) -> String {
+        match access.pass_id() {
+            None => "owner".into(),
+            Some(id) => format!("pass:{id}"),
+        }
+    }
+
+    /// The persona this person chose, while FoxBot still publishes it; else the original FoxBot.
+    fn persona_of(&self, access: &Access) -> String {
+        let chosen = self.personas.get(&Self::who(access));
+        match self.mascot_dir.as_deref() {
+            Some(dir) if crate::personas::published(dir).contains(&chosen) => chosen,
+            _ => String::new(),
+        }
+    }
+
+    /// `POST /api/persona {"persona": …}`: the mascot this person shows; empty for the original
+    /// FoxBot. Only a persona FoxBot's folder holds is accepted.
+    async fn choose_persona(
+        &self,
+        access: &Access,
+        r: &Request,
+        w: &mut TcpStream,
+    ) -> std::io::Result<()> {
+        let persona = serde_json::from_slice::<Value>(&r.body)
+            .ok()
+            .and_then(|v| v.get("persona").and_then(Value::as_str).map(String::from))
+            .unwrap_or_default();
+        let known = self
+            .mascot_dir
+            .as_deref()
+            .map(crate::personas::list)
+            .unwrap_or_default();
+        if !persona.is_empty() && !known.iter().any(|p| p["id"] == persona.as_str()) {
+            return send_json(w, 400, &json!({"error": "unknown persona"})).await;
+        }
+        if let Err(e) = self.personas.set(&Self::who(access), &persona) {
+            return send_json(w, 500, &json!({"error": e.to_string()})).await;
+        }
+        self.push(); // every page of this person follows
+        send_json(w, 200, &json!({"persona": persona})).await
+    }
+
+    /// `POST /api/session {"secret": …}`: the owner's token or a pass, exchanged for a session
+    /// cookie. Answers like `/api/whoami`. Wrong secrets make the address wait (429).
+    async fn sign_in(&self, r: &Request, w: &mut TcpStream) -> std::io::Result<()> {
+        use crate::session::{owner_hash, set_cookie, Kind};
+        if !r
+            .headers
+            .get("content-type")
+            .is_some_and(|c| c.starts_with("application/json"))
+        {
+            return send_json(w, 400, &json!({"error": "JSON only"})).await;
+        }
+        let wait = self.sessions.wait(r.peer);
+        if !wait.is_zero() {
+            let body = json!({"error": "too many attempts", "retry_after": wait.as_secs() + 1});
+            return send_json(w, 429, &body).await;
+        }
+        let secret = serde_json::from_slice::<Value>(&r.body)
+            .ok()
+            .and_then(|v| {
+                v.get("secret")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .map(String::from)
+            })
+            .unwrap_or_default();
+        let pass = (!secret.is_empty())
+            .then(|| self.access_of(Some(&secret), false))
+            .flatten();
+        let given = secret.as_bytes();
+        let owner = !self.token.is_empty()
+            && given.len() == self.token.len()
+            && given
+                .iter()
+                .zip(self.token.as_bytes())
+                .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+                == 0;
+        let (cookie, me) = match (&pass, owner) {
+            (Some(Access::Guest(p)), _) => (
+                self.sessions
+                    .issue(Kind::Pass, &crate::passes::token_hash(&secret)),
+                json!({"role": p["role"], "pass": p["id"], "name": p["name"]}),
+            ),
+            (_, true) => (
+                self.sessions.issue(Kind::Owner, &owner_hash(&self.token)),
+                json!({"role": "owner"}),
+            ),
+            _ => {
+                self.sessions.attempt(r.peer, false);
+                return send_json(w, 401, &json!({"error": "unknown token or pass"})).await;
+            }
+        };
+        self.sessions.attempt(r.peer, true);
+        let body = serde_json::to_vec(&me).expect("serializes");
+        send_with(
+            w,
+            200,
+            "application/json",
+            &body,
+            &set_cookie(Some(&cookie), r.https()),
+        )
+        .await
     }
 
     /// A thread is the access's own: always for the owner; for a pass, named after it or
@@ -992,12 +1412,26 @@ impl Gateway {
                 d["pass"] = json!(id);
                 Ok(d)
             }
-            "/api/message" | "/api/upload" | "/api/model" | "/api/mode" | "/api/archive"
-            | "/api/cancel" | "/api/rename" | "/api/pin" => {
-                if self.owned(access, &s(&d, "agent")) {
-                    Ok(d)
-                } else {
+            "/api/message"
+            | "/api/upload"
+            | "/api/model"
+            | "/api/mode"
+            | "/api/archive"
+            | "/api/cancel"
+            | "/api/rename"
+            | "/api/pin"
+            | "/api/openfox/thread" => {
+                // what runs commands or OpenFox sessions Inari does not supervise is the owner's
+                let unsupervised = (path == "/api/message"
+                    && d.get("workflow").is_some_and(|w| !w.is_null()))
+                    || (path == "/api/openfox/thread"
+                        && OWNER_ONLY.contains(&s(&d, "action").as_str()));
+                if !self.owned(access, &s(&d, "agent")) {
                     Err((403, "not your thread"))
+                } else if unsupervised {
+                    Err((403, "the core's owner does this"))
+                } else {
+                    Ok(d)
                 }
             }
             "/api/harness" => {
@@ -1161,6 +1595,10 @@ impl Gateway {
                 }
                 if let Some(a) = d.get("attachments").filter(|a| a.is_array()) {
                     p["attachments"] = a.clone();
+                }
+                // an OpenFox workflow launched with it (the node checks it)
+                if let Some(w) = d.get("workflow").filter(|w| w.is_object()) {
+                    p["workflow"] = w.clone();
                 }
                 self.bus.publish(&format!("agent.{}.run", s(d, "agent")), p);
                 ok
@@ -1338,6 +1776,71 @@ impl Gateway {
                 );
                 ok
             }
+            "/api/openfox/thread" => {
+                // something done on a thread's OpenFox panel; the thread's node does it
+                const ACTIONS: [&str; 25] = [
+                    "agent",
+                    "effort",
+                    "danger",
+                    "criteria",
+                    "answer",
+                    "pause",
+                    "resume",
+                    "dequeue",
+                    "compact",
+                    "retry_now",
+                    "retry",
+                    "refresh",
+                    "workflow_exit",
+                    "task_add",
+                    "task_move",
+                    "task_remove",
+                    "dev_config",
+                    "dev_start",
+                    "dev_stop",
+                    "dev_restart",
+                    "dev_logs",
+                    "process_stop",
+                    "checkout",
+                    "branch_new",
+                    "instructions",
+                ];
+                if !need(&["agent", "action"]) || !ACTIONS.contains(&s(d, "action").as_str()) {
+                    return bad;
+                }
+                self.bus
+                    .publish(&format!("agent.{}.openfox", s(d, "agent")), d.clone());
+                ok
+            }
+            "/api/openfox" => {
+                // an OpenFox setting from the interface: its address, agent, limit; sign-in; the
+                // active provider; a check. The node does it and says how it went.
+                let action = s(d, "action");
+                if !need(&["node", "harness", "action"])
+                    || !([
+                        "set",
+                        "login",
+                        "activate",
+                        "check",
+                        "provider_test",
+                        "provider_add",
+                        "provider_remove",
+                        "provider_refresh",
+                    ]
+                    .contains(&action.as_str())
+                        || crate::openfox_library::ACTIONS.contains(&action.as_str()))
+                {
+                    return bad;
+                }
+                let mut p = d.clone();
+                if let Some(o) = p.as_object_mut() {
+                    o.remove("node");
+                    o.remove("action");
+                }
+                self.bus
+                    .publish(&format!("node.{}.openfox.{action}", s(d, "node")), p);
+                ok
+            }
             "/api/update/check" => {
                 let node = Some(s(d, "node"))
                     .filter(|n| !n.is_empty())
@@ -1462,17 +1965,55 @@ impl Gateway {
 
     async fn events(&self, w: &mut TcpStream, access: Access) -> std::io::Result<()> {
         let mut rx = self.clients.subscribe();
+        let mut drafts = self.drafts.subscribe();
+        let mut panels = self.panels.subscribe();
         w.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\nConnection: keep-alive\r\n\r\n").await?;
         w.write_all(format!("data: {}\n\n", self.snapshot_for(&access)).as_bytes())
             .await?;
+        // the answers being written right now, for a page that opens in the middle of one
+        let now: Vec<(String, String)> = self
+            .state
+            .lock()
+            .expect("not poisoned")
+            .drafts
+            .iter()
+            .map(|(a, t)| (a.clone(), t.clone()))
+            .collect();
+        for (agent, text) in now.into_iter().filter(|(a, _)| self.owned(&access, a)) {
+            w.write_all(draft_frame(&agent, &text).as_bytes()).await?;
+        }
+        let shown: Vec<(String, Value)> = self
+            .state
+            .lock()
+            .expect("not poisoned")
+            .panels
+            .iter()
+            .map(|(a, p)| (a.clone(), p.clone()))
+            .collect();
+        for (agent, panel) in shown.into_iter().filter(|(a, _)| self.owned(&access, a)) {
+            w.write_all(panel_frame(&agent, &panel).as_bytes()).await?;
+        }
         w.flush().await?;
         loop {
-            let frame = match tokio::time::timeout(Duration::from_secs(15), rx.recv()).await {
-                Ok(Ok(())) | Ok(Err(broadcast::error::RecvError::Lagged(_))) => {
-                    format!("data: {}\n\n", self.snapshot_for(&access))
-                }
-                Ok(Err(broadcast::error::RecvError::Closed)) => return Ok(()),
-                Err(_) => ": keep-alive\n\n".to_string(),
+            let tick = tokio::time::sleep(Duration::from_secs(15));
+            let frame = tokio::select! {
+                got = rx.recv() => match got {
+                    Ok(()) | Err(broadcast::error::RecvError::Lagged(_)) => {
+                        format!("data: {}\n\n", self.snapshot_for(&access))
+                    }
+                    Err(broadcast::error::RecvError::Closed) => return Ok(()),
+                },
+                got = panels.recv() => match got {
+                    Ok((agent, panel)) if self.owned(&access, &agent) => panel_frame(&agent, &panel),
+                    Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => return Ok(()),
+                },
+                got = drafts.recv() => match got {
+                    Ok((agent, text)) if self.owned(&access, &agent) => draft_frame(&agent, &text),
+                    Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => continue, // the next one carries the whole text
+                    Err(broadcast::error::RecvError::Closed) => return Ok(()),
+                },
+                _ = tick => ": keep-alive\n\n".to_string(),
             };
             w.write_all(frame.as_bytes()).await?;
             w.flush().await?;
@@ -1483,6 +2024,27 @@ impl Gateway {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_page_gets_only_what_came_since_its_last_event() {
+        let log: Vec<Value> = ["a", "b", "c"].iter().map(|id| json!({"id": id})).collect();
+        let since = timeline_since(log.clone(), "b");
+        assert_eq!(since["events"], json!([{"id": "c"}]));
+        assert_eq!(
+            (since["from"].as_u64(), since["count"].as_u64()),
+            (Some(2), Some(3))
+        );
+        assert_eq!(timeline_since(log.clone(), "c")["events"], json!([]));
+        let whole = timeline_since(log.clone(), "gone");
+        assert_eq!(
+            (
+                whole["from"].as_u64(),
+                whole["events"].as_array().map(Vec::len)
+            ),
+            (Some(0), Some(3))
+        );
+        assert_eq!(timeline_since(log, "")["from"].as_u64(), Some(0));
+    }
 
     #[test]
     fn queries_are_decoded() {

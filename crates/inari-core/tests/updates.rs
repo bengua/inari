@@ -4,7 +4,6 @@
 use inari_core::node::{Node, NodeConfig};
 use inari_core::usage::http;
 use serde_json::{json, Value};
-use std::path::Path;
 use std::time::Duration;
 
 const FAKE_NPM: &str = r#"#!/bin/sh
@@ -53,16 +52,16 @@ async fn a_harness_is_updated_and_restarted_from_the_page() {
     for (name, value) in [("mesh.key", "m"), ("device.key", "d"), ("token", "t")] {
         std::fs::write(d.join(name), value).unwrap();
     }
-    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fake_acp.py");
+    let script = env!("CARGO_BIN_EXE_inari-core-rs");
     let cfg: NodeConfig = serde_json::from_value(json!({
         "node_id": "hub", "data_dir": d.join("hub"), "key_file": d.join("mesh.key"),
         "device_key_file": d.join("device.key"), "gateway_listen": "127.0.0.1:0",
         "gateway_token_file": d.join("token"), "heartbeat": 0.1,
         "harnesses": {
-            "fake": {"command": ["python3", script], "env": {"FAKE_ACP_LOG": d.join("acp.log")},
+            "fake": {"command": [script, "fake-agent"], "env": {"FAKE_ACP_LOG": d.join("acp.log")},
                      "update": {"npm": "fake-agent", "prefix": d.join("prefix"), "npm_bin": npm,
                                 "restart": ["touch", d.join("restarted")]}},
-            "broken": {"command": ["python3", script], "env": {"FAKE_ACP_LOG": d.join("acp.log")},
+            "broken": {"command": [script, "fake-agent"], "env": {"FAKE_ACP_LOG": d.join("acp.log")},
                        "update": {"npm": "nope", "prefix": d.join("prefix"), "npm_bin": d.join("missing-npm")}},
         },
     }))

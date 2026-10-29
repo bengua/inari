@@ -1,5 +1,4 @@
-//! Quotas and usage of the model providers, in one shape, as the Python reference
-//! (`inari_core.usage`): sources are adapters, the gateway polls them and puts the
+//! Quotas and usage of the model providers, in one shape: sources are adapters, the gateway polls them and puts the
 //! result in its snapshot. A local model has no quota: it is listed as unlimited.
 
 use serde_json::{json, Map, Value};
@@ -15,6 +14,21 @@ pub async fn http(
     body: Option<&[u8]>,
     timeout: Duration,
 ) -> Result<(u16, Vec<u8>), String> {
+    http_with(method, url, body, &[], timeout).await
+}
+
+/// `http`, with extra request headers (a token, say).
+pub async fn http_with(
+    method: &str,
+    url: &str,
+    body: Option<&[u8]>,
+    headers: &[(&str, &str)],
+    timeout: Duration,
+) -> Result<(u16, Vec<u8>), String> {
+    let extra: String = headers
+        .iter()
+        .map(|(k, v)| format!("{k}: {v}\r\n"))
+        .collect();
     let rest = url.strip_prefix("http://").ok_or("only http:// URLs")?;
     let (authority, path) = match rest.find('/') {
         Some(i) => (&rest[..i], &rest[i..]),
@@ -30,7 +44,7 @@ pub async fn http(
         let body = body.unwrap_or_default();
         let head = format!(
             "{method} {path} HTTP/1.1\r\nHost: {authority}\r\nContent-Type: application/json\r\n\
-             Content-Length: {}\r\nAccept: application/json\r\nConnection: close\r\n\r\n",
+             Content-Length: {}\r\nAccept: application/json\r\nConnection: close\r\n{extra}\r\n",
             body.len()
         );
         stream

@@ -340,6 +340,43 @@ pub fn materialize(root: &Path, dest: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Bring a folder kept between turns in step with the capsule: only what the snapshot changed
+/// since `before` (the tree the folder was last in step with) is written or removed, so what
+/// changed on disk meanwhile (a branch, a dev server's files) stays. Returns the new tree.
+pub fn sync(
+    root: &Path,
+    dest: &Path,
+    before: &BTreeMap<String, String>,
+) -> Result<BTreeMap<String, String>> {
+    let capsule = load(root)?;
+    let tree = capsule.snapshot.tree;
+    for name in before.keys().filter(|n| !tree.contains_key(*n)) {
+        if let Some(rel) = safe_relative(name) {
+            let _ = fs::remove_file(dest.join(rel));
+        }
+    }
+    for (name, sha) in &tree {
+        let rel = safe_relative(name)
+            .ok_or_else(|| Error::Integrity(format!("path escapes the workspace: {name}")))?;
+        if before.get(name) == Some(sha) && dest.join(&rel).is_file() {
+            continue;
+        }
+        let data = fs::read(root.join(BLOBS).join(sha))?;
+        if sha256_hex(&data) != *sha {
+            return Err(Error::Integrity(format!(
+                "blob {} is corrupt",
+                &sha[..12.min(sha.len())]
+            )));
+        }
+        let target = dest.join(rel);
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(target, data)?;
+    }
+    Ok(tree)
+}
+
 /// Record `workdir` as the capsule's new snapshot (only new content adds a blob) and reseal.
 pub fn update_snapshot(root: &Path, workdir: &Path) -> Result<Capsule> {
     locked(root, || update_snapshot_unlocked(root, workdir))

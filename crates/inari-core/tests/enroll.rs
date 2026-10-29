@@ -4,7 +4,6 @@
 use inari_core::node::{Node, NodeConfig};
 use inari_core::usage::http;
 use serde_json::{json, Value};
-use std::path::Path;
 use std::time::Duration;
 
 fn free_port() -> u16 {
@@ -22,8 +21,8 @@ async fn a_new_core_joins_with_an_invitation_from_the_page() {
     std::fs::write(d.join("mesh.key"), "mesh").unwrap();
     std::fs::write(d.join("device.key"), "device").unwrap();
     std::fs::write(d.join("token"), "tok").unwrap();
-    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fake_acp.py");
-    let fake = json!({"fake": {"command": ["python3", script], "env": {"FAKE_ACP_LOG": d.join("acp.log")}}});
+    let script = env!("CARGO_BIN_EXE_inari-core-rs");
+    let fake = json!({"fake": {"command": [script, "fake-agent"], "env": {"FAKE_ACP_LOG": d.join("acp.log")}}});
     let hub_cfg: NodeConfig = serde_json::from_value(json!({
         "node_id": "hub", "data_dir": d.join("hub"), "key_file": d.join("mesh.key"),
         "device_key_file": d.join("device.key"), "gateway_listen": "127.0.0.1:0",

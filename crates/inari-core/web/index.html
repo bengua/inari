@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Inari</title>
+<meta name="inari-page" content="__INARI_PAGE__">
+<link rel="preload" href="/assets/fonts/ibm_plex_sans.woff2?v=__INARI_PAGE__" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/app.css?v=__INARI_PAGE__">
+<script src="/assets/i18n.js?v=__INARI_PAGE__" defer></script>
+<script src="/assets/app.js?v=__INARI_PAGE__" defer></script>
+</head>
+<body>
+<div id="login" class="glass" hidden><h2>Inari</h2><label for="tokenInput">Access token or pass</label><small id="loginWhy" class="empty"></small><input id="tokenInput" type="password" autocomplete="current-password"><button class="btn go" id="tokenGo">Connect</button></div>
+<div id="fox" aria-label="Mascot"></div>
+<div id="dropdock" role="region" aria-label="Drop the thread here" hidden></div>
+<svg id="dragline" aria-hidden="true" hidden><path></path><circle r="4"></circle><circle class="ring" r="14"></circle></svg>
+<div id="app" class="nosel" hidden>
+  <header id="appbar"><button class="btn icon" id="sideToggle" title="Sidebar" aria-label="Show or hide the sidebar" data-icon="sidebar"></button><div class="brand"><h1>Inari</h1><small id="brandName"></small></div><span class="sp"></span><span class="chip" id="stats" aria-live="polite" style="cursor:default">…</span><button class="btn icon" id="benchBtn" title="Artifacts, terminal, journal" aria-label="Show or hide the artifacts pane" data-icon="panel"></button></header>
+  <aside id="side">
+    <div id="foxSlot"><button type="button" class="pnav" id="personaPrev" aria-label="Previous avatar" title="Previous avatar" hidden>‹</button><span id="personaName" role="status" aria-live="polite"></span><button type="button" class="pnav" id="personaNext" aria-label="Next avatar" title="Next avatar" hidden>›</button></div>
+    <nav class="nav"><button id="newThread" data-icon="edit"><span>New thread</span></button><button id="searchBtn" data-icon="search"><span>Search threads</span></button><input id="search" type="search" placeholder="Search all journals…" aria-label="Search journals"></nav>
+    <div id="hits" class="glass"></div><div id="mentions" class="glass" role="listbox" aria-label="Files"></div>
+    <div class="sect shead" id="coresHead">Threads by core<button class="btn small" id="sleepers" title="Sleeping threads" hidden></button><button class="btn icon small" id="addCore" title="Add a core" aria-label="Add a core">+</button></div>
+    <div id="cores"></div>
+    <div id="foot"><div id="approvals"></div><div id="feed" aria-label="Activity"></div>
+      <section id="usageCard" hidden aria-label="Provider usage"><header><span data-icon="bars"></span><b>Provider usage</b><button class="btn icon small" id="usageFold" title="Collapse provider usage" aria-label="Collapse provider usage" data-icon="chevron"></button></header><div id="usageBody"></div></section>
+      <div id="bottom"><button class="btn icon" id="gear" title="Settings" aria-label="Settings" data-icon="gear"></button><button class="btn icon" id="usageBtn" title="Provider usage" aria-label="Provider usage" aria-expanded="false" data-icon="bars"></button><button id="pill" title="Harness updates" aria-label="Harness updates"></button></div>
+      <div id="brandfoot"></div></div>
+  </aside>
+  <section id="main">
+    <div id="passBanner" role="status" hidden></div>
+    <div id="top"><button class="btn small" id="back">‹ Back</button><button class="btn icon" id="benchMobile" title="Artifacts, terminal, journal" aria-label="Artifacts" data-icon="panel"></button><h2 id="ptitle">Inari</h2><span id="pphase"></span>
+      <button class="chip" id="modelChip" hidden></button><button class="chip" id="modeChip" hidden></button><button class="chip" id="ctxChip" hidden></button><button class="chip" id="autoChip" hidden></button><button class="btn small" id="actionsBtn" data-icon="more" aria-label="Actions" title="Actions" hidden><span>Actions</span></button></div>
+    <div id="stage" aria-hidden="true"></div><div id="thread"><div id="msgs" role="log" aria-live="polite" aria-relevant="additions"></div><div id="askbox" aria-live="polite"></div></div>
+    <div id="dock"><button type="button" class="btn small" id="jump" hidden>↓ New messages</button><form class="composer" id="composer"><div class="attached" id="attached"></div><textarea id="msg" rows="2" placeholder="Build anything…" aria-label="Message"></textarea>
+      <div class="ctools"><button type="button" class="btn icon" id="attach" title="Attach a file" aria-label="Attach a file" data-icon="plus"></button><input type="file" id="file" multiple hidden>
+        <button type="button" class="chip" id="coreChip" title="Where it runs"></button><button type="button" class="chip" id="pickModel" title="Choose the model"></button><span class="sp"></span>
+        <button type="button" class="btn icon" id="mic" title="Dictate" aria-label="Dictate" data-icon="mic" hidden></button><button class="send stop" type="button" id="stopBtn" aria-label="Stop" title="Stop" data-icon="stop" hidden></button><button class="send" type="submit" id="sendBtn" aria-label="Send" data-icon="send"></button></div></form>
+      <div class="hint">Enter to send · Shift+Enter for a new line</div></div>
+  </section>
+  <aside id="bench"><div id="split" title="Drag to resize"></div>
+    <div class="tabs" role="tablist"><button class="tab on" data-tab="artifacts" role="tab">Artifacts</button><button class="tab" data-tab="terminal" role="tab">Terminal</button><button class="tab" data-tab="viewer" role="tab">Viewer</button><button class="tab" data-tab="journal" role="tab">Journal</button><button class="tab" data-tab="plan" role="tab" id="planTab" hidden>Plan</button><span class="sp"></span>
+      <button class="btn icon" id="wbmax" title="Give the artifacts all the room" aria-label="Expand" data-icon="expand"></button><button class="btn icon" id="benchClose" title="Fold this pane away" aria-label="Fold" data-icon="fold"></button></div>
+    <div id="bbody" role="tabpanel"></div></aside>
+</div>
+<svg id="tethers" aria-hidden="true"></svg>
+<div id="sheet" class="glass" role="dialog" aria-modal="true"><h2 id="sheetTitle"></h2><div class="opts" id="sheetOpts"></div></div>
+<div id="pop" class="pop glass"></div><div id="toast" class="glass" role="status" aria-live="polite"></div><div id="offline" role="status" hidden></div>
+</body>
+</html>

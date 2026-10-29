@@ -13,7 +13,7 @@ use std::time::Duration;
 const TOKEN: &str = "test-token";
 
 fn config(dir: &Path, id: &str, hub: &str, log: &Path) -> NodeConfig {
-    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fake_acp.py");
+    let script = env!("CARGO_BIN_EXE_inari-core-rs");
     std::fs::write(dir.join("mesh.key"), "mesh-secret").unwrap();
     std::fs::write(dir.join("device.key"), "device-secret").unwrap();
     std::fs::write(dir.join("token"), TOKEN).unwrap();
@@ -21,7 +21,7 @@ fn config(dir: &Path, id: &str, hub: &str, log: &Path) -> NodeConfig {
         "node_id": id, "data_dir": dir.join(id), "key_file": dir.join("mesh.key"),
         "device_key_file": dir.join("device.key"), "hub": hub, "heartbeat": 0.2, "registry_ttl": 3.0,
         "expected_peers": ["peer"], "approval_ttl": 10.0,
-        "harnesses": {"fake": {"command": ["python3", script], "env": {"FAKE_ACP_LOG": log}}},
+        "harnesses": {"fake": {"command": [script, "fake-agent"], "env": {"FAKE_ACP_LOG": log}}},
     });
     if hub.is_empty() {
         cfg["gateway_listen"] = json!("127.0.0.1:0");
@@ -100,7 +100,8 @@ async fn a_person_drives_two_rust_cores_through_the_gateway() {
     // the page carries its version, the snapshot names the one served: an older open page reloads
     let version = g.snapshot()["ui"]["page"].as_str().unwrap().to_string();
     assert_eq!(version.len(), 12);
-    assert!(String::from_utf8_lossy(&page).contains(&format!("const PAGE = \"{version}\"")));
+    assert!(String::from_utf8_lossy(&page)
+        .contains(&format!("<meta name=\"inari-page\" content=\"{version}\">")));
     let (status, _) = http(
         "GET",
         &format!("http://127.0.0.1:{port}/api/search?q=x"),

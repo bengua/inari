@@ -1,13 +1,14 @@
 # UX/UI specification
 
-Status: specified and implemented as one responsive page (`src/inari_core/web/index.html`,
-no build step, no external resource) served by `inari-core gateway`. Try it with
+Status: specified and implemented as one responsive page (`crates/inari-core/web/`: `index.html`,
+`app.css`, `app.js` and the fonts under `fonts/`; no build step, no external resource) served by
+`inari-core gateway`, the page at `/` and its files under `/assets/`. Try it with
 `inari-core demo` (a simulated mesh; every drag performs a real teleportation).
 Look: graphite and copper in dark, warm paper in light (following the system or the setting), glass panels and a copper glow; the mascot is FoxBot when its folder is configured, the orb otherwise. Layout: a narrow column of cores on the left (machines stacked, agents as small cards you drag between them), the conversation and prompt in the middle taking the room, and a workbench on the right (Artifacts, Terminal, Viewer, Journal) that folds away, expands to take the whole width, and resizes. On a phone the cores are the home screen, the conversation opens full screen and the workbench is a second full-screen view. What the page does today: the node-and-agent graph with drag-to-teleport, the
 journal as a vertical tree, the live orb driven by `mascot_state`, signed
 approvals, a terminal that runs a command in the agent's workspace (journaled, so the agent knows), a viewer for text, code, Markdown, JSON, images and sandboxed HTML, a target sheet for touch (long-press, or `T` on the keyboard), and
 reduced-motion support. Not yet built: fork and merge gestures, search, the
-biometric gate (the gateway holds the approval key; browsers use a bearer token),
+biometric gate (the gateway holds the approval key; a page signs in once for a session cookie, see docs/security.md),
 and an installable shell. The sections below remain the contract.
 
 ## Principles

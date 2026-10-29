@@ -9,6 +9,143 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Added
 
+- **OpenFox's work around the thread, in Inari.** An OpenFox thread's folder now stays on disk
+  between turns (Settings → OpenFox, on by default): it is still put away into the thread at the
+  end of every turn and before the thread leaves for another core, and at the next turn only what
+  changed in the thread since (an attachment, a return from another core) is brought in, so what
+  changed on disk meanwhile stays. On top of it:
+  - **Workflows.** The Plan tab launches one of OpenFox's workflows with the composer's message
+    and its parameters; a step that waits for the person shows as a card in the thread with its
+    branches; a workflow a stop broke off is carried on by the next message; it can be left.
+  - **The project's task board, dev server, processes and branch.** In the Plan tab: add a task,
+    start it (OpenFox works on it in a session of its own, in this thread's folder), mark it done,
+    remove it; set up the dev server, start, stop, restart it, read its log; stop a process OpenFox
+    started; switch to a branch or make one (the thread's files follow at once); the project's
+    instructions.
+  - **OpenFox's library**, in its sheet: agents, skills, commands and workflows (open, change,
+    duplicate OpenFox's own to change them, remove yours, turn a skill on or off); MCP servers
+    (add one, test it, turn it or one of its tools on or off, remove it; its environment and headers
+    go to OpenFox and only their names come back); the tools; the instructions for every project,
+    the language, the retry patterns and four switches.
+  A pass never launches a workflow, nor touches the task board, the dev server, the project's
+  instructions or the library: they run what its supervision does not see. A sheet taller than
+  the screen now scrolls.
+
+- **Choose your avatar.** Two discreet arrows beside the mascot go through the personas FoxBot
+  publishes (the ones `<mascot_dir>/personas.json` names; the folders of `sprites_persona/` still
+  in progress are never offered, and a choice of a persona taken down falls back to FoxBot); the
+  name shows for a moment, with how many of FoxBot's sequences the persona has. The choice is the person's own, not the model's: the core keeps it
+  for the owner and for each pass (`<data_dir>/personas.json`, `GET /api/personas`,
+  `POST /api/persona`), and every device of theirs follows.
+- **Thinner bars.** On a wide screen the app bar and the thread's bar are 36 px high, the
+  workbench tabs aligned with them; the thread's *Actions* is its icon; in a narrow column the
+  state leaves out its core and the model name is shortened (whole on hover). A bar that still
+  lacks room wraps, it never hides a control.
+- **The thread's comforts, OpenFox's and everyone's.** An edit's diff shows in its tool's output
+  (OpenFox's edit_file and write_file, in the theme's colours). The Plan tab of an OpenFox thread
+  shows its Git branch and changed files and the session's totals (read at the end of each turn).
+  In the composer, ↑ and ↓ go through the thread's earlier messages and "@" offers its files. The
+  search puts the open thread's hits first and opens a hit at its message. OpenFox's sheet
+  manages its providers: test a server, add one (a cloud one's key goes to OpenFox only, on a
+  bus subject that is never kept), refresh its models, remove it.
+
+- **What OpenFox does, beside the answer.** For a thread OpenFox runs, the core sends the pages a
+  live panel: the thinking (shown, not journaled), the sub-agents (their words no longer mixed
+  into the answer), a question with choices or a free answer (OpenFox waits for it), a retry under
+  way or given up (Retry follows OpenFox's second try as a turn of its own), and a Plan tab: the
+  agent it runs as (OpenFox's own, the person's included; the top bar's chip follows it), the
+  reasoning effort its model offers, the confirmations level, pause, the context with Compact, its
+  tasks, its criteria (editable), the other data it keeps, its queue, the last turn's stats. The
+  agent a new session starts with is applied once: after that OpenFox's own switches are kept.
+
+- **OpenFox, driven natively.** A harness `{"kind": "openfox"}` speaks to the machine's own
+  OpenFox through its REST API and WebSocket instead of the Python `openfox-acp` bridge started
+  for each message: one WebSocket per thread kept between turns, reconnection, an end of turn
+  found by asking when OpenFox's own signal is lost (the bridge waited for the turn's limit), and
+  a message sent during a turn handed to OpenFox's own queue, which takes it at its next step.
+  OpenFox's messages are read into types; providers without their API keys. Settings → OpenFox
+  sets, per core, its address, the agent a new thread starts with, a turn's limit, the sign-in
+  (OpenFox's password, exchanged for a token kept in mode 600, never the password) and OpenFox's
+  default model, listed from OpenFox itself. `docs/openfox-dans-inari-fr.md` maps what Inari's
+  interface already carries of OpenFox's and what comes next.
+
+- **The answer shows as the model writes it.** The core kept a model's text until the answer
+  ended (or a tool was called) and only then showed it whole. It now sends the answer so far to the
+  pages as it comes (`draft.<agent>` on the bus, at most every 120 ms, outside `agent.>` so a late
+  one is never replayed; an SSE `draft` event to the pages allowed to see the thread, including a
+  page opened mid-answer). The page grows one bubble without rebuilding the thread, and swaps it
+  for the journaled message when the answer ends. The demo agent writes word by word.
+
+- **Fast models no longer slow Inari down.** Each piece of a streamed answer announced the thread's
+  phase again: it crossed the mesh and sent every open page a whole new snapshot, dozens of times a
+  second (400 pieces made 402 announcements). A thread now announces a new phase at once and the
+  same one at most once a second (`Runner::announce_state`, tested). The page no longer drops the
+  last news of a turn: a snapshot within the 1.5 s between two reloads of the thread schedules one
+  at the end of that time, and news during a reload is fetched right after it.
+
+- **A message's buttons.** Each message has Copy and Quote in my reply in its top corner, and Copy,
+  Share, Edit (your messages) or Retry (its answers), and Start again from here under its text (icons
+  only on a phone). A journal is never rewritten: Edit and Retry start a new thread from just before
+  the message (a fork; the thread stays as it is), with the message ready to change, or sent again.
+  On a touch screen, Select text lets the finger select part of a message. Share opens the system's
+  share sheet; in the Android app, Android's (the page asks for an `inari-share:` address, which the
+  app turns into a share intent). The long press on a message is gone: on a phone it also started
+  the system's text selection and its copy bar.
+
+- **Send while the agent works.** During a turn, Stop and Send sit side by side. A message sent then
+  shows at once as waiting, and takes its place in the thread when the agent reads it: when its turn
+  ends, as ACP has it, so an agent's own way of working (OpenFox's) is never interrupted. A harness
+  with `"steer": true` reads it sooner: at the next tool boundary the core stops the step, keeping
+  what it did, and sends the message to the same session; the thread notes the pause. An answer
+  written without tools is never cut.
+
+- **The mascot at the top of the conversation.** With a thread open and the sidebar folded, the
+  mascot floats at the top centre of the conversation, just under the thread's bar, as large as in
+  the sidebar (it was 96 px against the top edge), in a band of its own: the thread scrolls below
+  that band, so no text ever passes behind the mascot, and new messages arrive at the bottom, clear
+  of it. With the sidebar shown, it stays in the sidebar, full size. (The see-through eyes that let
+  text show through it are fixed in FoxBot's frames, in `inari-apk`.)
+
+- **`inari-core-rs demo`: the demo in Rust.** Three nodes in one process, the interface on
+  `:8787`, live turns and an approval question; `--mascot DIR` shows FoxBot. The agent it runs is
+  this binary too (`inari-core-rs demo-agent`): `write <file>: <text>`, `run: <command>` (a
+  read-only command runs at once, anything else asks you first, `sudo` never runs).
+- **Capsule signatures in Rust.** `inari-core-rs keygen <name>`, `sign <capsule> --key <name.key>`
+  and `verify <capsule> --trusted <name.pub>`: the reference's format, byte for byte (the same key
+  writes the same signature).
+- **Capsules the Python reference wrote are frozen as test fixtures** (`tests/fixtures/python/`):
+  the Rust core is checked to read them hash for hash, report damage in the same words and verify
+  their signatures, so no existing capsule ever needs converting.
+- **`cargo test` needs no Python.** The scripted agent of the tests is `inari-core-rs fake-agent`,
+  a Rust port of `tests/fake_acp.py` with the same words and the same log.
+
+- **Richer replies.** The thread and the Markdown viewer share one renderer: headings, bulleted and
+  numbered lists, quotes, tables, rules, links (http and https only, opened outside the page) and
+  code blocks with their language and a *Copy* button.
+
+- **Connection state you can read.** When the page loses its core, a banner says so, how old what is
+  on screen is, and that it is reconnecting; the stream reopens by itself. A refused token or pass
+  brings the login back with the reason, and an error from the core is shown instead of dropped.
+
+- **The page in English and French.** It follows the browser's language, and *Settings → Language*
+  switches it. Every text goes through `t()` with its French in `web/i18n.js`; a test fails when a
+  text has no French. What the core itself sends (an agent's error, a harness message) stays as sent.
+
+- **Visible ways to do what gestures do.** Each thread shows an arrow to move it to another core,
+  each core a **+** to start a thread on it; a one-time tip explains dragging; **?** lists the
+  keyboard shortcuts, **/** searches, **Esc** closes a menu or a sheet.
+
+- **The page's own fonts.** IBM Plex Sans and Mono and Bricolage Grotesque are served by the core
+  (subset to Latin, woff2, about 120 KB), so every browser shows the same type. The page is now
+  `index.html`, `app.css`, `app.js` and `fonts/`, served under `/assets/` by both gateways.
+
+- **A thread asks only for what is new.** The page used to download a thread's whole journal every
+  second and a half while an agent worked; it now asks `timeline?after=<last event>` and appends,
+  and asks for the whole journal again only when it changed under it (a merge, a fork).
+
+- **A *New messages* button** appears when the agent writes while you have scrolled up; the thread
+  no longer pulls you down.
+
 - **Approvals appear in the thread, and an auto mode.** An agent's request to run something is a
   card at the bottom of *its* thread (Deny, Allow once, Always allow here) instead of a line in
   the cores' pane; requests from other threads stay in the pane. A chip on each thread switches
@@ -94,7 +231,68 @@ Newest first. An entry says what changed for someone using the thing.
   (`inari-core-rs serve-endpoint | adopt | teleport | status`). Python and Rust nodes teleport
   agents to each other over TCP, in both directions.
 
+### Removed
+
+- **The Python reference.** Inari is Rust only: `src/inari_core`, its tests, `pyproject.toml`
+  and the `uv` steps of `verify.sh` and CI are gone; nothing but the Rust binary is built,
+  tested or installed. What only the reference did either moved to Rust (the demo, its agent,
+  capsule signatures, the test agent) or was not used by the Rust core (the built-in model
+  loop and its provider handover, the container sandbox, schema generation). Capsules the
+  reference wrote are test fixtures the core reads hash for hash. The web page moved to
+  `crates/inari-core/web/`.
+
+### Android
+
+- **The navigation bar no longer covers the composer** on Android 15, where apps are drawn edge to
+  edge: the view stands clear of it, and the page is told only the height the keyboard adds.
+- **A share cannot exhaust the phone's memory.** A shared file's size is read before the file; a
+  file over the limit is never read, and one whose size is unknown is read only up to the limit.
+- **A page that does not load says what to check** (the private network, the core, the
+  certificate, the address), the technical reason kept small below; the unlock prompt is
+  translated. Leftover strings from another app are gone.
+
+### Security
+
+- **Sessions instead of a token in the page.** The page signs in once and holds an `HttpOnly`,
+  `SameSite=Strict` cookie signed by the core; the token no longer goes into URLs (`/events?token=`,
+  logo addresses) nor into the browser's storage. A revoked pass or a new owner token ends the
+  sessions they opened. Links with `#token=` or `#pass=`, and secrets older pages left in storage,
+  are exchanged once and forgotten. *Settings → Sign out* ends the session.
+- **A strict content policy.** No inline script may run (`script-src 'self'`), the page cannot be
+  framed by another site, and no referrer leaves it.
+- **Wrong secrets wait.** After five wrong tokens or passes from one address, each attempt waits
+  longer, up to five minutes.
+- **The gateway bounds its connections** (512 at once) and the time a request may take to arrive
+  (60 s), so a client trickling bytes no longer holds a connection for hours.
+
 ### Fixed
+
+- **The workbench tabs can be clicked.** The handle that resizes the workbench took the panes'
+  340 px minimum width and lay over the tabs (Artifacts, Terminal, Viewer, Journal); it is 8 px
+  again, and still resizes.
+- **The mascot's actions are tiles while a thread is carried**, beside the others: *Summarise it*,
+  *Put it to sleep*, and a red *Delete…* that asks before deleting (as the menu does). They work
+  whether or not the mascot can be reached.
+- **A thread can be dropped on FoxBot with a mouse.** FoxBot's frame took the mouse as soon as
+  the pointer was over it, so the drop never reached the page; while a thread is carried the frame
+  now lets the pointer through, and takes its own clicks again after.
+- **A thread can be dropped on the mascot again on a phone.** When the list was long enough to
+  scroll the page, the mascot scrolled out of view with its slot and could not be reached; while a
+  thread is carried it now comes to the top of the screen, and goes back after. The tip about
+  gestures, which pushed the list down, is no longer shown on touch screens (it spoke of a mouse
+  and a keyboard).
+- **An open tool call stays open.** The thread was rebuilt every second and a half while an agent
+  worked, closing the tool call you were reading and dropping your text selection; only what changed
+  is now redrawn, and a screen reader hears only the new messages.
+- **Readable text and reachable buttons.** The faint and dim greys and the copper of the main
+  buttons now meet WCAG AA contrast in both themes; buttons are at least 44 px on touch screens; the
+  workbench tabs say which one is selected and follow the arrow keys; keyboard focus is visible.
+- **Approvals are answered once.** Their cards are no longer rebuilt and re-announced on every
+  update, and a tap disables the card's buttons until the core answers.
+- **A draft survives the page updating itself**, and comes back in its thread.
+- **Forks get names that cannot collide**, and the login field submits with Enter.
+- **The gateway keeps accepting connections after a failed accept** (out of file descriptors, a
+  reset) instead of stopping until restarted.
 
 - **An agent's permission request was lost when its id was a string** (OpenFox's adapter sends
   `ofx-1`): the reader only accepted numbers, ignored the request, and the thread waited forever

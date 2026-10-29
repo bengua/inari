@@ -6,7 +6,6 @@
 use inari_core::node::{Node, NodeConfig};
 use inari_core::usage::http;
 use serde_json::{json, Value};
-use std::path::Path;
 use std::time::Duration;
 
 async fn call(port: u16, auth: &str, path: &str, body: Option<Value>) -> (u16, Value) {
@@ -41,9 +40,8 @@ async fn a_supervised_guest_has_its_threads_and_nothing_more() {
     for (n, v) in [("mesh.key", "m"), ("device.key", "d"), ("token", "owner")] {
         std::fs::write(d.join(n), v).unwrap();
     }
-    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fake_acp.py");
-    let h =
-        |log: &str| json!({"command": ["python3", script], "env": {"FAKE_ACP_LOG": d.join(log)}});
+    let script = env!("CARGO_BIN_EXE_inari-core-rs");
+    let h = |log: &str| json!({"command": [script, "fake-agent"], "env": {"FAKE_ACP_LOG": d.join(log)}});
     let cfg: NodeConfig = serde_json::from_value(json!({
         "node_id": "home", "data_dir": d.join("home"), "key_file": d.join("mesh.key"), "device_key_file": d.join("device.key"),
         "gateway_listen": "127.0.0.1:0", "gateway_token_file": d.join("token"), "heartbeat": 0.1, "approval_ttl": 10.0,
@@ -179,6 +177,44 @@ async fn a_supervised_guest_has_its_threads_and_nothing_more() {
             &guest,
             "/api/message",
             Some(json!({"agent": "taxes", "text": "hi"}))
+        )
+        .await
+        .0,
+        403
+    );
+    // on its own thread too, what runs outside the supervision's sight is the owner's: an OpenFox
+    // workflow, a task, a dev server, the project's instructions, the library
+    assert_eq!(
+        call(
+            port,
+            &guest,
+            "/api/message",
+            Some(json!({"agent": thread, "text": "", "workflow": {"id": "review"}}))
+        )
+        .await
+        .0,
+        403
+    );
+    for action in ["task_add", "dev_config", "dev_start", "instructions"] {
+        assert_eq!(
+            call(
+                port,
+                &guest,
+                "/api/openfox/thread",
+                Some(json!({"agent": thread, "action": action, "prompt": "x"}))
+            )
+            .await
+            .0,
+            403,
+            "{action}"
+        );
+    }
+    assert_eq!(
+        call(
+            port,
+            &guest,
+            "/api/openfox/library?node=home&harness=openfox&kind=mcp",
+            None
         )
         .await
         .0,

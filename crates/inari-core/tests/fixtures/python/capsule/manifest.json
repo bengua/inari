@@ -1,0 +1,53 @@
+{
+  "format": "ssc/1",
+  "capsule_id": "2d6a3e1d-b7c4-4eb6-b6ac-8ef26b8f4c83",
+  "thread_id": "thread-1",
+  "created_at": 1.0,
+  "title": "",
+  "labels": {},
+  "lineage": {
+    "parent_capsule": null,
+    "fork_event_id": null,
+    "merged_from": []
+  },
+  "access": {
+    "owners": [],
+    "readers": [],
+    "approval_required": []
+  },
+  "holder": {
+    "node_id": "node-a",
+    "epoch": 1
+  },
+  "timeline_head": "600faf07e55a5760ec0b993f5648dbac77b2bf8839ec8258df3b1c8ca9c6cdf5",
+  "files": {
+    "artifacts/blobs/8ed3f6ad685b959ead7022518e1af76cd816f8e8ec7ccdda1ed4018e8f2223f8": {
+      "sha256": "8ed3f6ad685b959ead7022518e1af76cd816f8e8ec7ccdda1ed4018e8f2223f8",
+      "size": 5
+    },
+    "artifacts/blobs/c074f13b5524cf8c5a8f6988b5038be74f7a52feec44b899afaf18feac565090": {
+      "sha256": "c074f13b5524cf8c5a8f6988b5038be74f7a52feec44b899afaf18feac565090",
+      "size": 10
+    },
+    "artifacts/snapshot.json": {
+      "sha256": "1477dc66f9a4a8920f275eddbc94a8edb87ffb5977c9216edc7a9e54297f3cfc",
+      "size": 201
+    },
+    "environment/spec.json": {
+      "sha256": "5b9bf09dee2046640d988d303182506c962ef2dbc3533623cb9ccb45d646e4f2",
+      "size": 133
+    },
+    "memory/timeline_events.jsonl": {
+      "sha256": "f9d55838b8130c7100b18bc44027636ba6093b3ce7c0a1f967d151220ffcf0d3",
+      "size": 1434
+    },
+    "memory/vector_index/index.json": {
+      "sha256": "d603bee68f73fdca04b89e16fdb94ed14056e71420abea1853add3f1054e20c9",
+      "size": 367
+    },
+    "memory/working_memory.md": {
+      "sha256": "f74d77dbfbe0c19a9b3772aa5cf6c8b37357a9943df78d262a2adc8effbb8ecf",
+      "size": 16
+    }
+  }
+}

@@ -1,5 +1,4 @@
-//! One-gesture approval of sensitive actions from a phone, as the Python reference
-//! (`inari_core.approvals`, `approval_bus`). The node asks on the bus; the gateway,
+//! One-gesture approval of sensitive actions from a phone. The node asks on the bus; the gateway,
 //! which holds the device key, answers with a signed verdict. A verdict counts once,
 //! before it expires, and only with the right signature; silence means no.
 

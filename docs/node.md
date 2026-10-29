@@ -11,8 +11,8 @@ hub: it also runs the coordinator and, with `gateway_listen`, the web interface.
 non-JSON POST are refused. It reads the same file and the same data
 directory, speaks the same bus and endpoint protocols, and serves the same interface, so
 a fleet can mix both and a machine can switch in place. It drives agents through ACP
-harnesses only (`harness` with `"kind": "acp"`, or `harnesses`); the built-in model loop
-(`provider`) and the container sandbox stay in the Python node. It adds
+harnesses only (`harness` with `"kind": "acp"`, or `harnesses`); the Python node's built-in
+model loop (`provider`) and container sandbox were retired with it. It adds
 `"approval_ttl"` (seconds an approval waits for the phone, default 120).
 
 ```json
@@ -53,6 +53,30 @@ are all configuration, and every default is empty.
   its permission requests to the phone, cancels it when a teleport freezes the agent, and,
   on a machine whose agent has no memory of the thread, opens a session primed with the
   journal so far.
+- **OpenFox, natively.** `"openfox": {"kind": "openfox"}` drives the machine's own OpenFox
+  through its REST API and WebSocket, the ones its web interface uses, with no bridge process
+  (`src/openfox.rs`). One WebSocket per thread, kept between turns; a dropped one is opened
+  again and a quiet session asked how it is, so the end of a turn is never missed; a message
+  sent during a turn goes to OpenFox's own queue, which takes it at its next step. Its settings
+  (address, the agent a new thread starts with, a turn's limit), its sign-in and its default
+  model are set from the interface (Settings → OpenFox) and kept in
+  `<data_dir>/openfox/<harness>/` (`settings.json`, `token` in mode 600, `sessions.json`). A node
+  that never set them reads `openfox-acp`'s (`~/.config/openfox-acp/{url,token}`, or
+  `$OPENFOX_ACP_DIR`). OpenFox must be served over `http://` on the core's own machine: it works
+  on the thread's files, which the core lays out locally. `prepare` and `update` work as for
+  any harness. Providers are read without their API keys.
+  A thread's folder (`<data_dir>/work/<thread>`) stays on disk between turns unless the setting
+  `keep_folder` is off: OpenFox's dev server, its processes, its task board and a branch changed
+  between turns need it. It is put away into the thread at the end of each turn, after a branch
+  switch and before the thread leaves (`freeze`); the tree it was last in step with is kept beside
+  it (`work/<thread>.tree.json`), so the next turn only writes what changed in the thread since.
+  It is dropped when the thread goes (tombstoned, discarded) or arrives from another core.
+  OpenFox's library is read with `GET /api/openfox/library?node=&harness=&kind=&id=` (the owner's;
+  `kind` is `agents`, `skills`, `commands`, `workflows`, `mcp`, `tools` or `settings`) and changed
+  with the node's OpenFox actions (`item_save`, `item_duplicate`, `item_remove`, `skill_toggle`,
+  `mcp_add`, `mcp_test`, `mcp_toggle`, `mcp_tool`, `mcp_remove`, `setting`;
+  `src/openfox_library.rs`). An MCP server's environment and headers go to OpenFox and are never
+  read back, only their names.
 - **Getting a model ready.** A harness may name a command run before each turn of a thread
   whose model was chosen, with `{model}` replaced by the model id:
   `"prepare": ["load-model", "{model}"], "prepare_timeout": 600`. It is how a local model is
@@ -73,6 +97,11 @@ are all configuration, and every default is empty.
 - **Sandbox.** `"sandbox": "subprocess"` (default) or `"container"` with `"engine"`.
 - **Network.** The transport authenticates and signs frames but does not encrypt: bind to
   a private interface (WireGuard, Tailscale) or tunnel it.
+  A message sent while a turn runs waits for the turn to end, as ACP has it (one prompt at a time);
+  the agent's own way of working is never interrupted. A harness with `"steer": true` lets the
+  message in sooner: at the next tool boundary the core cancels the step (the agent keeps what it
+  did) and sends the message to the same session, journaling a `steered` checkpoint. Off by
+  default; worth it for an agent that takes a cancel well (Claude Code through claude-agent-acp).
 
 ## Interface options (hub with a gateway)
 
@@ -132,7 +161,7 @@ A harness may say where it comes from:
 ```json
 "claude": {"command": ["<path to claude-agent-acp>"],
            "update": {"npm": "@zed-industries/claude-agent-acp", "prefix": "<npm global prefix>"}},
-"openfox": {"command": ["<path to openfox-acp>"],
+"openfox": {"kind": "openfox",
             "update": {"npm": "openfox", "restart": ["systemctl", "--user", "restart", "openfox.service"]}}
 ```
 

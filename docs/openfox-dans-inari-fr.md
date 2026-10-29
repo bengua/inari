@@ -1,0 +1,121 @@
+# OpenFox dans Inari : ce qu'Inari porte déjà, ce qu'il faut ajouter
+
+> Écrit en français pour Ben (listé dans `.english-exceptions`). Fait le 28/10/2026 en comparant l'interface
+> d'OpenFox 2.0.161 (`co-l/openfox`, dossier `web/src/components`, environ 250 composants) avec celle d'Inari
+> (`crates/inari-core/web/`).
+
+## Le principe
+
+En mode local, l'interface d'Inari porte celle d'OpenFox : on n'ouvre plus l'interface d'OpenFox. Inari en porte
+déjà l'essentiel (environ 80 %). Le reste s'ajoute **dans l'interface d'Inari**, avec ses composants à elle, et tous
+les réglages se font depuis l'interface, jamais en dur.
+
+Tout ce qui suit dépend d'une chose : qu'Inari parle **directement** à OpenFox (son API HTTP et son WebSocket), au
+lieu de passer par le pont `openfox-acp`. Le protocole ACP ne transporte que le texte, les outils et les
+permissions : les tâches, les critères, la réflexion, les sous-agents, le contexte, les workflows n'y passent pas.
+C'est donc la première étape (lot 0).
+
+Légende : ✅ déjà dans Inari · 🟡 en partie · ❌ à ajouter
+
+## Le fil (la conversation)
+
+| Élément d'OpenFox | Composant(s) OpenFox | Inari aujourd'hui | Lot |
+|---|---|---|---|
+| Liste des sessions, création | `SessionDropdown`, `CreateSessionModal` | ✅ fils par cœur, « Nouveau fil » | — |
+| Messages, rendu Markdown, code | `MessageList`, `ChatMessage`, `AssistantMessage` | ✅ | — |
+| Réponse au fil de l'écriture | `StreamingCursor` | ✅ (depuis `9bdba09`) | — |
+| Appels d'outils et résultats | `ToolCallDisplay`, `RunCommandView` | ✅ outils repliables | — |
+| Confirmations (chemins, commandes) | `CrossSessionConfirmationBanner`, permissions | ✅ approbations | 0 |
+| Questions de l'agent (choix, oui/non) | `chat.ask_user` | ✅ carte dans le fil (lot 1) | — |
+| Message pendant le travail (file) | `QueuedMessages` | ✅ file d'OpenFox (lot 0), visible et modifiable dans l'onglet Plan (lot 1) | — |
+| Arrêter | bouton Stop | ✅ | — |
+| Choix du modèle | `ModelPicker`, `ProviderSelector` | ✅ puce modèle | 0 |
+| Agent (builder, planner, agents perso) | `AgentSelector` | ✅ puce du haut et onglet Plan (lot 1) | — |
+| Niveau de danger / permissions | `DangerLevelSelector` | ✅ onglet Plan, « Confirmations » (lot 1) | — |
+| Effort de réflexion | `EffortChangeGate` | ✅ onglet Plan (lot 1) | — |
+| Blocs de réflexion | `ThinkingBlock`, `ThinkingSummary` | ✅ dans le fil, en direct (lot 1) | — |
+| Liste de tâches de l'agent | `TodoListDisplay` | ✅ onglet Plan (lot 1) | — |
+| Critères (contrat) et leur éditeur | `CriteriaEditor` | ✅ onglet Plan, modifiables (lot 1) | — |
+| Sous-agents | `SubAgentContainer` | ✅ dans le fil (lot 1) | — |
+| Contexte : remplissage, compactage | `ContextPopover`, `DynamicContextPreviewModal` | ✅ anneau, onglet Plan, « Compacter » (lot 1) ; aperçu du contexte dynamique : lot 2 | — |
+| Statistiques du tour et de la session | `StatsModal`, `TurnStatsModal`, `Sparkline` | ✅ onglet Plan : dernier tour et totaux de la session (lot 2) ; courbes : non | — |
+| Recherche dans les messages | `MessageSearchModal` | ✅ le fil ouvert d'abord, ouverture au message (lot 2) | — |
+| Historique des invites | `PromptHistory` | ✅ ↑ et ↓ dans la zone de saisie (lot 2) | — |
+| Mention de fichiers avec `@` | `AtMentionAutocomplete` | ✅ liste des fichiers du fil (lot 2) | — |
+| Pièces jointes, images, vision | `VisionFallbackItem` | ✅ pièces jointes ; repli vision géré par OpenFox | — |
+| Reprendre après une erreur du modèle | `chat.retry`, `chat.llm_retry_now` | ✅ bandeau dans le fil, « Réessayer » suivi (lot 1) | — |
+| Session en lecture seule | `ReadonlySessionView` | ✅ pass « supervision » | — |
+
+## Le travail autour du fil
+
+| Élément d'OpenFox | Composant(s) OpenFox | Inari aujourd'hui | Lot |
+|---|---|---|---|
+| Fichiers du projet, visionneuse | `DirectoryBrowser` | ✅ onglets Artefacts / Visionneuse | — |
+| Différences (diff) | `DiffView`, `DiffViewer` | ✅ diff des éditions dans le résultat de l'outil (lot 2) | — |
+| Terminal | `TerminalDrawer`, `TerminalPane` | ✅ onglet Terminal | — |
+| Branche Git, état, espace de travail | `WorkspaceBranchSection`, `BranchModal`, `WorkspaceModal` | ✅ branche et fichiers modifiés (lot 2), changer ou créer une branche (lot 3) dans l'onglet Plan ; espaces de travail séparés : non, voir plus bas | — |
+| Serveur de dev, journaux | `DevServerFooter`, `DevServerConfigModal`, `LogViewer` | ✅ onglet Plan : régler, démarrer, arrêter, redémarrer, son journal (lot 3) | — |
+| Processus d'arrière-plan | `BackgroundProcesses` | ✅ onglet Plan : la liste, « Arrêter » (lot 3) | — |
+| Workflows (barre, lancement, paramètres) | `WorkflowBar`, `WorkflowParamModal`, `WorkflowStartedCard` | ✅ onglet Plan : lancer avec le message et ses paramètres ; étape qui attend en carte dans le fil ; quitter (lot 3) | — |
+| Tableau des tâches du projet | `TasksModal`, `TaskColumn`, `TaskCard`, `GatesEditor` | ✅ onglet Plan : à faire, en cours, fait ; ajouter, démarrer, retirer (lot 3). Portes et tâches planifiées : non | — |
+| Vue partagée (plusieurs sessions) | `SplitView`, `SessionPane` | 🟡 un fil + l'établi | 4 |
+| Projets (créer, ouvrir, supprimer, réglages) | `CreateProjectModal`, `ProjectSettingsModal` | 🟡 un projet par fil, fait par Inari ; ses instructions dans l'onglet Plan (lot 3) | — |
+| Serveurs MCP | `McpSelector`, `McpServerCard` | ✅ fiche OpenFox : ajouter, tester, activer, retirer, outil par outil ; les secrets ne vont qu'à OpenFox (lot 3). Choix par session : non | — |
+
+## Les réglages (depuis l'interface, jamais en dur)
+
+| Élément d'OpenFox | Composant(s) OpenFox | Inari aujourd'hui | Lot |
+|---|---|---|---|
+| Adresse d'OpenFox, connexion (mot de passe) | `PasswordModal` | ✅ fiche OpenFox (lot 0) | — |
+| Mode de départ, durée max d'un tour, dossier gardé entre les tours | — | ✅ fiche OpenFox (lots 0 et 3) | — |
+| Fournisseur et modèle actifs | `ProviderSelector`, `model-list` | ✅ fiche OpenFox et puce modèle (lot 0) | — |
+| Gérer les fournisseurs (ajouter, tester) | `ManageProvidersModal` | ✅ fiche OpenFox : tester, ajouter (clé envoyée à OpenFox seulement), relire les modèles, retirer (lot 2) | — |
+| Agents, skills, commandes, instructions | `AgentsModal`, `SkillsModal`, `CommandsModal`, `InstructionsModal` | ✅ fiche OpenFox : ouvrir, modifier, dupliquer, retirer, activer un skill ; instructions pour tous les projets et langue (lot 3) | — |
+| Workflows (éditeur, diagramme) | `WorkflowsModal`, `FlowDiagram` | 🟡 fiche OpenFox : modifiés en JSON, dupliqués, retirés (lot 3) ; le diagramme : non | — |
+| Outils et permissions | `ToolsTab` | ✅ fiche OpenFox : la liste des outils, « Demander avant de changer de branche » (lot 3) | — |
+| Motifs de nouvelle tentative | `RetryPatternsEditor` | ✅ fiche OpenFox, « Instructions et réglages » (lot 3) | — |
+| Affichage, thème | `DisplayTab`, `ThemeEditor` | 🟡 thème clair/sombre, langue | 4 |
+| Raccourcis clavier | `KeybindingsTab` | 🟡 liste des raccourcis | 4 |
+| Notifications | `NotificationCenter`, `NotificationSettings` | 🟡 fil d'activité, notifications Android | 4 |
+| Plugins | `PluginsTab`, `PluginPanelHost` | ❌ | 4 |
+| Premier lancement | `OnboardingWizard` | 🟡 conseil d'accueil | 4 |
+| Mises à jour d'OpenFox, journal des versions | `AutoUpdateModal`, `ChangelogModal` | ✅ mises à jour des harnais | — |
+
+## Ordre proposé
+
+- **Lot 0 : OpenFox natif dans le cœur.**
+  - Une connexion WebSocket gardée par fil, une reprise après coupure, la fin d'un tour jamais manquée.
+  - La file `asap` d'OpenFox pour les messages pendant le travail.
+  - Le protocole d'OpenFox décrit par des types Rust.
+  - Les réglages du cœur depuis l'interface : adresse, connexion, mode, durée, fournisseur et modèle actifs.
+  - Sans ce lot, rien d'autre ne peut passer.
+- **Lot 1 : ce qu'on voit pendant un tour local.** Fait (28-29/10/2026).
+  - Liste de tâches, critères, réflexion, sous-agents, agent et effort, questions à choix, compactage du contexte,
+    reprise après erreur du modèle.
+- **Lot 2 : le confort du fil.** Fait (29/10/2026).
+  - Diff, branche Git, statistiques par tour, historique des invites, `@` fichiers, recherche dans les messages,
+    gestion des fournisseurs.
+- **Lot 3 : le travail du projet.** Fait (29/10/2026).
+  - Le dossier d'un fil reste sur le disque entre deux tours (réglage, activé par défaut) : c'est ce qui permet le
+    reste. Il est toujours rangé dans le fil à la fin de chaque tour et avant un départ vers un autre cœur.
+  - Workflows, tableau des tâches, serveur de dev et processus, branches, MCP, agents, skills, commandes et
+    instructions, outils, motifs de nouvelle tentative.
+- **Lot 4 : la finition.**
+  - Vue partagée, thème, raccourcis, notifications, plugins, premier lancement.
+
+Chaque lot est testé (un faux serveur OpenFox dans les tests Rust, des essais dans un vrai navigateur), documenté
+et poussé sur la branche avant le suivant.
+
+## Ce qui n'est pas repris, et pourquoi
+
+- **Les espaces de travail séparés** (`WorkspaceModal`, un worktree Git par session) : Inari donne déjà un dossier à
+  chaque fil, et un fil se déplace d'un cœur à l'autre avec ses fichiers.
+- **Les courbes de statistiques** (`Sparkline`) : les totaux et le dernier tour suffisent ici.
+- **Le diagramme d'un workflow** (`FlowDiagram`) : un workflow se modifie en JSON dans la fiche d'OpenFox.
+- **Les portes et les tâches planifiées du tableau** (`GatesEditor`, planification) : une tâche s'ajoute, se démarre
+  et se retire ; ses portes et son calendrier se règlent encore dans OpenFox.
+- **Les serveurs MCP choisis par session** : les serveurs valent pour tous les fils d'un cœur.
+- **Ce que garde le dossier `.openfox/` d'un projet** (ses agents, workflows… propres) : visible dans la
+  bibliothèque, mais une modification va dans la bibliothèque de la personne.
+- **Une passe** (un invité) ne lance pas de workflow et ne touche ni au tableau des tâches, ni au serveur de dev, ni
+  aux instructions, ni à la bibliothèque : ce sont des commandes ou des sessions que sa supervision ne voit pas.

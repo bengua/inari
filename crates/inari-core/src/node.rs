@@ -1,11 +1,10 @@
-//! A node of the mesh, as the Python reference (`inari_core.node`): one process that
-//! holds agents, serves capsules to its peers, drives its agents through their
-//! harnesses, and talks to the rest over the bus. A node with no `hub` is the hub: it
-//! also runs the coordinator and, when configured, the gateway. The configuration
-//! file is the reference's, and so is the data directory, so a Rust node can take
-//! over from a Python one in place.
+//! A node of the mesh: one process that holds agents, serves capsules to its peers, drives
+//! its agents through their harnesses, and talks to the rest over the bus. A node with no
+//! `hub` is the hub: it also runs the coordinator and, when configured, the gateway. The
+//! configuration file and the data directory are those the retired Python nodes used, so
+//! a core they ran was taken over in place.
 
-use crate::agent::{summary, AcpHarness, Approver, Publisher, Runner};
+use crate::agent::{summary, AcpHarness, Approver, Harness, Publisher, Runner};
 use crate::approvals::NodeApprovals;
 use crate::bus::{Bus, Message};
 use crate::buslink::{BusClient, BusServer};
@@ -13,6 +12,7 @@ use crate::capsule::{io, EventKind};
 use crate::gateway::{Gateway, GatewayOptions};
 use crate::host::CapsuleHost;
 use crate::mesh::{Coordinator, NodeInfo, Progress, Registry, Teleporter};
+use crate::openfox::OpenFoxHarness;
 use crate::rpc::{EndpointServer, RemoteEndpoint};
 use crate::teleport::{teleport_observed, CallResult, Endpoint};
 use crate::updates::UpdateSpec;
@@ -44,6 +44,9 @@ pub struct HarnessSpec {
     /// Environment of pass threads (`{pass}` = pass id), replacing the owner's: see AcpHarness.
     #[serde(default)]
     pub pass_env: BTreeMap<String, String>,
+    /// Read a message sent during a turn at the next tool boundary (see AcpHarness::steer).
+    #[serde(default)]
+    pub steer: bool,
     /// Where the harness comes from, to offer and install its updates.
     #[serde(default)]
     pub update: Option<UpdateSpec>,
@@ -161,7 +164,11 @@ impl NodeConfig {
     /// Harness specs, the single `harness` (kind acp) first under the name "default".
     pub fn harness_specs(&self) -> Vec<(String, HarnessSpec)> {
         let mut out = Vec::new();
-        if let Some(h) = self.harness.as_ref().filter(|h| h.kind == "acp") {
+        if let Some(h) = self
+            .harness
+            .as_ref()
+            .filter(|h| h.kind == "acp" || h.kind == "openfox")
+        {
             out.push(("default".to_string(), h.clone()));
         }
         out.extend(self.harnesses.0.iter().cloned());
@@ -397,9 +404,17 @@ impl Node {
             let publish: Publisher = Arc::new(move |subject: &str, payload: Value| {
                 publish_bus.publish(subject, payload);
             });
-            let built = specs
+            let built: Vec<(String, Harness)> = specs
                 .iter()
                 .map(|(name, spec)| {
+                    if spec.kind == "openfox" {
+                        // OpenFox driven natively: its settings are the interface's, in the data folder
+                        let mut h = OpenFoxHarness::new(cfg.data_dir.join("openfox").join(name));
+                        h.extra_env = spec.env.clone();
+                        h.prepare = spec.prepare.clone();
+                        h.prepare_timeout = Duration::from_secs_f64(spec.prepare_timeout.max(1.0));
+                        return (name.clone(), Harness::from(h));
+                    }
                     let file = cfg
                         .data_dir
                         .join("host")
@@ -409,8 +424,9 @@ impl Node {
                     h.extra_env = spec.env.clone();
                     h.prepare = spec.prepare.clone();
                     h.pass_env = spec.pass_env.clone();
+                    h.steer = spec.steer;
                     h.prepare_timeout = Duration::from_secs_f64(spec.prepare_timeout.max(1.0));
-                    (name.clone(), h)
+                    (name.clone(), Harness::from(h))
                 })
                 .collect();
             Some(Runner::new(
@@ -553,6 +569,80 @@ impl Node {
         m
     }
 
+    /// How each OpenFox this node drives natively is (by harness name): its settings, whether it
+    /// answers and is signed in, its providers and models (never their keys).
+    async fn openfox_status(&self) -> Map<String, Value> {
+        let mut out = Map::new();
+        if let Some(r) = &self.runner {
+            for (name, h) in &r.harnesses {
+                if let Some(fox) = h.openfox() {
+                    out.insert(name.clone(), fox.status().await);
+                }
+            }
+        }
+        out
+    }
+
+    /// An OpenFox setting changed from the interface: done here, the result said on the bus.
+    async fn openfox_action(&self, action: &str, p: &Value) {
+        let harness = s(p, "harness");
+        let fox = self
+            .runner
+            .as_ref()
+            .and_then(|r| r.harnesses.get(&harness))
+            .and_then(|h| h.openfox());
+        let mut detail = String::new();
+        let result = match (fox, action) {
+            (None, _) => Err(format!("no OpenFox harness {harness:?} on this core")),
+            (Some(f), "set") => {
+                let mut next = f.settings();
+                if let Some(u) = p.get("url").and_then(Value::as_str) {
+                    next.url = u.trim().trim_end_matches('/').to_string();
+                }
+                if let Some(m) = p.get("mode").and_then(Value::as_str) {
+                    next.mode = m.to_string();
+                }
+                if let Some(t) = p.get("turn_timeout").and_then(Value::as_u64) {
+                    next.turn_timeout = t;
+                }
+                if let Some(k) = p.get("keep_folder").and_then(Value::as_bool) {
+                    next.keep_folder = k;
+                }
+                f.set_settings(next)
+            }
+            (Some(f), "login") => f.login(&s(p, "password")).await,
+            (Some(f), "activate") => f.activate(&s(p, "provider"), &s(p, "model")).await,
+            (Some(f), "provider_test") => f
+                .test_provider(&s(p, "url"), &s(p, "backend"))
+                .await
+                .map(|model| {
+                    detail = if model.is_empty() {
+                        "OpenFox reaches it".into()
+                    } else {
+                        format!("OpenFox reaches it: {model}")
+                    };
+                }),
+            (Some(f), "provider_add") => f.add_provider(p).await,
+            (Some(f), "provider_remove") => f.remove_provider(&s(p, "provider")).await,
+            (Some(f), "provider_refresh") => f.refresh_provider(&s(p, "provider")).await,
+            (Some(_), "check") => Ok(()),
+            (Some(f), a) if crate::openfox_library::ACTIONS.contains(&a) => {
+                f.change(a, p).await.map(|d| detail = d)
+            }
+            (Some(_), other) => Err(format!("unknown OpenFox action {other:?}")),
+        };
+        self.refresh
+            .store(true, std::sync::atomic::Ordering::Relaxed); // the next heartbeat says how it is now
+        let (ok, error) = match result {
+            Ok(()) => (true, String::new()),
+            Err(e) => (false, e),
+        };
+        self.bus.publish(
+            &format!("node.{}.openfox.result", self.cfg.node_id),
+            json!({"node": self.cfg.node_id, "harness": harness, "action": action, "ok": ok, "error": error, "detail": detail}),
+        );
+    }
+
     /// What each harness announces: models, modes, slash commands (one map each, by harness).
     async fn harness_probes(&self) -> (Map<String, Value>, Map<String, Value>, Map<String, Value>) {
         let scratch = self.cfg.data_dir.join("scratch");
@@ -611,6 +701,7 @@ impl Node {
             );
         }
         let mut models_at: Option<std::time::Instant> = None;
+        let mut openfox_at: Option<std::time::Instant> = None;
         let mut last_packets = packets();
         let mut first = true;
         let period = Duration::from_secs_f64(cfg.heartbeat.max(0.05));
@@ -637,6 +728,15 @@ impl Node {
                 info.capabilities
                     .insert("harness_commands".into(), Value::Object(commands));
                 models_at = Some(std::time::Instant::now());
+            }
+            if forced || openfox_at.is_none_or(|t| t.elapsed() > Duration::from_secs(60)) {
+                // how each natively driven OpenFox is, for its settings in the interface
+                let status = self.openfox_status().await;
+                if !status.is_empty() {
+                    info.capabilities
+                        .insert("openfox".into(), Value::Object(status));
+                }
+                openfox_at = Some(std::time::Instant::now());
             }
             let updates = self.updates.lock().expect("not poisoned").clone();
             if !updates.is_empty() {
@@ -811,14 +911,39 @@ impl Node {
             let text = s(&m.payload, "text");
             let paths: Vec<String> = m.payload.get("attachments").and_then(Value::as_array).map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
             let model = s(&m.payload, "model");
+            // a workflow launched with the message (OpenFox only), checked before anything is journaled
+            let launch = match m.payload.get("workflow").filter(|w| !w.is_null()) {
+                None => None,
+                Some(w) => match serde_json::from_value::<crate::openfox::Launch>(w.clone()) {
+                    Ok(l) if l.problem().is_none() && r.openfox_of(&agent).is_some() => Some(l),
+                    Ok(l) => {
+                        let why = l.problem().unwrap_or_else(|| "only an OpenFox thread runs workflows".into());
+                        n.bus.publish(&format!("agent.{agent}.done"), json!({"agent": agent, "stopped": "error", "error": why, "text": ""}));
+                        return;
+                    }
+                    Err(e) => {
+                        n.bus.publish(&format!("agent.{agent}.done"), json!({"agent": agent, "stopped": "error", "error": format!("workflow: {e}"), "text": ""}));
+                        return;
+                    }
+                },
+            };
+            if launch.is_none() && text.trim().is_empty() && paths.is_empty() {
+                return;
+            }
             // detached: a turn may wait for an approval that arrives on this very bus
             tokio::spawn(async move {
                 if !model.is_empty() {
                     let _ = r.set_model(&agent, &model);
                 }
                 let attached = r.attached(&agent, &paths);
-                let out = r.run(&agent, &text, attached).await;
+                let out = match launch {
+                    Some(l) => r.launch(&agent, &text, attached, l).await,
+                    None => r.run(&agent, &text, attached).await,
+                };
                 let text: String = out.final_text.chars().take(400).collect();
+                if out.stopped == "joined" {
+                    return; // slipped into the turn running in OpenFox: that turn says when it is done
+                }
                 n.bus.publish(&format!("agent.{agent}.done"), json!({"agent": agent, "stopped": out.stopped, "error": out.error, "text": text}));
             });
         });
@@ -1016,6 +1141,58 @@ impl Node {
             }
         });
         let me = self.cfg.node_id.clone();
+        self.on("agent.*.openfox", |n, m| async move {
+            // something the person did on a thread's OpenFox panel
+            let agent = m.subject.split('.').nth(1).unwrap_or("").to_string();
+            let Some(r) = n.runner.clone().filter(|_| n.running(&agent)) else {
+                return;
+            };
+            let action = s(&m.payload, "action");
+            tokio::spawn(async move {
+                if let Some(fox) = r.openfox_of(&agent) {
+                    if let Err(e) = fox.thread_action(&r, &agent, &action, &m.payload).await {
+                        eprintln!("openfox: {action} on {agent}: {e}");
+                    }
+                }
+            });
+        });
+        for action in [
+            "set",
+            "login",
+            "activate",
+            "check",
+            "provider_test",
+            "provider_add",
+            "provider_remove",
+            "provider_refresh",
+        ]
+        .into_iter()
+        .chain(crate::openfox_library::ACTIONS)
+        {
+            self.on(
+                &format!("node.{me}.openfox.{action}"),
+                move |n, m| async move {
+                    n.openfox_action(action, &m.payload).await;
+                },
+            );
+        }
+        // part of OpenFox's library, read for the page (its answer goes to `reply`)
+        self.on(&format!("node.{me}.openfox.library"), |n, m| async move {
+            let p = &m.payload;
+            let fox = n
+                .runner
+                .as_ref()
+                .and_then(|r| r.harnesses.get(&s(p, "harness")))
+                .and_then(|h| h.openfox());
+            let reply = match fox {
+                None => json!({"ok": false, "error": "no such OpenFox harness on this core"}),
+                Some(f) => match f.library(&s(p, "kind"), &s(p, "id")).await {
+                    Ok(data) => json!({"ok": true, "data": data}),
+                    Err(e) => json!({"ok": false, "error": e}),
+                },
+            };
+            n.bus.publish(&s(p, "reply"), reply);
+        });
         self.on(&format!("node.{me}.update"), |n, m| async move {
             let harness = s(&m.payload, "harness");
             tokio::spawn(async move { n.update_harness(&harness).await }); // npm can take minutes

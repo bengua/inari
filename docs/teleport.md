@@ -84,7 +84,7 @@ and offer, but cannot win.
 
 ## What is tested
 
-`tests/test_teleport.py` drives the real code with injected faults at every step:
+`crates/inari-core/tests/teleport.rs` drives the real code with injected faults at every step:
 lost request and lost reply on each phase, a corrupted chunk, a dead source read, a
 stale epoch, an unreachable target during resolution, and a crash that loses the
 holder record. After each, the test checks the invariant (one holder, staging
