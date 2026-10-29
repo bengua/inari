@@ -7,3 +7,4 @@ docs/INSTALLER-BRANCHE-fr.md # step-by-step install of the test branch for Ben's
 docs/openfox-dans-inari-fr.md # OpenFox elements against Inari's interface, written in French for the owner
 docs/moteur-local-fr.md # the plan for the local engine (OpenFox core in Inari), written in French for the owner
 docs/kitsune-fr.md # Kitsune (voice second brain) handoff note, written in French for the owner
+docs/kitsune-passation-fr.md # handoff prompt to a local agent to finish Kitsune's web page, written in French for the owner
