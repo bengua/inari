@@ -605,6 +605,9 @@ impl Node {
                 if let Some(t) = p.get("turn_timeout").and_then(Value::as_u64) {
                     next.turn_timeout = t;
                 }
+                if let Some(k) = p.get("keep_folder").and_then(Value::as_bool) {
+                    next.keep_folder = k;
+                }
                 f.set_settings(next)
             }
             (Some(f), "login") => f.login(&s(p, "password")).await,
@@ -623,6 +626,9 @@ impl Node {
             (Some(f), "provider_remove") => f.remove_provider(&s(p, "provider")).await,
             (Some(f), "provider_refresh") => f.refresh_provider(&s(p, "provider")).await,
             (Some(_), "check") => Ok(()),
+            (Some(f), a) if crate::openfox_library::ACTIONS.contains(&a) => {
+                f.change(a, p).await.map(|d| detail = d)
+            }
             (Some(_), other) => Err(format!("unknown OpenFox action {other:?}")),
         };
         self.refresh
@@ -905,13 +911,35 @@ impl Node {
             let text = s(&m.payload, "text");
             let paths: Vec<String> = m.payload.get("attachments").and_then(Value::as_array).map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
             let model = s(&m.payload, "model");
+            // a workflow launched with the message (OpenFox only), checked before anything is journaled
+            let launch = match m.payload.get("workflow").filter(|w| !w.is_null()) {
+                None => None,
+                Some(w) => match serde_json::from_value::<crate::openfox::Launch>(w.clone()) {
+                    Ok(l) if l.problem().is_none() && r.openfox_of(&agent).is_some() => Some(l),
+                    Ok(l) => {
+                        let why = l.problem().unwrap_or_else(|| "only an OpenFox thread runs workflows".into());
+                        n.bus.publish(&format!("agent.{agent}.done"), json!({"agent": agent, "stopped": "error", "error": why, "text": ""}));
+                        return;
+                    }
+                    Err(e) => {
+                        n.bus.publish(&format!("agent.{agent}.done"), json!({"agent": agent, "stopped": "error", "error": format!("workflow: {e}"), "text": ""}));
+                        return;
+                    }
+                },
+            };
+            if launch.is_none() && text.trim().is_empty() && paths.is_empty() {
+                return;
+            }
             // detached: a turn may wait for an approval that arrives on this very bus
             tokio::spawn(async move {
                 if !model.is_empty() {
                     let _ = r.set_model(&agent, &model);
                 }
                 let attached = r.attached(&agent, &paths);
-                let out = r.run(&agent, &text, attached).await;
+                let out = match launch {
+                    Some(l) => r.launch(&agent, &text, attached, l).await,
+                    None => r.run(&agent, &text, attached).await,
+                };
                 let text: String = out.final_text.chars().take(400).collect();
                 if out.stopped == "joined" {
                     return; // slipped into the turn running in OpenFox: that turn says when it is done
@@ -1137,7 +1165,10 @@ impl Node {
             "provider_add",
             "provider_remove",
             "provider_refresh",
-        ] {
+        ]
+        .into_iter()
+        .chain(crate::openfox_library::ACTIONS)
+        {
             self.on(
                 &format!("node.{me}.openfox.{action}"),
                 move |n, m| async move {
@@ -1145,6 +1176,23 @@ impl Node {
                 },
             );
         }
+        // part of OpenFox's library, read for the page (its answer goes to `reply`)
+        self.on(&format!("node.{me}.openfox.library"), |n, m| async move {
+            let p = &m.payload;
+            let fox = n
+                .runner
+                .as_ref()
+                .and_then(|r| r.harnesses.get(&s(p, "harness")))
+                .and_then(|h| h.openfox());
+            let reply = match fox {
+                None => json!({"ok": false, "error": "no such OpenFox harness on this core"}),
+                Some(f) => match f.library(&s(p, "kind"), &s(p, "id")).await {
+                    Ok(data) => json!({"ok": true, "data": data}),
+                    Err(e) => json!({"ok": false, "error": e}),
+                },
+            };
+            n.bus.publish(&s(p, "reply"), reply);
+        });
         self.on(&format!("node.{me}.update"), |n, m| async move {
             let harness = s(&m.payload, "harness");
             tokio::spawn(async move { n.update_harness(&harness).await }); // npm can take minutes

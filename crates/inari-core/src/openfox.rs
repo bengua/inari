@@ -64,6 +64,15 @@ pub struct Settings {
     pub mode: String,
     /// How long a turn may run, in seconds.
     pub turn_timeout: u64,
+    /// The thread's folder stays on disk between turns, so OpenFox's dev server, its processes,
+    /// its task board and a branch changed between turns find it; it is still put away into the
+    /// thread at the end of every turn and before the thread leaves for another core.
+    #[serde(default = "yes")]
+    pub keep_folder: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 fn openfox_acp_dir() -> PathBuf {
@@ -88,6 +97,7 @@ impl Default for Settings {
             url,
             mode: "builder".into(),
             turn_timeout: 900,
+            keep_folder: true,
         }
     }
 }
@@ -112,6 +122,110 @@ impl Settings {
         }
         None
     }
+}
+
+/// A workflow a message launches, or the run waiting in the thread taken up again
+/// (OpenFox's `runner.launch`).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Launch {
+    /// The workflow (`GET /api/workflows`); unused when `resume`.
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub params: BTreeMap<String, String>,
+    /// Only the steps of this sub-group.
+    #[serde(default)]
+    pub sub_group: Option<String>,
+    /// Take up the run where it waits (a step for the person) instead of starting one.
+    #[serde(default)]
+    pub resume: bool,
+    /// The branch chosen at a step that offers some.
+    #[serde(default)]
+    pub choice: Option<String>,
+    /// What the journal shows when no text goes with it: the workflow's name, the branch chosen.
+    #[serde(default)]
+    pub label: String,
+}
+
+impl Launch {
+    /// What is wrong with it, if anything.
+    pub fn problem(&self) -> Option<String> {
+        let id_like = |x: &str| {
+            !x.is_empty()
+                && x.len() <= 128
+                && x.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "_-.".contains(c))
+        };
+        if !self.resume && !id_like(&self.id) {
+            return Some(format!("unknown workflow {:?}", self.id));
+        }
+        if self.params.len() > 32
+            || self
+                .params
+                .iter()
+                .any(|(k, v)| !id_like(k) || v.len() > 4000)
+        {
+            return Some(
+                "a workflow's parameters are 32 short ids at most, each up to 4000 characters"
+                    .into(),
+            );
+        }
+        if [&self.sub_group, &self.choice]
+            .into_iter()
+            .flatten()
+            .any(|x| !id_like(x))
+        {
+            return Some("unknown sub-group or branch".into());
+        }
+        if self.label.chars().count() > 200 {
+            return Some("a workflow's label is 200 characters at most".into());
+        }
+        None
+    }
+
+    /// The text the journal keeps for it.
+    pub fn shown(&self) -> String {
+        let name = if self.label.is_empty() {
+            &self.id
+        } else {
+            &self.label
+        };
+        format!("▶ {name}")
+    }
+}
+
+/// `runner.launch` for a workflow started now.
+fn launched(sid: &str, l: &Launch, content: &str) -> Value {
+    let mut p = json!({"sessionId": sid, "workflowId": l.id, "scope": "auto"});
+    if !l.params.is_empty() {
+        p["params"] = json!(l.params);
+    }
+    if let Some(g) = &l.sub_group {
+        p["subGroup"] = json!(g);
+    }
+    if !content.trim().is_empty() {
+        p["content"] = json!(content);
+    }
+    p
+}
+
+/// `runner.launch` taking a run up where it stopped or waits (as OpenFox's own page does).
+fn taken_up(sid: &str, r: &proto::Execution, choice: Option<&str>, content: &str) -> Value {
+    let mut p = json!({"sessionId": sid, "workflowId": r.workflow_id, "resumeFrom": r.current_step_id,
+                       "stepOutput": r.step_output.clone().unwrap_or_default()});
+    if let Some(params) = r.params.as_ref().filter(|x| !x.is_empty()) {
+        p["params"] = json!(params);
+    }
+    if let Some(g) = &r.sub_group {
+        p["subGroup"] = json!(g);
+    }
+    if let Some(c) = choice {
+        p["userChoice"] = json!(c);
+    }
+    if !content.trim().is_empty() {
+        p["content"] = json!(content);
+    }
+    p
 }
 
 // ── OpenFox's messages, as types ────────────────────────────────────────────
@@ -217,6 +331,237 @@ pub mod proto {
         pub context_state: Option<ContextState>,
         #[serde(default)]
         pub session_stats: Option<StatsSummary>,
+        /// The workflow the session runs or waits in, if any.
+        #[serde(default)]
+        pub active_workflow_execution: Option<Execution>,
+    }
+
+    /// A workflow's run in a session (`workflow.execution_changed`, and the session's view).
+    #[derive(Deserialize, Debug, Clone)]
+    #[serde(rename_all = "camelCase")]
+    pub struct Execution {
+        pub workflow_id: String,
+        #[serde(default)]
+        pub workflow_name: String,
+        #[serde(default)]
+        pub workflow_color: Option<String>,
+        /// running, waiting (a step for the person), completed, cancelled, blocked.
+        pub status: String,
+        #[serde(default)]
+        pub current_step_id: Option<String>,
+        #[serde(default)]
+        pub current_step_name: Option<String>,
+        /// What the steps so far gave, sent back when the run is taken up again.
+        #[serde(default)]
+        pub step_output: Option<std::collections::BTreeMap<String, String>>,
+        #[serde(default)]
+        pub params: Option<std::collections::BTreeMap<String, String>>,
+        /// The branches a step for the person offers.
+        #[serde(default)]
+        pub pending_choices: Option<Vec<StepChoice>>,
+        #[serde(default)]
+        pub sub_group: Option<String>,
+    }
+
+    #[derive(Deserialize, serde::Serialize, Debug, Clone, PartialEq)]
+    #[serde(rename_all = "camelCase")]
+    pub struct StepChoice {
+        pub id: String,
+        pub label: String,
+        #[serde(default)]
+        pub next_step_name: Option<String>,
+    }
+
+    /// `GET /api/workflows`: the bundled ones, the person's, the project's.
+    #[derive(Deserialize, Debug, Default)]
+    #[serde(rename_all = "camelCase")]
+    pub struct Workflows {
+        #[serde(default)]
+        pub defaults: Vec<Workflow>,
+        #[serde(default)]
+        pub user_items: Vec<Workflow>,
+        #[serde(default)]
+        pub project_items: Vec<Workflow>,
+    }
+
+    #[derive(Deserialize, serde::Serialize, Debug, Clone, PartialEq)]
+    #[serde(rename_all = "camelCase")]
+    pub struct Workflow {
+        pub id: String,
+        pub name: String,
+        #[serde(default)]
+        pub description: String,
+        #[serde(default)]
+        pub color: Option<String>,
+        #[serde(default)]
+        pub parameters: Vec<WorkflowParameter>,
+        #[serde(default)]
+        pub sub_groups: Option<Vec<String>>,
+        /// builtin, user or project.
+        #[serde(default)]
+        pub scope: Option<String>,
+    }
+
+    #[derive(Deserialize, serde::Serialize, Debug, Clone, PartialEq)]
+    pub struct WorkflowParameter {
+        pub id: String,
+        pub label: String,
+        #[serde(default)]
+        pub description: Option<String>,
+        #[serde(default)]
+        pub required: bool,
+    }
+
+    impl Workflows {
+        /// One list, the project's first: an id found twice is the project's, then the person's.
+        pub fn all(self) -> Vec<Workflow> {
+            let mut out: Vec<Workflow> = Vec::new();
+            for w in self
+                .project_items
+                .into_iter()
+                .chain(self.user_items)
+                .chain(self.defaults)
+            {
+                if !out.iter().any(|x| x.id == w.id) {
+                    out.push(w);
+                }
+            }
+            out
+        }
+    }
+
+    /// `GET /api/projects/:id/tasks`: the project's task board.
+    #[derive(Deserialize, Debug, Default)]
+    pub struct TaskBoard {
+        #[serde(default)]
+        pub tasks: Vec<Task>,
+        #[serde(default)]
+        pub settings: Option<TaskSettings>,
+    }
+
+    #[derive(Deserialize, serde::Serialize, Debug, Clone, PartialEq)]
+    #[serde(rename_all = "camelCase")]
+    pub struct TaskSettings {
+        #[serde(default)]
+        pub slot_limit: u32,
+        #[serde(default)]
+        pub queue_paused: bool,
+    }
+
+    #[derive(Deserialize, serde::Serialize, Debug, Clone, PartialEq)]
+    #[serde(rename_all = "camelCase")]
+    pub struct Task {
+        pub id: String,
+        pub prompt: String,
+        /// todo, in_progress or done.
+        pub status: String,
+        /// While in progress: running (OpenFox works on it) or queued (waits for a slot).
+        #[serde(default)]
+        pub run_state: Option<String>,
+        #[serde(default)]
+        pub queue_position: Option<u32>,
+        #[serde(default)]
+        pub version: u64,
+        #[serde(default)]
+        pub active_session_id: Option<String>,
+        #[serde(default)]
+        pub agent_id: Option<String>,
+    }
+
+    /// `GET /api/dev-server?workdir=`: the project's dev server.
+    #[derive(Deserialize, serde::Serialize, Debug, Clone, PartialEq, Default)]
+    #[serde(rename_all = "camelCase")]
+    pub struct DevServer {
+        /// off, running, warning or error.
+        pub state: String,
+        #[serde(default)]
+        pub url: Option<String>,
+        #[serde(default)]
+        pub hot_reload: bool,
+        #[serde(default)]
+        pub config: Option<DevConfig>,
+        #[serde(default)]
+        pub error_message: Option<String>,
+    }
+
+    /// `.openfox/dev.json`: how the dev server starts.
+    #[derive(Deserialize, serde::Serialize, Debug, Clone, PartialEq, Default)]
+    #[serde(rename_all = "camelCase")]
+    pub struct DevConfig {
+        pub command: String,
+        pub url: String,
+        #[serde(default)]
+        pub hot_reload: bool,
+    }
+
+    /// `GET /api/dev-server/logs`.
+    #[derive(Deserialize, Debug, Default)]
+    pub struct DevLogs {
+        #[serde(default)]
+        pub logs: Vec<DevLine>,
+        #[serde(default)]
+        pub total: u64,
+    }
+
+    #[derive(Deserialize, Debug)]
+    pub struct DevLine {
+        #[serde(default)]
+        pub stream: String,
+        #[serde(default)]
+        pub content: String,
+    }
+
+    /// `GET /api/sessions/:id/background-processes`.
+    #[derive(Deserialize, Debug, Default)]
+    pub struct Processes {
+        #[serde(default)]
+        pub processes: Vec<Process>,
+    }
+
+    #[derive(Deserialize, serde::Serialize, Debug, Clone, PartialEq)]
+    #[serde(rename_all = "camelCase")]
+    pub struct Process {
+        pub id: String,
+        #[serde(default)]
+        pub name: String,
+        #[serde(default)]
+        pub command: String,
+        /// running, exited, killed…
+        #[serde(default)]
+        pub status: String,
+        #[serde(default)]
+        pub exit_code: Option<i64>,
+    }
+
+    /// `GET /api/sessions/:id/branches`.
+    #[derive(Deserialize, Debug, Default)]
+    #[serde(rename_all = "camelCase")]
+    pub struct Branches {
+        #[serde(default)]
+        pub branches: Vec<Branch>,
+        #[serde(default)]
+        pub default_branch: Option<String>,
+    }
+
+    #[derive(Deserialize, Debug)]
+    pub struct Branch {
+        pub name: String,
+        #[serde(default)]
+        pub current: bool,
+    }
+
+    /// `GET /api/projects/:id`.
+    #[derive(Deserialize, Debug)]
+    pub struct ProjectOne {
+        pub project: ProjectFull,
+    }
+
+    #[derive(Deserialize, Debug)]
+    #[serde(rename_all = "camelCase")]
+    pub struct ProjectFull {
+        pub id: String,
+        #[serde(default)]
+        pub custom_instructions: Option<String>,
     }
 
     /// `POST /api/sessions` and `POST /api/projects`.
@@ -658,6 +1003,7 @@ pub mod proto {
         Stats(Stats),
         Progress(Progress),
         Git(GitStatus),
+        Workflow(Execution),
         Ack,
         /// A kind this core does not follow (yet): git status, queue state, workflows…
         Other(String),
@@ -716,6 +1062,7 @@ pub mod proto {
             "chat.stats" => typed(&kind, payload, Event::Stats),
             "chat.progress" => typed(&kind, payload, Event::Progress),
             "git.status" => typed(&kind, payload, Event::Git),
+            "workflow.execution_changed" => typed(&kind, payload, Event::Workflow),
             "ack" => Event::Ack,
             _ => Event::Other(kind.clone()),
         };
@@ -957,6 +1304,8 @@ pub struct OpenFoxHarness {
     panels: Mutex<HashMap<String, Panel>>,
     /// OpenFox's top-level agents, read at most once a minute.
     agents_seen: Mutex<Option<(Instant, Vec<proto::Agent>)>>,
+    /// The workflows, by the request that read them, at most once a minute.
+    workflows_seen: Mutex<HashMap<String, (Instant, Vec<proto::Workflow>)>>,
 }
 
 impl OpenFoxHarness {
@@ -977,6 +1326,7 @@ impl OpenFoxHarness {
             live: Mutex::default(),
             panels: Mutex::default(),
             agents_seen: Mutex::default(),
+            workflows_seen: Mutex::default(),
         }
     }
 
@@ -1040,7 +1390,7 @@ impl OpenFoxHarness {
         Ok(())
     }
 
-    async fn raw(
+    pub(crate) async fn raw(
         &self,
         method: &str,
         path: &str,
@@ -1067,7 +1417,7 @@ impl OpenFoxHarness {
     }
 
     /// A REST call whose answer reads as `T`.
-    async fn call<T: serde::de::DeserializeOwned>(
+    pub(crate) async fn call<T: serde::de::DeserializeOwned>(
         &self,
         method: &str,
         path: &str,
@@ -1081,7 +1431,7 @@ impl OpenFoxHarness {
     }
 
     /// A REST call whose answer does not matter beyond its status.
-    async fn act(&self, method: &str, path: &str, body: Value) -> Result<(), String> {
+    pub(crate) async fn act(&self, method: &str, path: &str, body: Value) -> Result<(), String> {
         let (status, raw) = self.raw(method, path, Some(body), true).await?;
         if status >= 400 {
             return Err(format!("{method} {path}: HTTP {status} {}", reason(&raw)));
@@ -1181,6 +1531,7 @@ impl OpenFoxHarness {
     pub async fn status(&self) -> Value {
         let s = self.settings();
         let mut out = json!({"url": s.url, "mode": s.mode, "turn_timeout": s.turn_timeout,
+                             "keep_folder": s.keep_folder,
                              "modes": self.agent_list().await,
                              "signed_in": !self.token().is_empty()});
         let auth: Result<proto::Auth, String> = self.call("GET", "/api/auth", None).await;
@@ -1253,16 +1604,22 @@ impl OpenFoxHarness {
     }
 
     /// The OpenFox project whose folder is `workdir`, made when missing.
-    async fn project_for(&self, workdir: &Path) -> Result<String, String> {
+    /// The OpenFox project of a thread's folder, if OpenFox has one.
+    async fn project_of(&self, workdir: &Path) -> Result<Option<String>, String> {
         let wanted = std::fs::canonicalize(workdir).unwrap_or_else(|_| workdir.to_path_buf());
         let projects: proto::Projects = self.call("GET", "/api/projects", None).await?;
-        for p in projects.list() {
+        Ok(projects.list().into_iter().find_map(|p| {
             let at =
                 std::fs::canonicalize(&p.workdir).unwrap_or_else(|_| PathBuf::from(&p.workdir));
-            if at == wanted {
-                return Ok(p.id);
-            }
+            (at == wanted).then_some(p.id)
+        }))
+    }
+
+    async fn project_for(&self, workdir: &Path) -> Result<String, String> {
+        if let Some(id) = self.project_of(workdir).await? {
+            return Ok(id);
         }
+        let wanted = std::fs::canonicalize(workdir).unwrap_or_else(|_| workdir.to_path_buf());
         let name: String = wanted
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
@@ -1286,11 +1643,15 @@ impl OpenFoxHarness {
         Ok(made.project.id)
     }
 
-    /// The thread's session (made when OpenFox does not have it), and whether it is new.
-    async fn session_for(&self, t: &Turn) -> Result<(proto::Session, bool), String> {
+    /// The thread's session (made when OpenFox does not have it), whether it is new, and the
+    /// workflow it runs or waits in.
+    async fn session_for(
+        &self,
+        t: &Turn,
+    ) -> Result<(proto::Session, bool, Option<proto::Execution>), String> {
         if let Some(sid) = self.sessions().get(&t.agent).and_then(Value::as_str) {
             if let Some(view) = self.session_view(sid).await? {
-                return Ok((view.session, false));
+                return Ok((view.session, false, view.active_workflow_execution));
             }
         }
         let project = self.project_for(&t.workdir).await?;
@@ -1302,7 +1663,7 @@ impl OpenFoxHarness {
             )
             .await?;
         self.remember(&t.agent, &made.session.id);
-        Ok((made.session, true))
+        Ok((made.session, true, None))
     }
 
     /// The thread's WebSocket: kept from an earlier turn, or opened and subscribed now.
@@ -1445,12 +1806,13 @@ impl OpenFoxHarness {
     }
 
     async fn conversation(&self, t: &Turn) -> Result<RunSummary, String> {
-        let (session, fresh) = self.session_for(t).await?;
+        let (session, fresh, run) = self.session_for(t).await?;
         let sid = session.id.clone();
         if t.resume {
-            // OpenFox runs its last turn again (after a model's failure): follow it, say nothing new
+            // OpenFox runs its last turn again (after a model's failure): follow it, say nothing
+            // new; a workflow that failure blocked takes its step up again instead
             let link = self.link_for(&sid).await?;
-            self.start_panel(t, &session).await;
+            self.start_panel(t, &session, run.as_ref()).await;
             self.live.lock().expect("not poisoned").insert(
                 t.agent.clone(),
                 Live {
@@ -1458,10 +1820,17 @@ impl OpenFoxHarness {
                     posted: Vec::new(),
                 },
             );
-            link.send(
-                &json!({"id": crate::wire::random_hex(4), "type": "chat.retry", "payload": {}}),
-            )
-            .await?;
+            let again = match run
+                .as_ref()
+                .filter(|r| r.status == "blocked" && r.current_step_id.is_some())
+            {
+                Some(r) => json!({"id": crate::wire::random_hex(4), "type": "runner.launch",
+                                  "payload": taken_up(&sid, r, None, "")}),
+                None => {
+                    json!({"id": crate::wire::random_hex(4), "type": "chat.retry", "payload": {}})
+                }
+            };
+            link.send(&again).await?;
             t.phase("inference");
             return self.follow(t, sid, link).await;
         }
@@ -1506,8 +1875,17 @@ impl OpenFoxHarness {
                 text.push_str(&format!("\n- {} ({}, {} bytes)", a.path, a.mime, a.size));
             }
         }
+        // a workflow launched with this message, the one waiting taken up, or one a stop broke
+        // off that this message carries on (as OpenFox's own page does)
+        let launch = match (&t.workflow, run.as_ref()) {
+            (Some(l), Some(r)) if l.resume => Some(taken_up(&sid, r, l.choice.as_deref(), &text)),
+            (Some(l), None) if l.resume => return Err("no workflow waits in this thread".into()),
+            (Some(l), _) => Some(launched(&sid, l, &text)),
+            (None, Some(r)) if r.status == "running" => Some(taken_up(&sid, r, None, &text)),
+            (None, _) => None,
+        };
         let link = self.link_for(&sid).await?;
-        self.start_panel(t, &session).await;
+        self.start_panel(t, &session, run.as_ref()).await;
         self.live.lock().expect("not poisoned").insert(
             t.agent.clone(),
             Live {
@@ -1515,12 +1893,20 @@ impl OpenFoxHarness {
                 posted: Vec::new(),
             },
         );
-        self.act(
-            "POST",
-            &format!("/api/sessions/{sid}/message"),
-            json!({"content": text}),
-        )
-        .await?;
+        match launch {
+            Some(payload) => {
+                link.send(&json!({"id": crate::wire::random_hex(4), "type": "runner.launch", "payload": payload}))
+                    .await?
+            }
+            None => {
+                self.act(
+                    "POST",
+                    &format!("/api/sessions/{sid}/message"),
+                    json!({"content": text}),
+                )
+                .await?
+            }
+        }
         t.phase("inference");
         self.follow(t, sid, link).await
     }
@@ -1595,7 +1981,7 @@ impl OpenFoxHarness {
                 a.done = true;
             }
         });
-        if let Err(e) = self.read_back(&t.agent, &sid).await {
+        if let Err(e) = self.read_back(&t.agent, &sid, &t.workdir).await {
             eprintln!("openfox: the session's totals: {e}"); // the panel keeps what it had
         }
         self.show(t, &mut follow, true);
@@ -1800,6 +2186,10 @@ impl OpenFoxHarness {
                     })
                 });
             }
+            Event::Workflow(e) => {
+                force = true;
+                self.edit_panel(&t.agent, |p| p.workflow = Some(WorkflowRun::from(&e)));
+            }
             Event::Running(r) => {
                 force = true;
                 self.edit_panel(&t.agent, |p| p.running = r.is_running);
@@ -1952,10 +2342,16 @@ impl OpenFoxHarness {
     }
 
     /// The panel as OpenFox has the session now: its agent, effort, phase, structured data.
-    async fn start_panel(&self, t: &Turn, session: &proto::Session) {
+    async fn start_panel(
+        &self,
+        t: &Turn,
+        session: &proto::Session,
+        run: Option<&proto::Execution>,
+    ) {
         let agents = self.agent_list().await;
         let efforts = self.efforts_for(session.model()).await;
         self.edit_panel(&t.agent, |p| {
+            p.workflow = run.map(WorkflowRun::from);
             p.agent = session.mode.clone().unwrap_or_default();
             p.agents = agents;
             p.effort = session.provider_reasoning_effort.clone();
@@ -2050,6 +2446,27 @@ impl OpenFoxHarness {
             .ok_or("this thread has no OpenFox session yet: send it a message first")?;
         let path = |rest: &str| format!("/api/sessions/{sid}{rest}");
         let text = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+        // an id that goes into a path
+        let id_of = |k: &str| -> Result<String, String> {
+            let v = text(k);
+            if !v.is_empty()
+                && v.len() <= 128
+                && v.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "_-.".contains(c))
+            {
+                Ok(v)
+            } else {
+                Err(format!("unknown {k} {v:?}"))
+            }
+        };
+        let workdir = runner.host.workdir(agent);
+        let on_disk = || -> Result<String, String> {
+            if workdir.is_dir() {
+                Ok(enc(&workdir.to_string_lossy()))
+            } else {
+                Err("the thread's folder is not on disk between turns: keep it (OpenFox's settings) and send a message first".into())
+            }
+        };
         let result = match action {
             "agent" => {
                 let mode = text("mode");
@@ -2149,16 +2566,16 @@ impl OpenFoxHarness {
                     Ok(())
                 }
             }
-            "compact" | "retry_now" => {
+            "compact" | "retry_now" | "workflow_exit" => {
                 // said on a WebSocket of its own: the turn's, if one runs, is that turn's
-                let kind = if action == "compact" {
-                    "context.compact"
-                } else {
-                    "chat.llm_retry_now"
+                let (kind, payload) = match action {
+                    "compact" => ("context.compact", json!({})),
+                    "retry_now" => ("chat.llm_retry_now", json!({})),
+                    _ => ("workflow.exit", json!({"sessionId": sid})),
                 };
                 let link = self.link_for(&sid).await?;
                 let sent = link
-                    .send(&json!({"id": crate::wire::random_hex(4), "type": kind, "payload": {}}))
+                    .send(&json!({"id": crate::wire::random_hex(4), "type": kind, "payload": payload}))
                     .await;
                 tokio::time::sleep(Duration::from_millis(200)).await; // let it go out before the socket closes
                 sent
@@ -2171,12 +2588,154 @@ impl OpenFoxHarness {
                 });
                 Ok(())
             }
+            "task_add" | "task_move" | "task_remove" => {
+                let project = self
+                    .project_of(&workdir)
+                    .await?
+                    .ok_or("OpenFox has no project for this thread yet: send it a message first")?;
+                let tasks = format!("/api/projects/{project}/tasks");
+                match action {
+                    "task_add" => match text("prompt").trim() {
+                        "" => Err("a task needs what it is to do".into()),
+                        prompt => self.act("POST", &tasks, json!({"prompt": prompt})).await,
+                    },
+                    "task_move" => {
+                        let to = text("to");
+                        if !["todo", "in_progress", "done"].contains(&to.as_str()) {
+                            Err(format!(
+                                "a task goes to todo, in_progress or done, not {to:?}"
+                            ))
+                        } else {
+                            self.act(
+                                "POST",
+                                &format!("{tasks}/{}/move", id_of("id")?),
+                                json!({"to": to}),
+                            )
+                            .await
+                        }
+                    }
+                    _ => {
+                        self.act("DELETE", &format!("{tasks}/{}", id_of("id")?), json!({}))
+                            .await
+                    }
+                }
+            }
+            "dev_config" => {
+                let at = on_disk()?;
+                let (command, url) = (
+                    text("command").trim().to_string(),
+                    text("url").trim().to_string(),
+                );
+                if command.is_empty() || url.is_empty() {
+                    Err("the dev server needs its command and its address".into())
+                } else {
+                    let hot = p
+                        .get("hot_reload")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
+                    self.act(
+                        "POST",
+                        &format!("/api/dev-server/config?workdir={at}"),
+                        json!({"command": command, "url": url, "hotReload": hot}),
+                    )
+                    .await
+                }
+            }
+            "dev_start" | "dev_stop" | "dev_restart" => {
+                let at = on_disk()?;
+                let verb = action.trim_start_matches("dev_");
+                self.act(
+                    "POST",
+                    &format!("/api/dev-server/{verb}?workdir={at}"),
+                    json!({}),
+                )
+                .await
+            }
+            "dev_logs" => {
+                let at = on_disk()?;
+                let logs: proto::DevLogs = self
+                    .call("GET", &format!("/api/dev-server/logs?workdir={at}"), None)
+                    .await?;
+                let lines: Vec<String> = logs
+                    .logs
+                    .iter()
+                    .rev()
+                    .take(200)
+                    .rev()
+                    .map(|l| {
+                        let line = l.content.trim_end().to_string();
+                        if l.stream == "stderr" {
+                            format!("! {line}")
+                        } else {
+                            line
+                        }
+                    })
+                    .collect();
+                self.edit_panel(agent, |x| {
+                    x.project.get_or_insert_with(ProjectView::default).dev_logs = lines;
+                });
+                Ok(())
+            }
+            "process_stop" => {
+                self.act(
+                    "POST",
+                    &path(&format!("/background-process/{}/stop", id_of("id")?)),
+                    json!({}),
+                )
+                .await
+            }
+            "checkout" | "branch_new" => {
+                on_disk()?;
+                let name = text(if action == "checkout" {
+                    "branch"
+                } else {
+                    "name"
+                });
+                let name = name.trim();
+                if name.is_empty() || name.len() > 200 || name.starts_with('-') {
+                    Err(format!("not a branch name: {name:?}"))
+                } else {
+                    let done = if action == "checkout" {
+                        self.act("POST", &path("/checkout"), json!({"branch": name}))
+                            .await
+                    } else {
+                        self.act("POST", &path("/checkout-new"), json!({"name": name}))
+                            .await
+                    };
+                    // the folder changed between turns: the thread's files follow it now
+                    if done.is_ok() {
+                        runner.put_away(agent);
+                    }
+                    done
+                }
+            }
+            "instructions" => {
+                let project = self
+                    .project_of(&workdir)
+                    .await?
+                    .ok_or("OpenFox has no project for this thread yet: send it a message first")?;
+                let said = text("text");
+                let said = said.trim();
+                if said.chars().count() > 20_000 {
+                    Err("a project's instructions are 20,000 characters at most".into())
+                } else {
+                    self.act(
+                        "PUT",
+                        &format!("/api/projects/{project}"),
+                        json!({"customInstructions": if said.is_empty() { Value::Null } else { json!(said) }}),
+                    )
+                    .await
+                }
+            }
             "refresh" => Ok(()),
             other => Err(format!("unknown OpenFox action {other:?}")),
         };
         // what OpenFox has now: outside a turn no WebSocket brings it, so it is read back
-        if result.is_ok() && !["retry", "retry_now", "compact"].contains(&action) {
-            if let Err(e) = self.read_back(agent, &sid).await {
+        if result.is_ok() && !["retry", "retry_now", "compact", "workflow_exit"].contains(&action) {
+            if let Err(e) = self
+                .read_back(agent, &sid, &runner.host.workdir(agent))
+                .await
+            {
                 eprintln!("openfox: reading {agent}'s session back: {e}");
             }
         }
@@ -2187,17 +2746,129 @@ impl OpenFoxHarness {
         result
     }
 
+    /// The workflows a message may launch here (read once a minute).
+    async fn workflow_list(&self, workdir: &Path) -> Vec<proto::Workflow> {
+        let path = if workdir.is_dir() {
+            format!(
+                "/api/workflows?projectDir={}",
+                enc(&workdir.to_string_lossy())
+            )
+        } else {
+            "/api/workflows".to_string()
+        };
+        let seen = self
+            .workflows_seen
+            .lock()
+            .expect("not poisoned")
+            .get(&path)
+            .filter(|(at, _)| at.elapsed() < Duration::from_secs(60))
+            .map(|(_, w)| w.clone());
+        if let Some(w) = seen {
+            return w;
+        }
+        match self.call::<proto::Workflows>("GET", &path, None).await {
+            Ok(w) => {
+                let list = w.all();
+                self.workflows_seen
+                    .lock()
+                    .expect("not poisoned")
+                    .insert(path, (Instant::now(), list.clone()));
+                list
+            }
+            Err(e) => {
+                eprintln!("openfox: {e}");
+                Vec::new()
+            }
+        }
+    }
+
+    /// What the thread's folder and project hold for OpenFox (None: OpenFox has no project for it).
+    async fn read_project(&self, sid: &str, workdir: &Path) -> Option<ProjectView> {
+        let project = match self.project_of(workdir).await {
+            Ok(Some(p)) => p,
+            Ok(None) => return None,
+            Err(e) => {
+                eprintln!("openfox: {e}");
+                return None;
+            }
+        };
+        // a folder not kept is put away at the end of the turn this is read in
+        let kept = self.settings().keep_folder;
+        let on_disk = kept && workdir.is_dir();
+        let mut out = ProjectView {
+            kept,
+            on_disk,
+            ..Default::default()
+        };
+        fn or_say<T: Default>(r: Result<T, String>) -> T {
+            r.unwrap_or_else(|e| {
+                eprintln!("openfox: {e}");
+                T::default()
+            })
+        }
+        if let Ok(p) = self
+            .call::<proto::ProjectOne>("GET", &format!("/api/projects/{project}"), None)
+            .await
+        {
+            out.instructions = p.project.custom_instructions.unwrap_or_default();
+        }
+        let board: proto::TaskBoard = or_say(
+            self.call("GET", &format!("/api/projects/{project}/tasks"), None)
+                .await,
+        );
+        out.tasks = board.tasks;
+        out.task_settings = board.settings;
+        let processes: proto::Processes = or_say(
+            self.call(
+                "GET",
+                &format!("/api/sessions/{sid}/background-processes"),
+                None,
+            )
+            .await,
+        );
+        out.processes = processes.processes;
+        if on_disk {
+            let at = enc(&workdir.to_string_lossy());
+            out.dev = self
+                .call("GET", &format!("/api/dev-server?workdir={at}"), None)
+                .await
+                .map_err(|e| eprintln!("openfox: {e}"))
+                .ok();
+            let branches: proto::Branches = or_say(
+                self.call("GET", &format!("/api/sessions/{sid}/branches"), None)
+                    .await,
+            );
+            out.branch = branches
+                .branches
+                .iter()
+                .find(|b| b.current)
+                .map(|b| b.name.clone())
+                .unwrap_or_default();
+            out.branches = branches.branches.into_iter().map(|b| b.name).collect();
+        }
+        Some(out)
+    }
+
     /// The panel as OpenFox has the session now (REST): its agent, effort, danger, phase, context
     /// and structured data. Live things (thinking, sub-agents, a question) stay as they are.
-    async fn read_back(&self, agent: &str, sid: &str) -> Result<(), String> {
+    async fn read_back(&self, agent: &str, sid: &str, workdir: &Path) -> Result<(), String> {
         let view = self
             .session_view(sid)
             .await?
             .ok_or("OpenFox no longer has this session")?;
         let agents = self.agent_list().await;
         let efforts = self.efforts_for(view.session.model()).await;
+        let workflows = self.workflow_list(workdir).await;
+        let project = self.read_project(sid, workdir).await;
         let s = view.session;
         self.edit_panel(agent, |x| {
+            x.workflow = view.active_workflow_execution.as_ref().map(WorkflowRun::from);
+            x.workflows = workflows;
+            let logs = x.project.take().map(|p| p.dev_logs).unwrap_or_default();
+            x.project = project.map(|p| ProjectView {
+                dev_logs: logs,
+                ..p
+            });
             x.agent = s.mode.clone().unwrap_or_default();
             x.agents = agents;
             x.effort = s.provider_reasoning_effort.clone();
@@ -2220,6 +2891,18 @@ impl OpenFoxHarness {
         });
         Ok(())
     }
+}
+
+/// `text` as one part of a URL's query.
+pub(crate) fn enc(text: &str) -> String {
+    text.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
 }
 
 /// How often the panel goes to the pages while text streams in it (thinking, a sub-agent).
@@ -2255,8 +2938,63 @@ pub struct Panel {
     /// The workspace's branch and changed files, as OpenFox last said (during a turn).
     pub git: Option<Value>,
     pub progress: String,
+    /// The workflow the session runs or waits in.
+    pub workflow: Option<WorkflowRun>,
+    /// The workflows a message may launch (the project's, the person's, OpenFox's own).
+    pub workflows: Vec<proto::Workflow>,
+    /// The thread's folder and OpenFox project: task board, dev server, processes, branches.
+    pub project: Option<ProjectView>,
     /// The last action's failure, for the page to say.
     pub error: String,
+}
+
+/// A workflow's run as the page shows it.
+#[derive(Serialize, Clone, Debug, Default, PartialEq)]
+pub struct WorkflowRun {
+    pub id: String,
+    pub name: String,
+    pub color: Option<String>,
+    /// running, waiting, completed, cancelled or blocked.
+    pub status: String,
+    pub step: String,
+    /// The branches a step for the person offers ("Continue" alone when none).
+    pub choices: Vec<proto::StepChoice>,
+}
+
+impl From<&proto::Execution> for WorkflowRun {
+    fn from(e: &proto::Execution) -> Self {
+        Self {
+            id: e.workflow_id.clone(),
+            name: if e.workflow_name.is_empty() {
+                e.workflow_id.clone()
+            } else {
+                e.workflow_name.clone()
+            },
+            color: e.workflow_color.clone(),
+            status: e.status.clone(),
+            step: e.current_step_name.clone().unwrap_or_default(),
+            choices: e.pending_choices.clone().unwrap_or_default(),
+        }
+    }
+}
+
+/// What a thread's folder holds for OpenFox outside its conversation, read back after a turn
+/// and after each action.
+#[derive(Serialize, Clone, Debug, Default, PartialEq)]
+pub struct ProjectView {
+    /// The folder stays on disk between turns (the dev server and processes need it).
+    pub kept: bool,
+    /// The folder is on disk now.
+    pub on_disk: bool,
+    pub instructions: String,
+    pub tasks: Vec<proto::Task>,
+    pub task_settings: Option<proto::TaskSettings>,
+    pub dev: Option<proto::DevServer>,
+    /// The dev server's last lines, read when asked for.
+    pub dev_logs: Vec<String>,
+    pub processes: Vec<proto::Process>,
+    pub branches: Vec<String>,
+    pub branch: String,
 }
 
 impl Panel {
@@ -2441,7 +3179,7 @@ impl Follow {
     }
 }
 
-fn reason(raw: &[u8]) -> String {
+pub(crate) fn reason(raw: &[u8]) -> String {
     serde_json::from_slice::<Value>(raw)
         .ok()
         .and_then(|v| v.get("error").and_then(Value::as_str).map(String::from))
@@ -2550,6 +3288,7 @@ mod tests {
             url: "http://127.0.0.1:10369".into(),
             mode: "builder".into(),
             turn_timeout: 900,
+            keep_folder: true,
         };
         assert_eq!(ok.problem(), None);
         assert!(Settings {

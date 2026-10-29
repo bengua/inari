@@ -182,6 +182,44 @@ async fn a_supervised_guest_has_its_threads_and_nothing_more() {
         .0,
         403
     );
+    // on its own thread too, what runs outside the supervision's sight is the owner's: an OpenFox
+    // workflow, a task, a dev server, the project's instructions, the library
+    assert_eq!(
+        call(
+            port,
+            &guest,
+            "/api/message",
+            Some(json!({"agent": thread, "text": "", "workflow": {"id": "review"}}))
+        )
+        .await
+        .0,
+        403
+    );
+    for action in ["task_add", "dev_config", "dev_start", "instructions"] {
+        assert_eq!(
+            call(
+                port,
+                &guest,
+                "/api/openfox/thread",
+                Some(json!({"agent": thread, "action": action, "prompt": "x"}))
+            )
+            .await
+            .0,
+            403,
+            "{action}"
+        );
+    }
+    assert_eq!(
+        call(
+            port,
+            &guest,
+            "/api/openfox/library?node=home&harness=openfox&kind=mcp",
+            None
+        )
+        .await
+        .0,
+        403
+    );
     assert_eq!(
         call(port, &format!("pass=wrong&{owner}"), "/api/whoami", None)
             .await

@@ -152,6 +152,75 @@ impl CapsuleHost {
         Ok(agent)
     }
 
+    /// Where a thread's files are put out while it works.
+    pub fn workdir(&self, agent: &str) -> PathBuf {
+        self.root.join("work").join(agent)
+    }
+
+    /// The tree a kept folder was last in step with, beside it (never inside it).
+    fn kept_tree(&self, agent: &str) -> PathBuf {
+        self.root.join("work").join(format!("{agent}.tree.json"))
+    }
+
+    /// Put a thread's files out for a turn. A kept folder (`keep`) that is still there is only
+    /// brought in step with what the thread's files became since; anything else starts afresh.
+    pub fn open_workdir(&self, agent: &str, keep: bool) -> crate::capsule::Result<PathBuf> {
+        let workdir = self.workdir(agent);
+        let path = self.agents.join(agent);
+        let before: Option<std::collections::BTreeMap<String, String>> =
+            fs::read(self.kept_tree(agent))
+                .ok()
+                .and_then(|b| serde_json::from_slice(&b).ok());
+        match before {
+            Some(before) if keep && workdir.is_dir() => {
+                let tree = io::sync(&path, &workdir, &before)?;
+                self.keep_tree(agent, &tree)?;
+            }
+            _ => {
+                self.drop_workdir(agent);
+                io::materialize(&path, &workdir)?;
+            }
+        }
+        Ok(workdir)
+    }
+
+    /// After a turn: the folder becomes the thread's files; it stays on disk when `keep`.
+    pub fn close_workdir(&self, agent: &str, keep: bool) -> crate::capsule::Result<()> {
+        let workdir = self.workdir(agent);
+        let kept = io::update_snapshot(&self.agents.join(agent), &workdir);
+        match (&kept, keep) {
+            (Ok(c), true) => self.keep_tree(agent, &c.snapshot.tree)?,
+            _ => self.drop_workdir(agent),
+        }
+        kept.map(|_| ())
+    }
+
+    /// The folder kept for a thread put away into its files (before it leaves this node).
+    pub fn put_away(&self, agent: &str) -> crate::capsule::Result<()> {
+        if self.kept_tree(agent).is_file() && self.workdir(agent).is_dir() {
+            let c = io::update_snapshot(&self.agents.join(agent), &self.workdir(agent))?;
+            self.keep_tree(agent, &c.snapshot.tree)?;
+        }
+        Ok(())
+    }
+
+    /// No folder left on disk for this thread.
+    pub fn drop_workdir(&self, agent: &str) {
+        let _ = fs::remove_dir_all(self.workdir(agent));
+        let _ = fs::remove_file(self.kept_tree(agent));
+    }
+
+    fn keep_tree(
+        &self,
+        agent: &str,
+        tree: &std::collections::BTreeMap<String, String>,
+    ) -> crate::capsule::Result<()> {
+        atomic_write(
+            &self.kept_tree(agent),
+            serde_json::to_vec(tree).expect("serializes").as_slice(),
+        )
+    }
+
     /// After a crash: trust the capsule on disk, drop half-finished staging.
     /// Put a thread this node runs in the trash: kept on disk (`trash/<agent>-<time>`), no
     /// longer run here, not brought back by `recover`.
@@ -166,6 +235,7 @@ impl CapsuleHost {
         fs::create_dir_all(&trash).map_err(|e| err("OSError", e))?;
         let dest = trash.join(format!("{agent}-{}", now() as u64));
         fs::rename(self.agents.join(agent), &dest).map_err(|e| err("OSError", e))?;
+        self.drop_workdir(agent);
         self.set(agent, &holder, epoch, "deleted")
     }
 
@@ -231,6 +301,8 @@ impl Endpoint for CapsuleHost {
             return Err(err("InariError", format!("{agent} is not running here")));
         }
         let path = self.agents.join(agent);
+        // what changed in a folder kept between turns leaves with the thread
+        self.put_away(agent).map_err(|e| err("OSError", e))?;
         io::append_event(
             &path,
             &format!("{}@{agent}", self.node_id),
@@ -260,6 +332,7 @@ impl Endpoint for CapsuleHost {
     }
 
     async fn tombstone(&self, agent: &str, epoch: u64) -> CallResult<()> {
+        self.drop_workdir(agent);
         self.set(agent, "", epoch, "tombstoned")
     }
 
@@ -365,6 +438,8 @@ impl Endpoint for CapsuleHost {
         let _ = fs::remove_dir_all(&dest);
         fs::rename(&stage, &dest).map_err(|e| err("OSError", e))?;
         self.absorb_blobs(&dest).map_err(|e| err("OSError", e))?;
+        // a folder left from an earlier stay here is older than what arrives
+        self.drop_workdir(&agent);
         self.set(&agent, &self.node_id, epoch, "running")?;
         self.prepared.lock().expect("not poisoned").remove(sid);
         Ok(())

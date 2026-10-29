@@ -319,10 +319,13 @@ function foxLive(p) { const out = [];
   if (p.retry) { const r = p.retry; out.push(r.failed
       ? `<div class="foxretry bad"><b>${esc(t("The model did not answer"))}</b><p>${esc(r.error)}</p><button type="button" class="btn small go" data-retry>${esc(t("Retry"))}</button></div>`
       : `<div class="foxretry"><b>${esc(t("The model did not answer, attempt {n}", { n: r.attempt }))}</b><p>${esc(r.error)}</p><button type="button" class="btn small" data-retry-now>${esc(t("Retry now"))}</button></div>`); }
+  const w = p.workflow; if (w && w.status === "waiting" && !p.running) { const opts = (w.choices || []).length ? w.choices.map((c) => `<button type="button" class="btn small go" data-wf="${esc(c.id)}" data-label="${esc(c.label)}" title="${esc(c.nextStepName || "")}">${esc(c.label)}</button>`).join("") : `<button type="button" class="btn small go" data-wf="" data-label="${esc(t("Continue the workflow"))}">${esc(t("Continue the workflow"))}</button>`;
+    out.push(`<div class="foxask"><b>${esc(t("The workflow {name} waits for you", { name: w.name }))}</b>${w.step ? `<p>${esc(w.step)}</p>` : ""}<div class="row2">${opts}</div></div>`); }
   if (p.running && p.progress) out.push(`<p class="foxprog">${esc(p.progress)}</p>`);
   return out.join(""); }
-$("msgs").addEventListener("click", (e) => { const c = e.target.closest(".foxask, .foxretry"); if (!c) return;
-  if (e.target.closest("[data-answer]")) foxAct("answer", { call_id: c.dataset.call, answer: e.target.closest("[data-answer]").dataset.answer });
+$("msgs").addEventListener("click", (e) => { const c = e.target.closest(".foxask, .foxretry"); if (!c) return; const wf = e.target.closest("[data-wf]");
+  if (wf) api("/api/message", { agent: selected, text: "", workflow: { resume: true, ...(wf.dataset.wf ? { choice: wf.dataset.wf } : {}), label: wf.dataset.label } });
+  else if (e.target.closest("[data-answer]")) foxAct("answer", { call_id: c.dataset.call, answer: e.target.closest("[data-answer]").dataset.answer });
   else if (e.target.closest("[data-free]")) { const v = c.querySelector(".foxfree").value.trim(); if (v) foxAct("answer", { call_id: c.dataset.call, answer: v }); }
   else if (e.target.closest("[data-skip]")) foxAct("answer", { call_id: c.dataset.call });
   else if (e.target.closest("[data-retry]")) foxAct("retry", {});
@@ -359,7 +362,71 @@ function planTab(body) { const p = panels[selected]; if (!p) { body.innerHTML = 
   if (p.git && (p.git.branch || (p.git.files || []).length)) { sec(t("Git")); if (p.git.branch) body.append(el("p", "pstate", t("Branch {name}", { name: p.git.branch })));
     const ul = el("ul", "plist"); for (const f of p.git.files || []) { const li = el("li"); li.append(el("span", "pm", ({ added: "+", deleted: "−" })[f.status] || "~"), el("span", "", f.path), el("small", "", ` +${f.additions} −${f.deletions}`)); ul.append(li); } body.append(ul); }
   if (p.session_stats) { const s = p.session_stats; sec(t("This session")); body.append(el("p", "pstate", [counted(s.answers, "1 answer", "{n} answers"), counted(s.calls, "1 model call", "{n} model calls"), t("{n} tokens in, {m} out", { n: (s.tokens_in || 0).toLocaleString(LANG), m: (s.tokens_out || 0).toLocaleString(LANG) }), s.speed ? t("{n} tokens/s", { n: Math.round(s.speed) }) : "", s.seconds ? t("{n} s", { n: Math.round(s.seconds) }) : ""].filter(Boolean).join(" · "))); }
-  if (p.stats) { const s = p.stats; sec(t("Last turn")); body.append(el("p", "pstate", [s.model, s.effort, s.speed ? t("{n} tokens/s", { n: Math.round(s.speed) }) : "", s.seconds ? t("{n} s", { n: Math.round(s.seconds) }) : ""].filter(Boolean).join(" · "))); } }
+  if (p.stats) { const s = p.stats; sec(t("Last turn")); body.append(el("p", "pstate", [s.model, s.effort, s.speed ? t("{n} tokens/s", { n: Math.round(s.speed) }) : "", s.seconds ? t("{n} s", { n: Math.round(s.seconds) }) : ""].filter(Boolean).join(" · "))); }
+  foxWork(p, body, el, sec, mark); }
+/* The Plan tab, OpenFox's work around the thread: a workflow to launch or the one it runs, the project's task board
+   (OpenFox works on a task in a session of its own, in this thread's folder), the dev server, the processes it started,
+   the branch, the project's instructions. */
+let foxWf = { id: "", params: {} };
+function foxWork(p, body, el, sec, mark) {
+  const btn = (text, fn, cls) => { const b = el("button", "btn small" + (cls ? " " + cls : ""), text); b.type = "button"; b.onclick = fn; return b; };
+  const w = p.workflow, live = w && ["running", "waiting", "blocked"].includes(w.status);
+  if (live || (p.workflows || []).length) sec(t("Workflow"));
+  if (live) { const line = el("p", "pstate", [w.name, w.step, ({ running: t("running"), waiting: t("waiting for you"), blocked: t("blocked") })[w.status]].filter(Boolean).join(" · ")); body.append(line);
+    if (w.status === "waiting" && !p.running) { const row = el("div", "row2"), go = (choice, label) => api("/api/message", { agent: selected, text: "", workflow: { resume: true, ...(choice ? { choice } : {}), label } });
+      if ((w.choices || []).length) for (const c of w.choices) row.append(btn(c.label, () => go(c.id, c.label), "go")); else row.append(btn(t("Continue the workflow"), () => go("", t("Continue the workflow")), "go"));
+      body.append(row); }
+    line.append(" ", btn(t("Leave the workflow"), () => foxAct("workflow_exit", {}))); }
+  else if ((p.workflows || []).length) { const ctl = el("div", "pctl"), l = el("label", "col"), pick = document.createElement("select"); body.append(ctl); l.append(el("span", "", t("Launch with the message")));
+    pick.append(new Option(t("No workflow: a plain message"), "", false, !foxWf.id)); for (const x of p.workflows) pick.append(new Option(x.description ? `${x.name} — ${x.description}` : x.name, x.id, false, x.id === foxWf.id));
+    pick.onchange = () => { foxWf = { id: pick.value, params: {} }; drawBench(); }; l.append(pick); ctl.append(l);
+    const wf = p.workflows.find((x) => x.id === foxWf.id);
+    if (wf) { const ed = el("div", "critedit");
+      for (const prm of wf.parameters || []) { const r = el("div", "row2"), inp = el("input"); inp.type = "text"; inp.placeholder = prm.label + (prm.required ? " *" : ""); inp.title = prm.description || ""; inp.value = foxWf.params[prm.id] || ""; inp.oninput = () => { foxWf.params[prm.id] = inp.value; }; r.append(inp); ed.append(r); }
+      const row = el("div", "row2"); row.append(btn(t("Launch"), async () => { const missing = (wf.parameters || []).filter((x) => x.required && !(foxWf.params[x.id] || "").trim()); if (missing.length) return toast(t("Missing: {names}", { names: missing.map((x) => x.label).join(", ") }));
+        const text = $("msg").value.trim(), params = Object.fromEntries(Object.entries(foxWf.params).filter(([, v]) => v.trim())); $("msg").value = ""; foxWf = { id: "", params: {} };
+        await api("/api/message", { agent: selected, text, workflow: { id: wf.id, params, label: wf.name } }); drawStop(); drawChat(); }, "go"));
+      ed.append(row); body.append(ed, el("p", "pstate", t("What is in the composer goes with it."))); } }
+  const pr = p.project; if (!pr) return;
+  sec(t("Task board"));
+  const tasks = pr.tasks || [], words = { todo: t("To do"), in_progress: t("In progress"), done: t("Done") };
+  for (const st of ["todo", "in_progress", "done"]) { const list = tasks.filter((x) => x.status === st); if (!list.length) continue; body.append(el("p", "pstate", words[st])); const ul = el("ul", "plist");
+    for (const x of list) { const li = el("li", "st-" + (st === "done" ? "completed" : st)); li.append(el("span", "pm", mark(st === "done" ? "completed" : st)), el("span", "", x.prompt.length > 200 ? x.prompt.slice(0, 200) + "…" : x.prompt));
+      if (st === "in_progress") li.append(el("small", "", x.runState === "queued" ? t("waiting for a slot") : t("OpenFox works on it")));
+      if (st === "todo") li.append(btn(t("Start"), () => foxAct("task_move", { id: x.id, to: "in_progress" })));
+      if (st === "in_progress") li.append(btn(t("Done"), () => foxAct("task_move", { id: x.id, to: "done" })));
+      if (st === "done") li.append(btn(t("Again"), () => foxAct("task_move", { id: x.id, to: "todo" })));
+      const del = btn("✕", () => foxAct("task_remove", { id: x.id })); del.setAttribute("aria-label", t("Remove")); li.append(del); ul.append(li); }
+    body.append(ul); }
+  if (!tasks.length) body.append(el("p", "pstate", t("No task yet: OpenFox takes one at a time, in a session of its own.")));
+  const add = el("div", "critedit"), row = el("div", "row2"), what = el("input"); what.type = "text"; what.placeholder = t("A task for OpenFox"); row.append(what, btn(t("Add"), () => { if (what.value.trim()) foxAct("task_add", { prompt: what.value.trim() }); }));
+  add.append(row); body.append(add);
+  sec(t("Dev server"));
+  if (!pr.on_disk) body.append(el("p", "pstate", pr.kept ? t("The thread's folder is on disk once a message is sent.") : t("The thread's folder is put away between turns: keep it on disk in OpenFox's settings to run a dev server.")));
+  else { const d = pr.dev || {}, cfg = d.config, state = ({ off: t("stopped"), running: t("running"), warning: t("running, with warnings"), error: t("failed") })[d.state] || t("stopped");
+    const line = el("p", "pstate", [state, d.url || (cfg && cfg.url), cfg && cfg.command, d.errorMessage].filter(Boolean).join(" · ")); body.append(line); const btns = el("div", "row2");
+    if (cfg) { if (d.state === "running" || d.state === "warning") btns.append(btn(t("Stop"), () => foxAct("dev_stop", {})), btn(t("Restart"), () => foxAct("dev_restart", {}))); else btns.append(btn(t("Start"), () => foxAct("dev_start", {}), "go")); }
+    btns.append(btn(cfg ? t("Change it") : t("Set it up"), () => devSheet(cfg)), btn(t("Its log"), () => foxAct("dev_logs", {}))); body.append(btns);
+    if ((pr.dev_logs || []).length) { const lg = el("details", "foxthink"); lg.open = true; lg.append(el("summary", "", t("Dev server log")), el("pre", "", pr.dev_logs.join("\n"))); body.append(lg); } }
+  if ((pr.processes || []).length) { sec(t("Processes")); const ul = el("ul", "plist");
+    for (const x of pr.processes) { const on = x.status === "running", li = el("li", on ? "st-in_progress" : "st-completed"); li.append(el("span", "pm", on ? "●" : "○"), el("span", "", x.name || x.command), el("small", "", on ? t("running") : x.exitCode != null ? t("ended ({code})", { code: x.exitCode }) : x.status));
+      if (on) li.append(btn(t("Stop"), () => foxAct("process_stop", { id: x.id }))); ul.append(li); }
+    body.append(ul); }
+  if ((pr.branches || []).length) { sec(t("Branch")); const ctl = el("div", "pctl"), l = el("label", "col"), pick = document.createElement("select"); l.append(el("span", "", t("Switch to")));
+    for (const b of pr.branches) pick.append(new Option(b, b, false, b === pr.branch)); pick.onchange = () => foxAct("checkout", { branch: pick.value }); l.append(pick); ctl.append(l); body.append(ctl);
+    const nb = el("div", "critedit"), r = el("div", "row2"), name = el("input"); name.type = "text"; name.placeholder = t("A new branch"); r.append(name, btn(t("Create"), () => { if (name.value.trim()) foxAct("branch_new", { name: name.value.trim() }); })); nb.append(r); body.append(nb); }
+  sec(t("This project's instructions")); const said = pr.instructions || "";
+  const ins = el("p", "pstate", said ? (said.length > 160 ? said.slice(0, 160) + "…" : said) : t("None: OpenFox follows its own and the ones for every project.")); ins.append(" ", btn(t("Edit"), () => textSheet(t("This project's instructions"), said, t("OpenFox adds them to every message of this project."), (text) => foxAct("instructions", { text })))); body.append(ins); }
+/* A text to edit in a sheet (instructions, a prompt): Save gives it back. */
+function textSheet(title, value, note, save) { const form = document.createElement("div"); form.className = "passform foxform"; const ta = document.createElement("textarea"); ta.rows = 10; ta.value = value || ""; form.append(ta);
+  sheet(title, [[t("Save"), () => save(ta.value)]], note, form); }
+/* The dev server's command and address (OpenFox keeps them in the folder's .openfox/dev.json). */
+function devSheet(cfg) { const form = document.createElement("div"); form.className = "passform foxform"; cfg = cfg || {};
+  const field = (label, x) => { const l = document.createElement("label"); l.className = "col"; const sp = document.createElement("span"); sp.textContent = label; l.append(sp, x); form.append(l); return x; };
+  const command = field(t("Command"), Object.assign(document.createElement("input"), { type: "text", value: cfg.command || "", placeholder: "npm run dev -- --port ${PORT}", spellcheck: false }));
+  const url = field(t("Its address"), Object.assign(document.createElement("input"), { type: "text", value: cfg.url || "", placeholder: "http://localhost:5173", spellcheck: false }));
+  const hot = field(t("When the files change"), document.createElement("select")); hot.append(new Option(t("It reloads by itself"), "1", false, !!cfg.hotReload), new Option(t("OpenFox restarts it"), "", false, !cfg.hotReload));
+  sheet(t("Dev server"), [[t("Save"), () => foxAct("dev_config", { command: command.value.trim(), url: url.value.trim(), hot_reload: !!hot.value })]], t("It runs in this thread's folder, on this core."), form); }
 
 /* ---------- OpenFox's settings on a core (the core keeps them; nothing is written by hand) ---------- */
 function openfoxSheet(node, harness, said) {
@@ -377,12 +444,17 @@ function openfoxSheet(node, harness, said) {
   const limit = field(t("Longest turn"), document.createElement("select")), mins = [5, 15, 30, 60, 120, 240, 480];
   if (st.turn_timeout && !mins.includes(st.turn_timeout / 60)) mins.push(Math.round(st.turn_timeout / 60));
   for (const m of mins.sort((a, b) => a - b)) limit.append(new Option(m < 60 ? t("{n} min", { n: m }) : t("{n} h", { n: m / 60 }), m * 60, false, m * 60 === st.turn_timeout));
+  const keep = field(t("A thread's folder between two turns"), document.createElement("select"));
+  keep.append(new Option(t("Kept on disk (dev server, processes, task board, branches)"), "1", false, st.keep_folder !== false), new Option(t("Put away into the thread"), "", false, st.keep_folder === false));
   const act = async (action, extra) => { const at = Math.floor(Date.now() / 1000), key = `${node}/${harness}`;
     const r = await api("/api/openfox", { node, harness, action, ...extra }); if (r.error) return toast(t(r.error));
     toast(t("Sent to {name}…", { name: node }));
     if (await until(() => ((snap.openfox_results || {})[key] || {}).at >= at, 20000)) setTimeout(() => openfoxSheet(node, harness, snap.openfox_results[key]), 2500); else toast(t("{name} did not answer", { name: node })); };
+  if (st.reachable) { form.append(Object.assign(document.createElement("h3"), { textContent: t("OpenFox's library") })); const lib = document.createElement("div"); lib.className = "row2"; lib.style.flexWrap = "wrap";
+    for (const [kind, label] of Object.entries(FOX_KINDS)) lib.append(foxBtn(t(label), () => foxLibrary(node, harness, kind)));
+    lib.append(foxBtn(t("MCP servers"), () => foxMcp(node, harness)), foxBtn(t("Tools"), () => foxTools(node, harness)), foxBtn(t("Instructions and settings"), () => foxSettings(node, harness))); form.append(lib); }
   const save = document.createElement("button"); save.className = "btn small go"; save.type = "button"; save.textContent = t("Save"); form.append(save);
-  save.onclick = () => act("set", { url: url.value.trim(), mode: mode.value, turn_timeout: Number(limit.value) });
+  save.onclick = () => act("set", { url: url.value.trim(), mode: mode.value, turn_timeout: Number(limit.value), keep_folder: !!keep.value });
   if (st.password) { const pw = field(st.signed_in ? t("Signed in. Sign in again (OpenFox's password)") : t("OpenFox's password"), Object.assign(document.createElement("input"), { type: "password", autocomplete: "current-password" }));
     const go = document.createElement("button"); go.className = "btn small"; go.type = "button"; go.textContent = t("Sign in"); form.append(go);
     go.onclick = () => { if (pw.value) act("login", { password: pw.value }); pw.value = ""; }; }
@@ -413,6 +485,81 @@ function openfoxSheet(node, harness, said) {
     add.onclick = () => { act("provider_add", { name: pname.value.trim(), url: purl.value.trim(), backend: kind.value, local: where.value === "local", api_key: key.value }); key.value = ""; };
     row.append(test, add); form.append(row); }
   sheet(t("OpenFox on {name}", { name: node }), [[t("Check"), () => act("check", {})]], t("These settings are kept by the core. Models and providers come from OpenFox itself."), form); }
+
+/* An OpenFox action on a core: sent, then its answer waited for; `after` gets it (or nothing when the core is silent). */
+async function foxNodeAct(node, harness, action, extra, after) { const at = Math.floor(Date.now() / 1000), key = `${node}/${harness}`;
+  const r = await api("/api/openfox", { node, harness, action, ...extra }); if (r.error) return toast(t(r.error));
+  toast(t("Sent to {name}…", { name: node }));
+  if (await until(() => ((snap.openfox_results || {})[key] || {}).at >= at, 20000)) { const said = snap.openfox_results[key]; if (!said.ok) toast(said.error); else if (said.detail) toast(t(said.detail)); after && after(said); }
+  else toast(t("{name} did not answer", { name: node })); }
+/* OpenFox's library on a core, read from OpenFox itself: its agents, skills, commands, workflows, MCP servers, tools, settings. */
+async function foxRead(node, harness, kind, id) { const q = new URLSearchParams({ node, harness, kind, id: id || "" }); const r = await api("/api/openfox/library?" + q);
+  if (r.error || !r.ok) { toast(r.error || t("OpenFox did not answer")); return null; } return r.data; }
+const FOX_KINDS = { agents: "Agents", skills: "Skills", commands: "Commands", workflows: "Workflows" };
+function foxForm() { const form = document.createElement("div"); form.className = "passform foxform"; return form; }
+function foxField(form, label, x) { const l = document.createElement("label"); l.className = "col"; const sp = document.createElement("span"); sp.textContent = label; l.append(sp, x); form.append(l); return x; }
+function foxRow(form, text, buttons) { const row = document.createElement("div"); row.className = "row2"; const name = document.createElement("span"); name.textContent = text; name.style.flex = "1"; row.append(name, ...buttons); form.append(row); return row; }
+function foxBtn(text, fn, cls) { const b = document.createElement("button"); b.className = "btn small" + (cls ? " " + cls : ""); b.type = "button"; b.textContent = text; b.onclick = fn; return b; }
+const twice = (b, ask, fn) => () => { if (b.dataset.sure) fn(); else { b.dataset.sure = "1"; b.textContent = ask; } };
+async function foxLibrary(node, harness, kind) { const data = await foxRead(node, harness, kind); if (!data) return; const form = foxForm(), again = () => foxLibrary(node, harness, kind), act = (a, x) => foxNodeAct(node, harness, a, x, again);
+  const scope = { builtin: t("OpenFox's own"), user: t("yours"), project: t("this project's") };
+  for (const it of data.items || []) { const bits = [it.name, scope[it.scope] || it.scope, it.subagent ? t("sub-agent") : "", it.enabled === false ? t("off") : ""].filter(Boolean).join(" · "), btns = [foxBtn(t("Open"), () => foxItem(node, harness, kind, it))];
+    if (kind === "skills" && it.enabled != null) btns.push(foxBtn(it.enabled ? t("Turn off") : t("Turn on"), () => act("skill_toggle", { id: it.id })));
+    btns.push(foxBtn(t("Duplicate"), () => act("item_duplicate", { of: kind, id: it.id })));
+    if (!it.read_only && it.scope !== "builtin") { const del = foxBtn(t("Remove"), null); del.onclick = twice(del, t("Remove {name}?", { name: it.name }), () => act("item_remove", { of: kind, id: it.id })); btns.push(del); }
+    const row = foxRow(form, bits, btns); if (it.description) row.title = it.description; }
+  if (!(data.items || []).length) form.append(Object.assign(document.createElement("p"), { className: "empty", textContent: t("None yet.") }));
+  sheet(t(FOX_KINDS[kind]), [], t("OpenFox's own are duplicated to be changed: the copy is yours."), form); }
+async function foxItem(node, harness, kind, it) { const data = await foxRead(node, harness, kind, it.id); if (!data) return; const form = foxForm(), ro = it.read_only || it.scope === "builtin";
+  let save;
+  if (kind === "workflows") { const ta = foxField(form, t("The workflow (JSON)"), document.createElement("textarea")); ta.rows = 16; ta.spellcheck = false; ta.value = data.json || ""; ta.readOnly = ro; save = () => ({ json: ta.value }); }
+  else { const name = foxField(form, t("Name"), Object.assign(document.createElement("input"), { type: "text", value: data.name || "", readOnly: ro }));
+    const desc = kind === "commands" ? null : foxField(form, t("What it is for"), Object.assign(document.createElement("input"), { type: "text", value: data.description || "", readOnly: ro }));
+    const prompt = foxField(form, t("Its prompt"), document.createElement("textarea")); prompt.rows = 12; prompt.value = data.prompt || ""; prompt.readOnly = ro;
+    save = () => ({ name: name.value, description: desc ? desc.value : "", prompt: prompt.value }); }
+  const opts = ro ? [[t("Duplicate it to change it"), () => foxNodeAct(node, harness, "item_duplicate", { of: kind, id: it.id }, () => foxLibrary(node, harness, kind))]]
+    : [[t("Save"), () => foxNodeAct(node, harness, "item_save", { of: kind, id: it.id, ...save() }, () => foxLibrary(node, harness, kind))]];
+  sheet(it.name, opts, ro ? t("OpenFox's own: read only.") : "", form); }
+async function foxMcp(node, harness) { const data = await foxRead(node, harness, "mcp"); if (!data) return; const form = foxForm(), again = () => foxMcp(node, harness), act = (a, x) => foxNodeAct(node, harness, a, x, again);
+  for (const m of data.servers || []) { const off = foxBtn(m.disabled ? t("Turn on") : t("Turn off"), () => act("mcp_toggle", { name: m.name, disabled: !m.disabled })), del = foxBtn(t("Remove"), null);
+    del.onclick = twice(del, t("Remove {name}?", { name: m.name }), () => act("mcp_remove", { name: m.name }));
+    foxRow(form, [m.name, m.disabled ? t("off") : m.status, m.transport === "http" ? m.url : m.command, counted((m.tools || []).length, "1 tool", "{n} tools"), m.tokens ? t("{n} tokens", { n: m.tokens.toLocaleString(LANG) }) : ""].filter(Boolean).join(" · "), [off, del]);
+    if (m.error) form.append(Object.assign(document.createElement("p"), { className: "bad", textContent: m.error }));
+    if ((m.env || []).length || (m.headers || []).length) form.append(Object.assign(document.createElement("small"), { className: "empty", textContent: t("Its secrets ({names}) stay with OpenFox.", { names: [...m.env, ...m.headers].join(", ") }) }));
+    for (const tool of m.tools || []) foxRow(form, "— " + tool.name, [foxBtn(tool.enabled ? t("Turn off") : t("Turn on"), () => act("mcp_tool", { name: m.name, tool: tool.name, enabled: !tool.enabled }))]); }
+  form.append(Object.assign(document.createElement("h3"), { textContent: t("Add an MCP server") }));
+  const name = foxField(form, t("Name"), Object.assign(document.createElement("input"), { type: "text", placeholder: "github", spellcheck: false }));
+  const kind = foxField(form, t("How OpenFox reaches it"), document.createElement("select")); kind.append(new Option(t("A command on this core"), "stdio"), new Option(t("An address (HTTP)"), "http"));
+  const command = foxField(form, t("Command"), Object.assign(document.createElement("input"), { type: "text", placeholder: "npx -y @modelcontextprotocol/server-github", spellcheck: false }));
+  const env = foxField(form, t("Its environment, one NAME=value a line"), document.createElement("textarea")); env.rows = 3; env.spellcheck = false;
+  const url = foxField(form, t("Its address"), Object.assign(document.createElement("input"), { type: "text", placeholder: "https://example.com/mcp", spellcheck: false }));
+  const headers = foxField(form, t("Its headers, one Name: value a line"), document.createElement("textarea")); headers.rows = 2; headers.spellcheck = false;
+  const show = () => { const http = kind.value === "http"; for (const [x, on] of [[command, !http], [env, !http], [url, http], [headers, http]]) x.parentElement.hidden = !on; }; kind.onchange = show; show();
+  form.append(Object.assign(document.createElement("small"), { className: "empty", textContent: t("The values go to OpenFox and nowhere else: Inari neither keeps nor shows them.") }));
+  const body = () => ({ name: name.value.trim(), transport: kind.value, command: command.value, env: env.value, url: url.value, headers: headers.value });
+  const row = document.createElement("div"); row.className = "row2"; row.append(foxBtn(t("Test"), () => foxNodeAct(node, harness, "mcp_test", body())), foxBtn(t("Add"), () => { act("mcp_add", body()); env.value = ""; headers.value = ""; }, "go")); form.append(row);
+  sheet(t("MCP servers"), [], t("Every thread OpenFox runs on this core can use them."), form); }
+async function foxTools(node, harness) { const data = await foxRead(node, harness, "tools"); if (!data) return; const form = foxForm();
+  for (const x of data.tools || []) foxRow(form, [x.name, x.isMcp ? t("from {name}", { name: x.mcpServer || "MCP" }) : "", x.alwaysAllowed ? t("never asks") : "", x.topLevelOnly ? t("not for sub-agents") : "", (x.actions || []).join(", ")].filter(Boolean).join(" · "), []);
+  sheet(t("Tools"), [], t("What OpenFox's agents may use. An agent's own list says which of them it takes."), form); }
+async function foxSettings(node, harness) { const data = await foxRead(node, harness, "settings"); if (!data) return; const form = foxForm(), again = () => foxSettings(node, harness), set = (key, value) => foxNodeAct(node, harness, "setting", { key, value }, again);
+  const ins = data.global_instructions || ""; foxRow(form, t("Instructions for every project") + (ins ? " · " + (ins.length > 60 ? ins.slice(0, 60) + "…" : ins) : ""), [foxBtn(t("Edit"), () => textSheet(t("Instructions for every project"), ins, t("OpenFox adds them to every message, in every project."), (v) => set("global_instructions", v)))]);
+  const lang = foxField(form, t("The language OpenFox answers in"), Object.assign(document.createElement("input"), { type: "text", value: data["agent.language"] || "", placeholder: "automatic" })); lang.onchange = () => set("agent.language", lang.value.trim() || "automatic");
+  for (const [key, label] of [["agent.allowParallelSubAgents", t("Sub-agents may work side by side")], ["agent.autoContinueOnBoot", t("Unfinished work goes on when OpenFox starts again")], ["llm.dynamicSystemPrompt", t("Instructions are read again during a session")], ["tools.confirmOnWorkspaceActions", t("Asks before changing a branch or a workspace")]]) {
+    const sel = foxField(form, label, document.createElement("select")); sel.append(new Option(t("Yes"), "1", false, !!data[key]), new Option(t("No"), "", false, !data[key])); sel.onchange = () => set(key, !!sel.value); }
+  // the patterns that make OpenFox try a turn again: what to look for, where, how many times a turn
+  const rp = data["agent.retryPatterns"] || { patterns: [], maxRetriesPerTurn: 10 }, draft = JSON.parse(JSON.stringify(rp));
+  form.append(Object.assign(document.createElement("h3"), { textContent: t("Try a turn again when the answer matches") }));
+  const list = document.createElement("div"); list.className = "critedit"; form.append(list);
+  const draw = () => { list.textContent = ""; draft.patterns.forEach((x, i) => { const r = document.createElement("div"); r.className = "row2"; const inp = Object.assign(document.createElement("input"), { type: "text", value: x.pattern, placeholder: "^Error:", spellcheck: false }); inp.oninput = () => { x.pattern = inp.value; };
+      const where = document.createElement("select"); for (const [v, l] of [["content", t("in the answer")], ["thinking", t("in the thinking")], ["both", t("in both")]]) where.append(new Option(l, v, false, v === x.field)); where.onchange = () => { x.field = where.value; };
+      const on = document.createElement("select"); on.append(new Option(t("on"), "1", false, x.active), new Option(t("off"), "", false, !x.active)); on.onchange = () => { x.active = !!on.value; };
+      const del = foxBtn("✕", () => { draft.patterns.splice(i, 1); draw(); }); del.setAttribute("aria-label", t("Remove")); r.append(inp, where, on, del); list.append(r); });
+    const r = document.createElement("div"); r.className = "row2"; r.append(foxBtn(t("Add a pattern"), () => { draft.patterns.push({ field: "content", pattern: "", action: "retry", active: true }); draw(); })); list.append(r); };
+  draw();
+  const max = foxField(form, t("At most, tries a turn"), Object.assign(document.createElement("input"), { type: "number", min: 0, max: 100, value: draft.maxRetriesPerTurn }));
+  form.append(foxBtn(t("Save the patterns"), () => { draft.maxRetriesPerTurn = Math.max(0, Math.min(100, Number(max.value) || 0)); draft.patterns = draft.patterns.filter((x) => x.pattern.trim()); set("agent.retryPatterns", draft); }, "go"));
+  sheet(t("OpenFox's settings"), [], t("Kept by OpenFox itself, for every thread it runs on this core."), form); }
 
 /* ---------- the mascot: FoxBot when its folder is served, else the orb ---------- */
 let foxFrame = null, foxReady = false, foxLast = "";

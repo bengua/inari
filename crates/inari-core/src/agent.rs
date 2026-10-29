@@ -152,6 +152,8 @@ pub struct Turn {
     pub pass: String,
     /// No new message: the agent takes up its last turn again (Runner::resume).
     pub resume: bool,
+    /// A workflow this message launches, or the waiting run it takes up (OpenFox only).
+    pub workflow: Option<crate::openfox::Launch>,
 }
 
 impl Turn {
@@ -1036,6 +1038,12 @@ impl Harness {
             Harness::Acp(_) => None,
         }
     }
+
+    /// Whether a thread's folder stays on disk between its turns (OpenFox's dev server, its
+    /// processes and its task board need it; an ACP agent finds it afresh each turn).
+    pub fn keeps_folder(&self) -> bool {
+        self.openfox().is_some_and(|h| h.settings().keep_folder)
+    }
 }
 
 /// How often a thread repeats the phase it is already in (Runner::announce_state).
@@ -1116,6 +1124,23 @@ impl Runner {
         self.harnesses
             .get(&self.harness_of(agent))
             .and_then(Harness::openfox)
+    }
+
+    /// Whether this thread's folder stays on disk between its turns (Harness::keeps_folder).
+    pub fn keeps_folder(&self, agent: &str) -> bool {
+        self.harnesses
+            .get(&self.harness_of(agent))
+            .is_some_and(Harness::keeps_folder)
+    }
+
+    /// A kept folder changed outside a turn (a branch switched, say): the thread's files follow
+    /// it now, unless a turn runs (its end does it).
+    pub fn put_away(&self, agent: &str) {
+        let lock = self.lock(agent);
+        let Ok(_guard) = lock.try_lock() else { return };
+        if let Err(e) = self.host.put_away(agent) {
+            eprintln!("putting {agent}'s folder away failed: {e}");
+        }
     }
 
     /// The harness that thinks for this thread: its own, else the node's default.
@@ -1429,12 +1454,11 @@ impl Runner {
         if self.host.status(agent) != "running" {
             return json!({"ok": false, "output": "this node does not run the agent", "code": -1});
         }
-        let path = self.host.agents.join(agent);
-        let workdir = self.host.root.join("work").join(agent);
-        let _ = std::fs::remove_dir_all(&workdir);
-        if let Err(e) = io::materialize(&path, &workdir) {
-            return json!({"ok": false, "output": e.to_string(), "code": -1});
-        }
+        let keep = self.keeps_folder(agent);
+        let workdir = match self.host.open_workdir(agent, keep) {
+            Ok(w) => w,
+            Err(e) => return json!({"ok": false, "output": e.to_string(), "code": -1}),
+        };
         let call_id = crate::wire::random_hex(6);
         let args = json!({"cmd": cmd, "by": "user"});
         let _ = self.journal(
@@ -1452,10 +1476,9 @@ impl Runner {
             EventKind::ToolResult,
             json!({"call_id": call_id, "output": output, "is_error": code != 0}),
         );
-        if let Err(e) = io::update_snapshot(&path, &workdir) {
+        if let Err(e) = self.host.close_workdir(agent, keep) {
             eprintln!("snapshot of {agent} failed: {e}");
         }
-        let _ = std::fs::remove_dir_all(&workdir);
         json!({"ok": code == 0, "output": output, "code": code, "timed_out": timed_out})
     }
 
@@ -1498,13 +1521,26 @@ impl Runner {
                 }
             }
         }
-        self.take_turn(agent, text, attachments, false).await
+        self.take_turn(agent, text, attachments, false, None).await
     }
 
     /// Follow a turn the agent runs again of its own (OpenFox retrying after a model's failure):
     /// the same turn as `run`, with no new message from the person.
     pub async fn resume(self: &Arc<Self>, agent: &str) -> RunSummary {
-        self.take_turn(agent, "", Vec::new(), true).await
+        self.take_turn(agent, "", Vec::new(), true, None).await
+    }
+
+    /// A turn that launches an OpenFox workflow, or takes up the one waiting, with the message
+    /// that goes with it (if any). It waits for a turn already running instead of joining it.
+    pub async fn launch(
+        self: &Arc<Self>,
+        agent: &str,
+        text: &str,
+        attachments: Vec<Attached>,
+        launch: crate::openfox::Launch,
+    ) -> RunSummary {
+        self.take_turn(agent, text, attachments, false, Some(launch))
+            .await
     }
 
     async fn take_turn(
@@ -1513,6 +1549,7 @@ impl Runner {
         text: &str,
         attachments: Vec<Attached>,
         resume: bool,
+        workflow: Option<crate::openfox::Launch>,
     ) -> RunSummary {
         let lock = self.lock(agent);
         *self
@@ -1540,8 +1577,10 @@ impl Runner {
             .unwrap_or("")
             .to_string();
         let path = self.host.agents.join(agent);
-        let workdir = self.host.root.join("work").join(agent);
-        let _ = std::fs::remove_dir_all(&workdir);
+        let keep = self
+            .harnesses
+            .get(&harness_name)
+            .is_some_and(Harness::keeps_folder);
         self.set_phase(agent, "listening");
         let files: Vec<Value> = attachments
             .iter()
@@ -1550,6 +1589,13 @@ impl Runner {
         let mut data = json!({"text": text});
         if !files.is_empty() {
             data["attachments"] = Value::Array(files);
+        }
+        if let Some(l) = &workflow {
+            if text.trim().is_empty() {
+                data["text"] = json!(l.shown());
+            }
+            data["workflow"] =
+                json!({"id": l.id, "label": l.label, "resume": l.resume, "choice": l.choice});
         }
         if resume {
             // nothing new from the person: the agent takes up its last turn again
@@ -1565,16 +1611,16 @@ impl Runner {
             }
         }
         let summary = match (
-            io::materialize(&path, &workdir),
+            self.host.open_workdir(agent, keep),
             self.harnesses.get(&harness_name),
         ) {
-            (Ok(()), Some(h)) => {
+            (Ok(workdir), Some(h)) => {
                 let turn = Turn {
                     runner: Arc::clone(self),
                     agent: agent.into(),
                     text: text.into(),
                     attachments,
-                    workdir: workdir.clone(),
+                    workdir,
                     model,
                     mode: labels
                         .get("mode")
@@ -1587,6 +1633,7 @@ impl Runner {
                         .unwrap_or("")
                         .to_string(),
                     resume,
+                    workflow,
                 };
                 h.turn(&turn).await
             }
@@ -1607,10 +1654,9 @@ impl Runner {
         } else if summary.stopped == "steered" {
             let _ = self.journal(agent, EventKind::Checkpoint, json!({"reason": "steered"}));
         }
-        if let Err(e) = io::update_snapshot(&path, &workdir) {
+        if let Err(e) = self.host.close_workdir(agent, keep) {
             eprintln!("snapshot of {agent} failed: {e}");
         }
-        let _ = std::fs::remove_dir_all(&workdir);
         self.set_phase(
             agent,
             if summary.stopped == "error" {

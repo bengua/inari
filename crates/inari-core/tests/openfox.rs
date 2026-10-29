@@ -7,7 +7,7 @@
 use inari_core::agent::{Approver, Runner};
 use inari_core::capsule::io;
 use inari_core::host::CapsuleHost;
-use inari_core::openfox::{OpenFoxHarness, Settings};
+use inari_core::openfox::{Launch, OpenFoxHarness, Settings};
 use serde_json::{json, Value};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -37,6 +37,67 @@ struct Fox {
     log: Vec<String>,
     /// What the REST calls and WebSocket messages carried, for the tests to read.
     seen: Vec<(String, Value)>,
+    /// Every request's path with its query.
+    targets: Vec<String>,
+    /// The project OpenFox made for the thread's folder.
+    project_dir: Option<String>,
+    /// The workflow the session runs or waits in.
+    run: Option<Value>,
+    tasks: Vec<Value>,
+    instructions: Option<String>,
+    dev: Option<Value>,
+    dev_running: bool,
+    process_running: bool,
+    branch: String,
+    settings: std::collections::BTreeMap<String, String>,
+    mcp: Vec<Value>,
+}
+
+/// A workflow's run, as `workflow.execution_changed` and the session's view say it.
+fn run_of(status: &str, step: &str) -> Value {
+    let mut r = json!({"executionId": "x1", "workflowId": "review", "workflowName": "Review", "status": status,
+                       "currentStepId": step.to_lowercase(), "currentStepName": step,
+                       "stepOutput": {"review": "two findings"}, "params": {"focus": "parser"}});
+    if status == "waiting" {
+        r["pendingChoices"] = json!([{"id": "approve", "label": "Approve", "goto": "$done"},
+                                     {"id": "redo", "label": "Redo", "goto": "fix", "nextStepName": "Fix"}]);
+    }
+    r
+}
+
+/// A workflow launched, or taken up at its step for the person.
+async fn workflow(fox: Shared, launch: Value) {
+    fox.lock().unwrap().running = true;
+    say(&fox, "session.running", json!({"isRunning": true}));
+    let answer = match launch["userChoice"].as_str() {
+        Some(choice) => {
+            let r = run_of("completed", "Done");
+            fox.lock().unwrap().run = Some(r.clone());
+            say(&fox, "workflow.execution_changed", r);
+            format!("Chose {choice}.")
+        }
+        None => {
+            let r = run_of("running", "Review");
+            fox.lock().unwrap().run = Some(r.clone());
+            say(&fox, "workflow.execution_changed", r);
+            let r = run_of("waiting", "Approve");
+            fox.lock().unwrap().run = Some(r.clone());
+            say(&fox, "workflow.execution_changed", r);
+            "Reviewed.".to_string()
+        }
+    };
+    say(
+        &fox,
+        "chat.delta",
+        json!({"messageId": "w", "content": answer}),
+    );
+    {
+        let mut f = fox.lock().unwrap();
+        f.messages
+            .push(json!({"role": "assistant", "content": answer}));
+        f.running = false;
+    }
+    say(&fox, "session.running", json!({"isRunning": false}));
 }
 
 type Shared = Arc<Mutex<Fox>>;
@@ -353,6 +414,11 @@ async fn serve(fox: Shared, mut s: TcpStream) {
                     tx.send(json!({"type": "ack", "id": m["id"], "payload": {"sessionId": "s1"}}));
             } else if m["type"] == "chat.retry" {
                 tokio::spawn(work(Arc::clone(&fox), "retried".into()));
+            } else if m["type"] == "runner.launch" {
+                let _ = tx.send(json!({"type": "ack", "id": m["id"], "payload": {}}));
+                tokio::spawn(workflow(Arc::clone(&fox), m["payload"].clone()));
+            } else if m["type"] == "workflow.exit" {
+                fox.lock().unwrap().run = Some(run_of("cancelled", "Approve"));
             }
         }
         drop(tx);
@@ -361,6 +427,21 @@ async fn serve(fox: Shared, mut s: TcpStream) {
     }
     let body: Value = serde_json::from_slice(&body).unwrap_or_default();
     let path = target.split('?').next().unwrap_or("").to_string();
+    fox.lock().unwrap().targets.push(target.clone());
+    if token_ok {
+        if let Some(reply) = around(&fox, &method, &path, &body) {
+            let (status, reply) = reply;
+            fox.lock()
+                .unwrap()
+                .seen
+                .push((format!("{method} {path}"), body.clone()));
+            let text = reply.to_string();
+            let _ = s
+                .write_all(format!("HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{text}", text.len()).as_bytes())
+                .await;
+            return;
+        }
+    }
     fox.lock()
         .unwrap()
         .seen
@@ -429,8 +510,13 @@ async fn serve(fox: Shared, mut s: TcpStream) {
     {
         (200, json!({}))
     } else if path == "/api/projects" && method == "GET" {
-        (200, json!({"projects": []}))
+        let dir = fox.lock().unwrap().project_dir.clone();
+        (
+            200,
+            json!({"projects": dir.map(|d| vec![json!({"id": "p1", "workdir": d})]).unwrap_or_default()}),
+        )
     } else if path == "/api/projects" {
+        fox.lock().unwrap().project_dir = body["workdir"].as_str().map(String::from);
         (
             200,
             json!({"project": {"id": "p1", "workdir": body["workdir"]}}),
@@ -445,6 +531,7 @@ async fn serve(fox: Shared, mut s: TcpStream) {
             200,
             json!({"session": {"id": "s1", "mode": f.mode, "isRunning": f.running, "providerId": pid, "providerModel": pm,
                                "metadataEntries": {"criteria": f.criteria}},
+                     "activeWorkflowExecution": f.run,
                      "sessionStats": {"totalTime": 12.5, "toolTime": 2.0, "prefillTokens": 900, "generationTokens": 120,
                                       "avgGenerationSpeed": 40.0, "responseCount": 2, "llmCallCount": 3},
                      "messages": f.messages}),
@@ -489,6 +576,161 @@ async fn serve(fox: Shared, mut s: TcpStream) {
         .await;
 }
 
+/// What OpenFox keeps around its sessions: workflows, the project's task board, its dev server,
+/// processes and branches, its library, MCP servers, tools and settings. None: not one of these.
+fn around(fox: &Shared, method: &str, path: &str, body: &Value) -> Option<(u16, Value)> {
+    let mut f = fox.lock().unwrap();
+    let ok = Some((200, json!({})));
+    Some(match (method, path) {
+        ("GET", "/api/workflows") => (
+            200,
+            json!({"defaults": [{"id": "review", "name": "Review", "description": "reviews the change", "scope": "builtin",
+                                  "parameters": [{"id": "focus", "label": "Focus", "required": true}]}],
+                   "userItems": [], "projectItems": [{"id": "ship", "name": "Ship", "scope": "project"}], "activeWorkflowId": "default"}),
+        ),
+        ("GET", "/api/workflows/review") => (
+            200,
+            json!({"metadata": {"id": "review", "name": "Review"}, "entryStep": "review", "steps": [{"id": "review"}]}),
+        ),
+        ("GET", "/api/projects/p1") => (
+            200,
+            json!({"project": {"id": "p1", "customInstructions": f.instructions}}),
+        ),
+        ("PUT", "/api/projects/p1") => {
+            f.instructions = body["customInstructions"].as_str().map(String::from);
+            return ok;
+        }
+        ("GET", "/api/projects/p1/tasks") => (
+            200,
+            json!({"tasks": f.tasks, "settings": {"slotLimit": 1, "queuePaused": false}, "counts": {}}),
+        ),
+        ("POST", "/api/projects/p1/tasks") => {
+            let id = format!("t{}", f.tasks.len() + 1);
+            f.tasks.push(json!({"id": id, "prompt": body["prompt"], "status": "todo", "version": 1, "position": 0}));
+            (201, json!({"task": f.tasks.last()}))
+        }
+        ("GET", "/api/dev-server") => (
+            200,
+            json!({"state": if f.dev_running { "running" } else { "off" }, "url": f.dev.as_ref().map(|d| d["url"].clone()),
+                                                   "hotReload": false, "config": f.dev, "errorMessage": null, "inspectProxyPort": null}),
+        ),
+        ("POST", "/api/dev-server/config") => {
+            f.dev = Some(
+                json!({"command": body["command"], "url": body["url"], "hotReload": body["hotReload"]}),
+            );
+            return ok;
+        }
+        ("POST", "/api/dev-server/start") => {
+            f.dev_running = true;
+            return ok;
+        }
+        ("POST", "/api/dev-server/stop") => {
+            f.dev_running = false;
+            return ok;
+        }
+        ("GET", "/api/dev-server/logs") => (
+            200,
+            json!({"logs": [{"stream": "stdout", "content": "ready on 5173\n"}, {"stream": "stderr", "content": "a warning"}], "total": 2}),
+        ),
+        ("GET", "/api/sessions/s1/background-processes") => (
+            200,
+            json!({"processes": [{"id": "bp1", "sessionId": "s1", "name": "vite", "command": "npm run dev",
+                                                                                        "status": if f.process_running { "running" } else { "exited" }, "exitCode": if f.process_running { Value::Null } else { json!(0) }}]}),
+        ),
+        ("POST", "/api/sessions/s1/background-process/bp1/stop") => {
+            f.process_running = false;
+            return ok;
+        }
+        ("GET", "/api/sessions/s1/branches") => {
+            let current = if f.branch.is_empty() {
+                "main".to_string()
+            } else {
+                f.branch.clone()
+            };
+            (
+                200,
+                json!({"branches": [{"name": "main", "current": current == "main"}, {"name": "feat", "current": current == "feat"}], "defaultBranch": "main"}),
+            )
+        }
+        ("POST", "/api/sessions/s1/checkout") | ("POST", "/api/sessions/s1/checkout-new") => {
+            let branch = body["branch"]
+                .as_str()
+                .or(body["name"].as_str())
+                .unwrap_or("")
+                .to_string();
+            // a branch changes the folder's files
+            if let Some(dir) = &f.project_dir {
+                std::fs::write(std::path::Path::new(dir).join("BRANCH"), &branch).unwrap();
+            }
+            f.branch = branch;
+            return ok;
+        }
+        ("GET", "/api/agents/reviewer") => (
+            200,
+            json!({"metadata": {"id": "reviewer", "name": "Reviewer", "description": "my own", "subagent": false, "allowedTools": []}, "prompt": "Review the change."}),
+        ),
+        ("PUT", "/api/agents/reviewer")
+        | ("POST", "/api/agents/planner/duplicate")
+        | ("DELETE", "/api/agents/reviewer")
+        | ("POST", "/api/skills/summarize/toggle") => return ok,
+        ("GET", "/api/skills") => (
+            200,
+            json!({"defaults": [], "userItems": [], "projectItems": [],
+                                              "items": [{"id": "summarize", "name": "Summarize", "description": "short", "enabled": true, "source": "bundled", "readOnly": true}]}),
+        ),
+        ("GET", "/api/mcp/servers") => (200, json!({"servers": f.mcp})),
+        ("POST", "/api/mcp/servers") => {
+            f.mcp.push(json!({"name": body["name"], "status": "connected", "estimatedTokens": 400,
+                              "config": {"transport": body["transport"], "command": body["command"], "args": body["args"], "env": body["env"]},
+                              "tools": [{"name": "issues", "enabled": true, "estimatedTokens": 400, "inputSchema": {}}]}));
+            (201, json!({"server": f.mcp.last()}))
+        }
+        ("POST", "/api/mcp/servers/test") => {
+            (200, json!({"success": true, "tools": ["issues", "pulls"]}))
+        }
+        ("PUT", "/api/mcp/servers/gh")
+        | ("PUT", "/api/mcp/servers/gh/tools/issues")
+        | ("DELETE", "/api/mcp/servers/gh") => return ok,
+        ("GET", "/api/tools") => (
+            200,
+            json!({"tools": [{"name": "read_file", "actions": [], "alwaysAllowed": true, "topLevelOnly": false, "isMcp": false},
+                                                       {"name": "gh_issues", "actions": [], "alwaysAllowed": false, "topLevelOnly": false, "isMcp": true, "mcpServer": "gh"}]}),
+        ),
+        ("GET", p) if p.starts_with("/api/settings/") => {
+            let key = p.trim_start_matches("/api/settings/").replace("%2E", ".");
+            (
+                200,
+                json!({"key": key, "value": f.settings.get(&key).cloned()}),
+            )
+        }
+        ("PUT", p) if p.starts_with("/api/settings/") => {
+            let key = p.trim_start_matches("/api/settings/").replace("%2E", ".");
+            f.settings
+                .insert(key, body["value"].as_str().unwrap_or("").to_string());
+            return ok;
+        }
+        _ => {
+            let task = path.strip_prefix("/api/projects/p1/tasks/")?;
+            let (id, what) = task.split_once('/').unwrap_or((task, ""));
+            let at = f.tasks.iter().position(|t| t["id"] == id)?;
+            match (method, what) {
+                ("POST", "move") => {
+                    f.tasks[at]["status"] = body["to"].clone();
+                    if body["to"] == "in_progress" {
+                        f.tasks[at]["runState"] = json!("running");
+                    }
+                    (200, json!({"task": f.tasks[at]}))
+                }
+                ("DELETE", "") => {
+                    f.tasks.remove(at);
+                    (204, json!({}))
+                }
+                _ => return None,
+            }
+        }
+    })
+}
+
 async fn fake_openfox() -> (Shared, u16) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -523,6 +765,7 @@ async fn lab(approve: bool) -> Lab {
         url: format!("http://127.0.0.1:{port}"),
         mode: "builder".into(),
         turn_timeout: 60,
+        keep_folder: true,
     })
     .unwrap();
     assert!(
@@ -962,4 +1205,336 @@ async fn providers_are_managed_and_their_keys_only_reach_openfox() {
         !fox.status().await.to_string().contains("sk-kimi-secret"),
         "never said back"
     );
+}
+
+fn body_of(l: &Lab, k: &str) -> Value {
+    l.fox
+        .lock()
+        .unwrap()
+        .seen
+        .iter()
+        .rev()
+        .find(|(x, _)| x == k)
+        .map(|(_, b)| b.clone())
+        .unwrap_or_default()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_workflow_is_launched_waits_for_the_person_and_is_taken_up() {
+    let l = lab(true).await;
+    l.runner.run(&l.agent, "hello", vec![]).await;
+    // the workflows a message may launch: the project's first, then OpenFox's own
+    let names: Vec<Value> = last_panel(&l)["workflows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| w["id"].clone())
+        .collect();
+    assert_eq!(names, [json!("ship"), json!("review")]);
+    let launch = Launch {
+        id: "review".into(),
+        params: [("focus".to_string(), "parser".to_string())].into(),
+        label: "Review".into(),
+        ..Default::default()
+    };
+    assert_eq!(launch.problem(), None);
+    let out = l
+        .runner
+        .launch(&l.agent, "look at it", vec![], launch)
+        .await;
+    assert_eq!(out.stopped, "done", "{out:?}");
+    let sent = body_of(&l, "WS runner.launch");
+    assert_eq!(sent["payload"]["workflowId"], "review");
+    assert_eq!(sent["payload"]["params"], json!({"focus": "parser"}));
+    assert_eq!(sent["payload"]["content"], "look at it");
+    assert!(said(&l).contains(&"u: look at it".to_string()));
+    let w = &last_panel(&l)["workflow"];
+    assert_eq!(w["status"], "waiting");
+    assert_eq!(w["choices"][1]["nextStepName"], "Fix");
+    // the person picks a branch: the run is taken up where it waits, with what it had
+    let again = Launch {
+        resume: true,
+        choice: Some("approve".into()),
+        label: "Approve".into(),
+        ..Default::default()
+    };
+    l.runner.launch(&l.agent, "", vec![], again).await;
+    let sent = body_of(&l, "WS runner.launch");
+    assert_eq!(sent["payload"]["resumeFrom"], "approve");
+    assert_eq!(sent["payload"]["userChoice"], "approve");
+    assert_eq!(
+        sent["payload"]["stepOutput"],
+        json!({"review": "two findings"})
+    );
+    assert!(
+        sent["payload"].get("content").is_none(),
+        "no text went with it"
+    );
+    assert!(said(&l).contains(&"u: ▶ Approve".to_string()));
+    assert!(said(&l).contains(&"a: Chose approve.".to_string()));
+    assert_eq!(last_panel(&l)["workflow"]["status"], "completed");
+    // a bad launch never reaches OpenFox
+    assert!(Launch {
+        id: "../x".into(),
+        ..Default::default()
+    }
+    .problem()
+    .is_some());
+    // leaving a workflow is OpenFox's own message
+    fox_of(&l)
+        .thread_action(&l.runner, &l.agent, "workflow_exit", &json!({}))
+        .await
+        .unwrap();
+    assert!(body_of(&l, "WS workflow.exit")["payload"]["sessionId"] == "s1");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_folder_stays_between_turns_and_the_project_around_it_is_the_pages() {
+    let l = lab(true).await;
+    l.runner.run(&l.agent, "hello", vec![]).await;
+    let workdir = l.runner.host.workdir(&l.agent);
+    assert!(workdir.is_dir(), "the folder stays on disk between turns");
+    // made between turns (a dev server's file): still there for the next turn, then in the thread
+    std::fs::write(workdir.join("made-between.txt"), "kept").unwrap();
+    l.runner.run(&l.agent, "hello", vec![]).await;
+    let c = io::load(&l.runner.host.agents.join(&l.agent)).unwrap();
+    assert!(c.snapshot.tree.contains_key("made-between.txt"));
+    let fox = fox_of(&l);
+    let act = |a: &'static str, p: Value| {
+        let l = &l;
+        async move { fox.thread_action(&l.runner, &l.agent, a, &p).await }
+    };
+    // the task board
+    act("task_add", json!({"prompt": "  write the docs "}))
+        .await
+        .unwrap();
+    assert_eq!(
+        body_of(&l, "POST /api/projects/p1/tasks"),
+        json!({"prompt": "write the docs"})
+    );
+    act("task_move", json!({"id": "t1", "to": "in_progress"}))
+        .await
+        .unwrap();
+    let task = &last_panel(&l)["project"]["tasks"][0];
+    assert_eq!(
+        (task["status"].clone(), task["runState"].clone()),
+        (json!("in_progress"), json!("running"))
+    );
+    assert!(act("task_move", json!({"id": "t1", "to": "nowhere"}))
+        .await
+        .is_err());
+    assert!(act("task_move", json!({"id": "../p2", "to": "done"}))
+        .await
+        .is_err());
+    act("task_remove", json!({"id": "t1"})).await.unwrap();
+    assert_eq!(last_panel(&l)["project"]["tasks"], json!([]));
+    // the dev server runs in the thread's folder
+    act(
+        "dev_config",
+        json!({"command": "npm run dev", "url": "http://localhost:5173", "hot_reload": true}),
+    )
+    .await
+    .unwrap();
+    act("dev_start", json!({})).await.unwrap();
+    let dev = &last_panel(&l)["project"]["dev"];
+    assert_eq!(dev["state"], "running");
+    assert_eq!(dev["config"]["command"], "npm run dev");
+    let at = l
+        .fox
+        .lock()
+        .unwrap()
+        .targets
+        .iter()
+        .rev()
+        .find(|t| t.starts_with("/api/dev-server/start"))
+        .cloned()
+        .unwrap();
+    let raw = at.split("workdir=").nth(1).unwrap_or("").as_bytes();
+    let (mut said, mut i) = (Vec::new(), 0);
+    while i < raw.len() {
+        if raw[i] == b'%' {
+            said.push(
+                u8::from_str_radix(std::str::from_utf8(&raw[i + 1..i + 3]).unwrap(), 16).unwrap(),
+            );
+            i += 3;
+        } else {
+            said.push(raw[i]);
+            i += 1;
+        }
+    }
+    assert_eq!(
+        String::from_utf8(said).unwrap(),
+        workdir.to_string_lossy(),
+        "{at}"
+    );
+    act("dev_logs", json!({})).await.unwrap();
+    assert_eq!(
+        last_panel(&l)["project"]["dev_logs"],
+        json!(["ready on 5173", "! a warning"])
+    );
+    // its processes
+    l.fox.lock().unwrap().process_running = true;
+    act("refresh", json!({})).await.unwrap();
+    assert_eq!(
+        last_panel(&l)["project"]["processes"][0]["status"],
+        "running"
+    );
+    act("process_stop", json!({"id": "bp1"})).await.unwrap();
+    assert_eq!(last_panel(&l)["project"]["processes"][0]["exitCode"], 0);
+    // a branch changed between turns: the thread's files follow it at once
+    assert_eq!(
+        last_panel(&l)["project"]["branches"],
+        json!(["main", "feat"])
+    );
+    act("checkout", json!({"branch": "feat"})).await.unwrap();
+    assert_eq!(last_panel(&l)["project"]["branch"], "feat");
+    let c = io::load(&l.runner.host.agents.join(&l.agent)).unwrap();
+    assert!(
+        c.snapshot.tree.contains_key("BRANCH"),
+        "put away into the thread"
+    );
+    assert!(act("branch_new", json!({"name": "--force"})).await.is_err());
+    // the project's instructions
+    act("instructions", json!({"text": "Answer in French."}))
+        .await
+        .unwrap();
+    assert_eq!(
+        last_panel(&l)["project"]["instructions"],
+        "Answer in French."
+    );
+    act("instructions", json!({"text": "  "})).await.unwrap();
+    assert_eq!(
+        body_of(&l, "PUT /api/projects/p1"),
+        json!({"customInstructions": null})
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_folder_put_away_between_turns_has_no_dev_server() {
+    let l = lab(true).await;
+    let fox = fox_of(&l);
+    let mut s = fox.settings();
+    s.keep_folder = false;
+    fox.set_settings(s).unwrap();
+    l.runner.run(&l.agent, "hello", vec![]).await;
+    assert!(
+        !l.runner.host.workdir(&l.agent).exists(),
+        "put away as before"
+    );
+    let err = fox
+        .thread_action(&l.runner, &l.agent, "dev_start", &json!({}))
+        .await
+        .unwrap_err();
+    assert!(err.contains("not on disk"), "{err}");
+    assert_eq!(last_panel(&l)["project"]["on_disk"], false);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_library_is_read_and_changed_and_mcp_secrets_only_reach_openfox() {
+    let l = lab(true).await;
+    let fox = fox_of(&l);
+    let agents = fox.library("agents", "").await.unwrap();
+    let scopes: Vec<(Value, Value)> = agents["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| (i["id"].clone(), i["scope"].clone()))
+        .collect();
+    assert!(scopes.contains(&(json!("reviewer"), json!("user"))));
+    assert!(scopes.contains(&(json!("planner"), json!("builtin"))));
+    let one = fox.library("agents", "reviewer").await.unwrap();
+    assert_eq!(one["prompt"], "Review the change.");
+    fox.change(
+        "item_save",
+        &json!({"of": "agents", "id": "reviewer", "name": "Reviewer", "description": "mine", "prompt": "Review it well."}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        body_of(&l, "PUT /api/agents/reviewer"),
+        json!({"metadata": {"name": "Reviewer", "description": "mine"}, "prompt": "Review it well."})
+    );
+    assert!(fox
+        .change(
+            "item_save",
+            &json!({"of": "agents", "id": "reviewer", "prompt": " "})
+        )
+        .await
+        .is_err());
+    assert!(fox
+        .change("item_remove", &json!({"of": "secrets", "id": "x"}))
+        .await
+        .is_err());
+    let skills = fox.library("skills", "").await.unwrap();
+    assert_eq!(skills["items"][0]["scope"], "builtin");
+    assert_eq!(skills["items"][0]["read_only"], true);
+    fox.change("skill_toggle", &json!({"id": "summarize"}))
+        .await
+        .unwrap();
+    let wf = fox.library("workflows", "review").await.unwrap();
+    assert!(wf["json"].as_str().unwrap().contains("entryStep"));
+    // an MCP server: its environment goes to OpenFox, and only its names come back
+    let detail = fox
+        .change(
+            "mcp_test",
+            &json!({"name": "gh", "command": "npx -y gh-mcp"}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(detail, "OpenFox reaches it: issues, pulls");
+    fox.change(
+        "mcp_add",
+        &json!({"name": "gh", "command": "npx -y gh-mcp", "env": "GITHUB_TOKEN=ghp_s3cret"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        body_of(&l, "POST /api/mcp/servers")["env"],
+        json!({"GITHUB_TOKEN": "ghp_s3cret"})
+    );
+    let mcp = fox.library("mcp", "").await.unwrap();
+    assert!(!mcp.to_string().contains("ghp_s3cret"), "{mcp}");
+    assert_eq!(mcp["servers"][0]["env"], json!(["GITHUB_TOKEN"]));
+    fox.change(
+        "mcp_tool",
+        &json!({"name": "gh", "tool": "issues", "enabled": false}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        body_of(&l, "PUT /api/mcp/servers/gh/tools/issues"),
+        json!({"enabled": false})
+    );
+    fox.change("mcp_toggle", &json!({"name": "gh", "disabled": true}))
+        .await
+        .unwrap();
+    fox.change("mcp_remove", &json!({"name": "gh"}))
+        .await
+        .unwrap();
+    let tools = fox.library("tools", "").await.unwrap();
+    assert_eq!(tools["tools"][1]["mcpServer"], "gh");
+    // settings: only the ones Inari shows, checked before they go
+    fox.change(
+        "setting",
+        &json!({"key": "agent.retryPatterns", "value": {"patterns": [{"field": "content", "pattern": "^Error", "action": "retry", "active": true}], "maxRetriesPerTurn": 3}}),
+    )
+    .await
+    .unwrap();
+    fox.change(
+        "setting",
+        &json!({"key": "llm.dynamicSystemPrompt", "value": true}),
+    )
+    .await
+    .unwrap();
+    assert!(fox
+        .change(
+            "setting",
+            &json!({"key": "search.tavilyApiKey", "value": "x"})
+        )
+        .await
+        .is_err());
+    let settings = fox.library("settings", "").await.unwrap();
+    assert_eq!(settings["agent.retryPatterns"]["maxRetriesPerTurn"], 3);
+    assert_eq!(settings["llm.dynamicSystemPrompt"], true);
+    assert_eq!(settings["agent.autoContinueOnBoot"], false);
 }

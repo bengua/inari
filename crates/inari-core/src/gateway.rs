@@ -257,6 +257,18 @@ fn s(p: &Value, k: &str) -> String {
     }
 }
 
+/// OpenFox panel actions a pass may not do: they run commands, or OpenFox sessions outside the
+/// thread (a task), that the pass's supervision does not see.
+const OWNER_ONLY: [&str; 7] = [
+    "task_add",
+    "task_move",
+    "task_remove",
+    "dev_config",
+    "dev_start",
+    "dev_restart",
+    "instructions",
+];
+
 fn percent_decode(text: &str) -> String {
     let bytes = text.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -1158,6 +1170,33 @@ impl Gateway {
                 _ => send_json(w, 404, &json!({"error": "not found"})).await,
             };
         }
+        if get && r.path == "/api/openfox/library" {
+            // part of a core's OpenFox library: its agents, skills, MCP servers… (the owner's)
+            if !matches!(access, Access::Owner) {
+                return send_json(w, 403, &json!({"error": "the core's owner sees this"})).await;
+            }
+            let q = |k: &str| r.query.get(k).cloned().unwrap_or_default();
+            if !q("node")
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "-_".contains(c))
+                || q("node").is_empty()
+            {
+                return send_json(w, 400, &json!({"error": "bad request"})).await;
+            }
+            let reply = self
+                .ask(
+                    &format!("node.{}.openfox.library", q("node")),
+                    json!({"harness": q("harness"), "kind": q("kind"), "id": q("id")}),
+                    Duration::from_secs(15),
+                )
+                .await;
+            return send_json(
+                w,
+                200,
+                &reply.unwrap_or(json!({"ok": false, "error": "the core did not answer"})),
+            )
+            .await;
+        }
         if get && r.path.starts_with("/api/logo/") {
             return self.logo(w, r.path.rsplit('/').next().unwrap_or("")).await;
         }
@@ -1382,10 +1421,17 @@ impl Gateway {
             | "/api/rename"
             | "/api/pin"
             | "/api/openfox/thread" => {
-                if self.owned(access, &s(&d, "agent")) {
-                    Ok(d)
-                } else {
+                // what runs commands or OpenFox sessions Inari does not supervise is the owner's
+                let unsupervised = (path == "/api/message"
+                    && d.get("workflow").is_some_and(|w| !w.is_null()))
+                    || (path == "/api/openfox/thread"
+                        && OWNER_ONLY.contains(&s(&d, "action").as_str()));
+                if !self.owned(access, &s(&d, "agent")) {
                     Err((403, "not your thread"))
+                } else if unsupervised {
+                    Err((403, "the core's owner does this"))
+                } else {
+                    Ok(d)
                 }
             }
             "/api/harness" => {
@@ -1549,6 +1595,10 @@ impl Gateway {
                 }
                 if let Some(a) = d.get("attachments").filter(|a| a.is_array()) {
                     p["attachments"] = a.clone();
+                }
+                // an OpenFox workflow launched with it (the node checks it)
+                if let Some(w) = d.get("workflow").filter(|w| w.is_object()) {
+                    p["workflow"] = w.clone();
                 }
                 self.bus.publish(&format!("agent.{}.run", s(d, "agent")), p);
                 ok
@@ -1728,7 +1778,7 @@ impl Gateway {
             }
             "/api/openfox/thread" => {
                 // something done on a thread's OpenFox panel; the thread's node does it
-                const ACTIONS: [&str; 12] = [
+                const ACTIONS: [&str; 25] = [
                     "agent",
                     "effort",
                     "danger",
@@ -1741,6 +1791,19 @@ impl Gateway {
                     "retry_now",
                     "retry",
                     "refresh",
+                    "workflow_exit",
+                    "task_add",
+                    "task_move",
+                    "task_remove",
+                    "dev_config",
+                    "dev_start",
+                    "dev_stop",
+                    "dev_restart",
+                    "dev_logs",
+                    "process_stop",
+                    "checkout",
+                    "branch_new",
+                    "instructions",
                 ];
                 if !need(&["agent", "action"]) || !ACTIONS.contains(&s(d, "action").as_str()) {
                     return bad;
@@ -1754,7 +1817,7 @@ impl Gateway {
                 // active provider; a check. The node does it and says how it went.
                 let action = s(d, "action");
                 if !need(&["node", "harness", "action"])
-                    || ![
+                    || !([
                         "set",
                         "login",
                         "activate",
@@ -1765,6 +1828,7 @@ impl Gateway {
                         "provider_refresh",
                     ]
                     .contains(&action.as_str())
+                        || crate::openfox_library::ACTIONS.contains(&action.as_str()))
                 {
                     return bad;
                 }
