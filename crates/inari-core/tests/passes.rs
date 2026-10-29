@@ -288,7 +288,30 @@ async fn a_supervised_guest_has_its_threads_and_nothing_more() {
         "the owner follows the thread"
     );
 
+    // the guest's page keeps an event stream open: revoking the pass ends it
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port))
+        .await
+        .unwrap();
+    stream
+        .write_all(format!("GET /events?{guest} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n").as_bytes())
+        .await
+        .unwrap();
+    let mut first = [0u8; 4096];
+    let n = stream.read(&mut first).await.unwrap();
+    assert!(String::from_utf8_lossy(&first[..n]).contains("200 OK"));
     call(port, owner, "/api/pass/revoke", Some(json!({"id": pid}))).await;
+    let ended = tokio::time::timeout(Duration::from_secs(20), async {
+        let mut buf = [0u8; 65536];
+        loop {
+            match stream.read(&mut buf).await {
+                Ok(0) | Err(_) => return true,
+                Ok(_) => {}
+            }
+        }
+    })
+    .await;
+    assert_eq!(ended, Ok(true), "the revoked pass's stream ends");
     until("the revocation", || {
         g.snapshot_for(&inari_core::gateway::Access::Owner)["passes"]
             .as_array()

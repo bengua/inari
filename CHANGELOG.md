@@ -284,6 +284,9 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Fixed
 
+- **A revoked pass's open page goes dark at once.** The page's event stream checked the pass when
+  it opened only: a pass revoked or expired meanwhile kept receiving its own threads' updates until
+  the page was closed. The stream now ends as soon as the pass no longer holds.
 - **A turn that cannot run says why, in the thread.** When an agent could not start or answer
   (OpenFox not running, a wrong address, a missing sign-in, a model refused), the reason was only
   written to the thread's journal and a line of the activity feed: the message seemed to go

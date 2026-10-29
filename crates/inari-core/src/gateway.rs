@@ -984,6 +984,20 @@ impl Gateway {
         }
     }
 
+    /// Whether what opened a long request still holds: a pass revoked or expired meanwhile
+    /// ends the page's event stream at once, not only its next request.
+    fn still(&self, access: &Access) -> bool {
+        match access {
+            Access::Owner => true,
+            Access::Guest(p) => {
+                let st = self.state.lock().expect("not poisoned");
+                st.passes
+                    .iter()
+                    .any(|q| q["id"] == p["id"] && crate::passes::valid(q))
+            }
+        }
+    }
+
     /// The owner's token, given in the `Authorization` header (or, for old clients, `?token=`).
     fn token_given(&self, r: &Request) -> bool {
         let header = r
@@ -2069,6 +2083,9 @@ impl Gateway {
                 },
                 _ = tick => ": keep-alive\n\n".to_string(),
             };
+            if !self.still(&access) {
+                return Ok(()); // revoked: nothing more goes to this page
+            }
             w.write_all(frame.as_bytes()).await?;
             w.flush().await?;
         }
