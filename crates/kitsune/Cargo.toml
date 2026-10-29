@@ -11,6 +11,9 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+# Encryption at rest for audio files: pure Rust (RustCrypto), no C, static-build clean.
+aes-gcm = "0.10"
+getrandom = "0.2"
 
 [dev-dependencies]
 tempfile = "3"

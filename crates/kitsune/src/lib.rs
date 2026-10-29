@@ -2,12 +2,14 @@
 //! meaning, brought back by a time or a place. Everything lives in one local SQLite store,
 //! whose schema moves forward and back by numbered migrations (`migrations/`).
 
+pub mod crypto;
 pub mod mcp;
 pub mod migrate;
 pub mod search;
 pub mod store;
 pub mod triggers;
 
+pub use crypto::{AudioVault, Key};
 pub use migrate::{migrate_to, version, LATEST};
 pub use search::{cosine, haversine_m, Filters, Geo, Hit, SearchOptions};
 pub use store::{AudioRef, NewNote, Note, Store, Trigger};
