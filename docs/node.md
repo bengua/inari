@@ -77,6 +77,20 @@ are all configuration, and every default is empty.
   `mcp_add`, `mcp_test`, `mcp_toggle`, `mcp_tool`, `mcp_remove`, `setting`;
   `src/openfox_library.rs`). An MCP server's environment and headers go to OpenFox and are never
   read back, only their names.
+- **Inari's local engine.** `"inari": {"kind": "local"}` runs the agent in the core itself: the
+  model on an OpenAI-compatible server (plain `http://`, on the machine or the private network),
+  the tools (read_file, write_file, edit_file, run_command) in the thread's folder
+  (`src/engine/`). Its settings are the interface's, in `<data_dir>/engine/<harness>/settings.json`
+  (`providers`, `model` as `<provider>/<model>`, `mode` builder or planner, `context_window`,
+  `max_steps`, `turn_timeout`, `temperature`, `instructions`); a provider's key is kept apart in
+  `keys.json` (mode 600) and never sent back. Actions: `node.<id>.engine.{set, provider_add,
+  provider_remove, provider_test}` (`POST /api/engine`, owner only); its state is
+  `capabilities.engine`.
+- **Harnesses from the interface.** `node.<id>.harness.{add, remove, test}` (`POST /api/harnesses`,
+  owner only) add, replace, take away or try a harness while the node runs; the interface's choices
+  are kept in `<data_dir>/harnesses.json` (a spec by name, or null for one of the configuration's
+  taken away) and read on top of the configuration at start. `capabilities.harness_specs` lists
+  them with where each comes from and whether its program is installed.
 - **Getting a model ready.** A harness may name a command run before each turn of a thread
   whose model was chosen, with `{model}` replaced by the model id:
   `"prepare": ["load-model", "{model}"], "prepare_timeout": 600`. It is how a local model is
@@ -140,6 +154,9 @@ are all configuration, and every default is empty.
 | `agent.<id>.fork` `{new_thread, upto}` | fork on the holder |
 | `agent.merge` `{target, source}` | union two journals on the same holder |
 | `agent.history.request` `{agent}` | the holder replies `agent.<id>.history` |
+| `agent.<id>.openfox` `{action, …}` | something done on the thread's Plan tab (OpenFox or the local engine): criteria, an answer, a task, the dev server, a branch, `git_clone` `{forge, repo, branch}`, `git_publish` `{forge, repo, base, title, body}` |
+| `node.<id>.engine.<action>` `{harness, …}` | a local engine's settings: `set`, `provider_add`, `provider_remove`, `provider_test`, `forge_add` `{id, name, kind, url, user, token, ssh, api}`, `forge_remove` `{id}`, `forge_test`; the result goes on `node.<id>.harness.result` |
+| `node.<id>.openfox.library` `{harness, kind, id, reply}` | part of the library of OpenFox or of a local engine (agents, skills, commands, workflows, mcp, tools) |
 
 Long work runs off the bus: a handler that blocks stalls the link reader, and an agent
 waiting for an approval would be waiting for the very frame it blocks (found by a test).

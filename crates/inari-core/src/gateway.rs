@@ -105,6 +105,8 @@ struct State {
     drafts: HashMap<String, String>,
     /// The last OpenFox setting changed from the interface, by "node/harness": done or why not.
     openfox_results: BTreeMap<String, Value>,
+    /// The last harness change asked of each core, with how it went (owner only).
+    harness_results: BTreeMap<String, Value>,
     /// What each OpenFox thread shows beside its conversation (`panel.<agent>`).
     panels: HashMap<String, Value>,
 }
@@ -259,7 +261,7 @@ fn s(p: &Value, k: &str) -> String {
 
 /// OpenFox panel actions a pass may not do: they run commands, or OpenFox sessions outside the
 /// thread (a task), that the pass's supervision does not see.
-const OWNER_ONLY: [&str; 7] = [
+const OWNER_ONLY: [&str; 9] = [
     "task_add",
     "task_move",
     "task_remove",
@@ -267,6 +269,9 @@ const OWNER_ONLY: [&str; 7] = [
     "dev_start",
     "dev_restart",
     "instructions",
+    // with the owner's forge token
+    "git_clone",
+    "git_publish",
 ];
 
 fn percent_decode(text: &str) -> String {
@@ -552,6 +557,15 @@ impl Gateway {
                 .retain(|n| n.get("node_id").and_then(Value::as_str) != Some(node.as_str()));
         });
         self.on("teleport.result", |_, st, m| st.results.push(m.payload));
+        self.on("node.*.harness.result", |_, st, m| {
+            let key = s(&m.payload, "node");
+            let mut r = m.payload;
+            r["at"] = json!(std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0));
+            st.harness_results.insert(key, r);
+        });
         self.on("node.*.openfox.result", |_, st, m| {
             let key = format!("{}/{}", s(&m.payload, "node"), s(&m.payload, "harness"));
             let mut r = m.payload;
@@ -667,6 +681,7 @@ impl Gateway {
             "approvals": st.approvals.values().cloned().collect::<Vec<_>>(),
             "update_jobs": st.update_jobs,
             "openfox_results": st.openfox_results,
+            "harness_results": st.harness_results,
         })
     }
 
@@ -764,7 +779,7 @@ impl Gateway {
                                            "harness_modes": modes, "harness_commands": commands});
             }
         }
-        for k in ["moves", "update_jobs", "openfox_results"] {
+        for k in ["moves", "update_jobs", "openfox_results", "harness_results"] {
             snap[k] = json!({});
         }
         snap["results"] = json!([]);
@@ -968,6 +983,20 @@ impl Gateway {
                     .find(|p| p["token_sha"] == hash.as_str() && crate::passes::valid(p))
                     .cloned()
                     .map(Access::Guest)
+            }
+        }
+    }
+
+    /// Whether what opened a long request still holds: a pass revoked or expired meanwhile
+    /// ends the page's event stream at once, not only its next request.
+    fn still(&self, access: &Access) -> bool {
+        match access {
+            Access::Owner => true,
+            Access::Guest(p) => {
+                let st = self.state.lock().expect("not poisoned");
+                st.passes
+                    .iter()
+                    .any(|q| q["id"] == p["id"] && crate::passes::valid(q))
             }
         }
     }
@@ -1778,7 +1807,9 @@ impl Gateway {
             }
             "/api/openfox/thread" => {
                 // something done on a thread's OpenFox panel; the thread's node does it
-                const ACTIONS: [&str; 25] = [
+                const ACTIONS: [&str; 27] = [
+                    "git_clone",
+                    "git_publish",
                     "agent",
                     "effort",
                     "danger",
@@ -1810,6 +1841,56 @@ impl Gateway {
                 }
                 self.bus
                     .publish(&format!("agent.{}.openfox", s(d, "agent")), d.clone());
+                ok
+            }
+            "/api/engine" => {
+                // a local engine's setting, a provider of it (its key goes to the core only)
+                let action = s(d, "action");
+                let node = s(d, "node");
+                if !need(&["node", "harness", "action"])
+                    || ![
+                        "set",
+                        "provider_add",
+                        "provider_remove",
+                        "provider_test",
+                        "forge_add",
+                        "forge_remove",
+                        "forge_test",
+                    ]
+                    .contains(&action.as_str())
+                    || !node
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || "-_".contains(c))
+                {
+                    return bad;
+                }
+                let mut p = d.clone();
+                if let Some(o) = p.as_object_mut() {
+                    o.remove("node");
+                    o.remove("action");
+                }
+                self.bus.publish(&format!("node.{node}.engine.{action}"), p);
+                ok
+            }
+            "/api/harnesses" => {
+                // a harness added, changed, taken away or tried on a core (Claude Code, Codex…)
+                let action = s(d, "action");
+                let node = s(d, "node");
+                if !need(&["node", "action"])
+                    || !["add", "remove", "test"].contains(&action.as_str())
+                    || !node
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || "-_".contains(c))
+                {
+                    return bad;
+                }
+                let mut p = d.clone();
+                if let Some(o) = p.as_object_mut() {
+                    o.remove("node");
+                    o.remove("action");
+                }
+                self.bus
+                    .publish(&format!("node.{node}.harness.{action}"), p);
                 ok
             }
             "/api/openfox" => {
@@ -2015,6 +2096,9 @@ impl Gateway {
                 },
                 _ = tick => ": keep-alive\n\n".to_string(),
             };
+            if !self.still(&access) {
+                return Ok(()); // revoked: nothing more goes to this page
+            }
             w.write_all(frame.as_bytes()).await?;
             w.flush().await?;
         }

@@ -1,0 +1,139 @@
+{
+  "metadata": {
+    "id": "default",
+    "name": "Build & Verify",
+    "description": "Standard build-verify loop. Builder implements criteria, verifier checks them, a reviewer looks at the diff. (From OpenFox, MIT; the workspace steps removed: an Inari thread has its own folder.)",
+    "version": "1.3.2",
+    "color": "#3b82f6"
+  },
+  "entryStep": "build",
+  "settings": {
+    "maxIterations": 12
+  },
+  "steps": [
+    {
+      "id": "build",
+      "name": "Implement",
+      "type": "agent",
+      "phase": "build",
+      "agentId": "builder",
+      "subGroup": "build",
+      "prompt": "Implement the task and make sure you fulfil the {{criteriaCount}} criteria. Mark each criterion as complete using session_metadata with action update and status completed.\n\nNote: **Do not** call the `code_reviewer` or `verifier` sub-agents yourself via `call_sub_agent` — both run automatically later in this workflow (verify → code review) with the full diff in context; doing it here duplicates work.",
+      "nudgePrompt": "Continue working on the acceptance criteria. {{reason}}.\n\n{{verifierFindings}}\nFix the issues above, then mark each failed criterion as **completed** using session_metadata with action update and status completed. Do not use \"verified\" — that status is set by the verifier, not by you.\n\nReminder: don't self-invoke `code_reviewer`/`verifier` — the workflow runs them later.",
+      "transitions": [
+        {
+          "when": {
+            "type": "metadata_all_in",
+            "key": "criteria",
+            "field": "status",
+            "values": [
+              "completed",
+              "passed"
+            ]
+          },
+          "goto": "verify"
+        },
+        {
+          "when": {
+            "type": "always"
+          },
+          "goto": "build"
+        }
+      ]
+    },
+    {
+      "id": "verify",
+      "name": "Verifier",
+      "type": "sub_agent",
+      "phase": "verification",
+      "subAgentType": "verifier",
+      "subGroup": "verify",
+      "prompt": "## Criteria\n{{criteriaList}}\n\n## Modified Files\n{{modifiedFiles}}\n\nVerify each criterion marked [NEEDS VERIFICATION]. Read the code, run tests if applicable, then use session_metadata to update each criterion's status to passed or failed.",
+      "transitions": [
+        {
+          "when": {
+            "type": "metadata_all_match",
+            "key": "criteria",
+            "field": "status",
+            "value": "passed"
+          },
+          "goto": "code_review"
+        },
+        {
+          "when": {
+            "type": "always"
+          },
+          "goto": "build",
+          "subGroup": "verify"
+        }
+      ]
+    },
+    {
+      "id": "code_review",
+      "name": "Code Review",
+      "type": "sub_agent",
+      "phase": "verification",
+      "subAgentType": "code_reviewer",
+      "subGroup": "code review",
+      "prompt": "## Modified Files\n{{modifiedFiles}}\n\nReview the **git diff** of the modified files rather than reading the full files. Focus on:\n1. **UX interaction** — does this feel good to use? Any rough edges, confusing behavior, or unnecessary friction?\n2. **Project bloat** — does this follow project conventions? Is it maintainable? Does it add unnecessary complexity?\n\nUse session_metadata to create review_findings entries for any issues you find (status: open). If re-reviewing existing findings, update their status to resolved or dismissed as appropriate. Then call return_value with your findings.",
+      "transitions": [
+        {
+          "when": {
+            "type": "always"
+          },
+          "goto": "finalize"
+        }
+      ]
+    },
+    {
+      "id": "finalize",
+      "name": "Finalize",
+      "type": "agent",
+      "phase": "verification",
+      "agentId": "builder",
+      "subGroup": "code review",
+      "prompt": "## Code Review Findings\n{{stepOutput.content}}\n\nThe code reviewer has provided feedback above. Review it and make any final adjustments if needed.\n\nFirst, use `session_metadata` with action `get` and key `review_findings` to see the existing findings and their IDs. Then use `session_metadata` with action `update` and the correct ID to resolve or dismiss each one:\n- If you fixed the issue, set status to **resolved**.\n- If the finding is not applicable, set status to **dismissed**.\n\nAll findings must be resolved or dismissed before you can finish. When you're satisfied, call step_done().",
+      "nudgePrompt": "The step cannot complete because not all review findings have been resolved or dismissed. Use `session_metadata` with action `get` and key `review_findings` to check the current status of each finding by ID, then use `session_metadata` with action `update` to set each one to **resolved** or **dismissed**. Call step_done() once all findings are handled.",
+      "transitions": [
+        {
+          "when": {
+            "type": "metadata_all_in",
+            "key": "review_findings",
+            "field": "status",
+            "values": [
+              "resolved",
+              "dismissed"
+            ]
+          },
+          "goto": "summarize"
+        },
+        {
+          "when": {
+            "type": "always"
+          },
+          "goto": "finalize"
+        }
+      ]
+    },
+    {
+      "id": "summarize",
+      "name": "Summarize",
+      "type": "agent",
+      "phase": "verification",
+      "agentId": "builder",
+      "subGroup": "summarize",
+      "prompt": "Produce a concise summary of what was accomplished in this session. Include:\n- What was implemented or fixed\n- Key files modified\n- Any notable decisions or tradeoffs\n- **What to test** — a short, actionable mini-tutorial from the user's perspective:\n  - Concrete UI flows or interactions to try, with the expected outcome\n  - Edge cases worth poking at\n  - One action per line, numbered, so the user can follow along without extra context\n\nCall step_done() when done.",
+      "transitions": [
+        {
+          "when": {
+            "type": "always"
+          },
+          "goto": "$done"
+        }
+      ]
+    }
+  ],
+  "startCondition": {
+    "type": "always"
+  }
+}

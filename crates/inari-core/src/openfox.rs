@@ -1413,7 +1413,9 @@ impl OpenFoxHarness {
             CALL,
         )
         .await
-        .map_err(|e| format!("{method} {path}: OpenFox does not answer at {url} ({e})"))
+        .map_err(|e| {
+            format!("OpenFox does not answer at {url}: is it running? (Settings → OpenFox; {method} {path}: {e})")
+        })
     }
 
     /// A REST call whose answer reads as `T`.
@@ -1424,6 +1426,11 @@ impl OpenFoxHarness {
         body: Option<Value>,
     ) -> Result<T, String> {
         let (status, raw) = self.raw(method, path, body, true).await?;
+        if status == 401 {
+            return Err(
+                "OpenFox asks this core to sign in: Settings → OpenFox, its password".into(),
+            );
+        }
         if status >= 400 {
             return Err(format!("{method} {path}: HTTP {status} {}", reason(&raw)));
         }
@@ -1433,6 +1440,11 @@ impl OpenFoxHarness {
     /// A REST call whose answer does not matter beyond its status.
     pub(crate) async fn act(&self, method: &str, path: &str, body: Value) -> Result<(), String> {
         let (status, raw) = self.raw(method, path, Some(body), true).await?;
+        if status == 401 {
+            return Err(
+                "OpenFox asks this core to sign in: Settings → OpenFox, its password".into(),
+            );
+        }
         if status >= 400 {
             return Err(format!("{method} {path}: HTTP {status} {}", reason(&raw)));
         }
@@ -1763,7 +1775,7 @@ impl OpenFoxHarness {
     pub async fn turn(&self, t: &Turn) -> RunSummary {
         if let Err(e) = prepare_model(&self.prepare, self.prepare_timeout, &self.extra_env, t).await
         {
-            t.append(
+            t.note(
                 EventKind::Checkpoint,
                 json!({"reason": "model_unavailable", "detail": e}),
             );
@@ -1779,7 +1791,7 @@ impl OpenFoxHarness {
         match out {
             Ok(Ok(s)) => s,
             Ok(Err(e)) => {
-                t.append(
+                t.note(
                     EventKind::Checkpoint,
                     json!({"reason": "harness_error", "detail": e}),
                 );
@@ -1795,7 +1807,7 @@ impl OpenFoxHarness {
                         .act("POST", &format!("/api/sessions/{sid}/stop"), json!({}))
                         .await;
                 }
-                t.append(EventKind::Checkpoint, json!({"reason": "harness_timeout"}));
+                t.note(EventKind::Checkpoint, json!({"reason": "harness_timeout"}));
                 RunSummary {
                     stopped: "error".into(),
                     error: format!("OpenFox did not finish within {}s", limit.as_secs()),
@@ -2995,6 +3007,12 @@ pub struct ProjectView {
     pub processes: Vec<proto::Process>,
     pub branches: Vec<String>,
     pub branch: String,
+    /// The folder is a Git repository (the local engine says; OpenFox gives its branches).
+    pub is_git: bool,
+    /// The Git forges this core publishes to (the local engine's): id, name, kind.
+    pub forges: Vec<Value>,
+    /// The forge and repository the folder belongs to, and its last pull request.
+    pub git: Option<Value>,
 }
 
 impl Panel {
@@ -3086,7 +3104,7 @@ impl From<&proto::ContextState> for ContextView {
 
 /// What an edit or a write changes, as diff lines under a `@@ path` header (at most DIFF_LINES):
 /// the thread shows it with the tool's result.
-fn edit_diff(tool: &str, args: &Value) -> Option<String> {
+pub(crate) fn edit_diff(tool: &str, args: &Value) -> Option<String> {
     let path = args.get("path").and_then(Value::as_str).unwrap_or("");
     let lines = |text: &str, mark: char| -> Vec<String> {
         text.lines().map(|l| format!("{mark} {l}")).collect()

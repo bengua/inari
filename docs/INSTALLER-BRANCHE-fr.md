@@ -228,7 +228,7 @@ sleep 5
 systemctl --user is-active inari-core.service
 journalctl --user -u inari-core.service -n 20 --no-pager | grep -i "openfox" || echo "aucune erreur OpenFox"
 ```
-Attendu : `active`, puis `aucune erreur OpenFox`. Une ligne `openfox: … HTTP 401` veut dire que le jeton manque :
+Attendu : `active`, puis `aucune erreur OpenFox`. Une ligne `openfox: OpenFox asks this core to sign in` veut dire que le jeton manque :
 Ben se connecte depuis l'interface (étape 10, point 10). Toute autre erreur `openfox:` : envoie-la à Ben.
 
 **Retour en arrière** (seulement si quelque chose ne va pas) :
@@ -296,6 +296,12 @@ Ouvrir la webapp, puis :
 14. Réglages → OpenFox → « La bibliothèque d'OpenFox » : Agents, Skills, Commandes, Workflows, Serveurs MCP, Outils,
     « Instructions et réglages ». Un serveur MCP ajouté avec une variable (ex. `GITHUB_TOKEN=…`) affiche seulement
     « Ses secrets (GITHUB_TOKEN) restent chez OpenFox ».
+15. Réglages → Agents et abonnements → `inari` (le moteur local) → « Réglages » : « Forges Git » (ajouter la forge
+    Forgejo de l'atelier et/ou GitHub, avec le jeton du compte de publication ; « Tester » répond « Connecté en
+    tant que … ») et « La bibliothèque du moteur » (Agents, Skills, Commandes, Workflows, Serveurs MCP, Outils).
+16. Dans un fil du moteur local, onglet « Plan » : critères, workflow « Build & Verify », tableau des tâches,
+    serveur de dev ; « Forge Git » : « Le cloner ici » (dossier pas encore Git), puis, sur une branche à soi,
+    « Pousser et ouvrir une pull request ». Le lien de la pull request s'affiche ensuite.
 
 ## Étape 11 — Le compte rendu à envoyer à Ben
 

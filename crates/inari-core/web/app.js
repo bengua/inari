@@ -255,7 +255,7 @@ function fillAutoChip(a) { const chip = $("autoChip"), guest = snap.ui && snap.u
   chip.classList.toggle("on", !!a.auto); chip.textContent = a.auto ? "⚡ " + t("Auto") : t("Ask first"); chip.title = a.auto ? t("This thread acts without asking. Click to ask again.") : t("The agent asks before sensitive actions. Click to let it act without asking."); }
 $("autoChip").onclick = () => { const a = snap.agents[selected]; if (!a) return; api("/api/auto", { agent: selected, auto: !a.auto }); toast(a.auto ? t("The agent will ask again") : t("Auto mode: the agent acts without asking")); };
 /* Harness updates, as the old sidebar badge: a download mark and the logos of what is out of date, on every core. */
-const HARNESS = { claude: ["claude", "Claude Code"], gemini: ["gemini", "Gemini CLI"], openfox: ["local", "OpenFox"] };
+const HARNESS = { claude: ["claude", "Claude Code"], codex: ["openai", "Codex"], gemini: ["gemini", "Gemini CLI"], kimi: ["kimi", "Kimi CLI"], openfox: ["local", "OpenFox"] };
 function harnessName(h) { return (HARNESS[h] || [h, h])[1]; }
 function updateEntries() { const out = [], jobs = snap.update_jobs || {};
   for (const n of snap.nodes || []) for (const [h, u] of Object.entries((n.capabilities || {}).updates || {})) { const job = jobs[n.node_id + "/" + h], v = { ...u, ...(job || {}) }; out.push({ node: n.node_id, harness: h, ...v }); }
@@ -292,6 +292,10 @@ $("usageBtn").onclick = () => { store.set("usageOpen", !store.get("usageOpen", f
 $("pill").onclick = () => openPop($("pill"), updatesPanel);
 $("gear").onclick = () => openPop($("gear"), (pop) => { pop.insertAdjacentHTML("beforeend", `<h3>${esc(t("Appearance"))}</h3>`); const seg = document.createElement("div"); seg.className = "seg"; for (const th of ["auto", "light", "dark"]) { const b = document.createElement("button"); b.className = "btn small" + (store.get("theme", "auto") === th ? " on" : ""); b.textContent = t(th); b.onclick = () => { theme(th); pop.classList.remove("open"); }; seg.append(b); } pop.append(seg);
   pop.insertAdjacentHTML("beforeend", `<h3 style="margin-top:12px">${esc(t("Language"))}</h3>`); const langs = document.createElement("div"); langs.className = "seg"; for (const [code, name] of Object.entries(LANGS)) { const b = document.createElement("button"); b.className = "btn small" + (LANG === code ? " on" : ""); b.textContent = name; b.lang = code; b.onclick = () => { if (code === LANG) return; setLang(code); saveDraft(); location.reload(); }; langs.append(b); } pop.append(langs);
+  // each core's agents and subscriptions (Claude Code, Codex, Gemini, Kimi, OpenFox…), set here
+  const cores = (snap ? snap.nodes : []).filter((n) => (n.capabilities || {}).harness_specs);
+  if (cores.length) { pop.insertAdjacentHTML("beforeend", `<h3 style="margin-top:12px">${esc(t("Agents and subscriptions"))}</h3>`); const box = document.createElement("div"); box.className = "seg";
+    for (const n of cores) { const b = document.createElement("button"); b.className = "btn small"; b.textContent = t("Agents of {name}", { name: n.node_id }); b.onclick = () => { pop.classList.remove("open"); harnessSheet(n.node_id); }; box.append(b); } pop.append(box); }
   // OpenFox, on each core that drives it natively: its settings live here, not in a file
   const foxes = (snap ? snap.nodes : []).flatMap((n) => Object.keys((n.capabilities || {}).openfox || {}).map((h) => [n.node_id, h]));
   if (foxes.length) { pop.insertAdjacentHTML("beforeend", `<h3 style="margin-top:12px">OpenFox</h3>`); const box = document.createElement("div"); box.className = "seg";
@@ -415,6 +419,16 @@ function foxWork(p, body, el, sec, mark) {
   if ((pr.branches || []).length) { sec(t("Branch")); const ctl = el("div", "pctl"), l = el("label", "col"), pick = document.createElement("select"); l.append(el("span", "", t("Switch to")));
     for (const b of pr.branches) pick.append(new Option(b, b, false, b === pr.branch)); pick.onchange = () => foxAct("checkout", { branch: pick.value }); l.append(pick); ctl.append(l); body.append(ctl);
     const nb = el("div", "critedit"), r = el("div", "row2"), name = el("input"); name.type = "text"; name.placeholder = t("A new branch"); r.append(name, btn(t("Create"), () => { if (name.value.trim()) foxAct("branch_new", { name: name.value.trim() }); })); nb.append(r); body.append(nb); }
+  if ((pr.forges || []).length && pr.on_disk) { sec(t("Git forge")); const g = pr.git || {}, ed = el("div", "critedit"), field = (ph, value) => { const i = el("input"); i.type = "text"; i.placeholder = ph; i.value = value || ""; i.spellcheck = false; const r = el("div", "row2"); r.append(i); ed.append(r); return i; };
+    const fr = el("div", "row2"), forge = document.createElement("select"); for (const f of pr.forges) forge.append(new Option(f.name || f.id, f.id, false, f.id === g.forge)); fr.append(forge); ed.append(fr);
+    const repo = field(t("owner/name"), g.repo);
+    if (!pr.is_git) { const branch = field(t("Branch (empty: the default one)"));
+      const r = el("div", "row2"); r.append(btn(t("Clone it here"), () => { if (repo.value.trim()) foxAct("git_clone", { forge: forge.value, repo: repo.value.trim(), branch: branch.value.trim() }); }, "go")); ed.append(r); }
+    else { if (g.pull_request) { const a = el("a", "", g.pull_request); a.href = g.pull_request; a.target = "_blank"; a.rel = "noopener"; const line = el("p", "pstate", t("Last pull request:") + " "); line.append(a); body.append(line); }
+      const base = field(t("Into the branch"), "main"), title = field(t("The pull request's title")), desc = el("textarea"); desc.rows = 3; desc.placeholder = t("What it changes (optional)"); ed.append(desc);
+      const r = el("div", "row2"); r.append(btn(t("Push and open a pull request"), () => { if (!repo.value.trim() || !title.value.trim()) return toast(t("A repository and a title")); foxAct("git_publish", { forge: forge.value, repo: repo.value.trim(), base: base.value.trim(), title: title.value.trim(), body: desc.value }); }, "go")); ed.append(r);
+      body.append(el("p", "pstate", t("The branch {name} goes to the forge with its token; the model never has it.", { name: pr.branch || "" }))); }
+    body.append(ed); }
   sec(t("This project's instructions")); const said = pr.instructions || "";
   const ins = el("p", "pstate", said ? (said.length > 160 ? said.slice(0, 160) + "…" : said) : t("None: OpenFox follows its own and the ones for every project.")); ins.append(" ", btn(t("Edit"), () => textSheet(t("This project's instructions"), said, t("OpenFox adds them to every message of this project."), (text) => foxAct("instructions", { text })))); body.append(ins); }
 /* A text to edit in a sheet (instructions, a prompt): Save gives it back. */
@@ -561,6 +575,100 @@ async function foxSettings(node, harness) { const data = await foxRead(node, har
   form.append(foxBtn(t("Save the patterns"), () => { draft.maxRetriesPerTurn = Math.max(0, Math.min(100, Number(max.value) || 0)); draft.patterns = draft.patterns.filter((x) => x.pattern.trim()); set("agent.retryPatterns", draft); }, "go"));
   sheet(t("OpenFox's settings"), [], t("Kept by OpenFox itself, for every thread it runs on this core."), form); }
 
+/* ---------- a core's agents and subscriptions: added, tried, installed, taken away from here, never in a file ---------- */
+const AGENT_PRESETS = [
+  { id: "claude", label: "Claude (Claude Code)", name: "claude", command: "claude-agent-acp", npm: "@zed-industries/claude-agent-acp", hint: "Sign in once on this core: run claude, then /login." },
+  { id: "codex", label: "ChatGPT (Codex)", name: "codex", command: "codex-acp", npm: "@zed-industries/codex-acp", hint: "Sign in once on this core: run codex login." },
+  { id: "gemini", label: "Gemini (Gemini CLI)", name: "gemini", command: "gemini --acp", npm: "@google/gemini-cli", hint: "Sign in once on this core: run gemini and choose Login with Google." },
+  { id: "kimi", label: "Kimi (Kimi CLI)", name: "kimi", command: "kimi --acp", npm: "", hint: "Install Kimi CLI on this core, then sign in once: run kimi and /login." },
+  { id: "local", label: "Local engine (Inari)", name: "inari", kind: "local", hint: "Inari's own agent for your local models: its model servers are set in its Settings, once added." },
+  { id: "openfox", label: "OpenFox, a separate process (legacy)", name: "openfox", kind: "openfox", hint: "For an OpenFox you already run. The local engine does the same inside Inari, with no other process." },
+  { id: "acp", label: "Another ACP agent", name: "", command: "", npm: "", hint: "Any agent that speaks the Agent Client Protocol: the command that starts it." },
+];
+async function harnessAct(node, action, extra, after) { const at = Math.floor(Date.now() / 1000);
+  const r = await api("/api/harnesses", { node, action, ...extra }); if (r.error) return;
+  toast(t("Sent to {name}…", { name: node }));
+  if (await until(() => ((snap.harness_results || {})[node] || {}).at >= at, 60000)) { const said = snap.harness_results[node]; const answers = (said.detail || "").match(/^It answers: (.*)$/); toast(said.ok ? (answers ? t("It answers: {models}", { models: answers[1] }) : said.detail ? t(said.detail) : t("Done.")) : said.error); if (after) setTimeout(after, 2500); }
+  else toast(t("{name} did not answer", { name: node })); }
+function harnessSheet(node) { const n = snap.nodes.find((x) => x.node_id === node), caps = (n && n.capabilities) || {}, specs = caps.harness_specs || {}, models = caps.harnesses || {}, ups = caps.updates || {};
+  const form = foxForm(), again = () => harnessSheet(node);
+  for (const [name, h] of Object.entries(specs)) { const preset = AGENT_PRESETS.find((p) => p.id === h.preset || (h.kind === "local" && p.id === "local")), count = (models[name] || []).length, up = ups[name] || {};
+    const bits = [name, preset ? preset.label : h.kind === "openfox" ? "OpenFox" : h.command, h.default ? t("default") : "", !h.installed ? t("not installed") : count ? counted(count, "1 model", "{n} models") : "", up.available ? t("update available") : "", h.source === "configuration" ? t("from the configuration file") : ""].filter(Boolean).join(" · ");
+    const btns = [foxBtn(t("Test"), () => harnessAct(node, "test", { name }))];
+    if (h.npm && (!h.installed || up.available)) btns.push(foxBtn(h.installed ? t("Update") : t("Install"), () => { api("/api/update", { node, harness: name }); toast(t("Installing {name}… it can take a few minutes.", { name })); }, "go"));
+    if (h.kind === "openfox") btns.push(foxBtn(t("Settings"), () => openfoxSheet(node, name)));
+    if (h.kind === "local") btns.push(foxBtn(t("Settings"), () => engineSheet(node, name), "go"));
+    if (!h.default) { const del = foxBtn(t("Remove"), null); del.onclick = twice(del, t("Remove {name}?", { name }), () => harnessAct(node, "remove", { name }, again)); btns.push(del); }
+    foxRow(form, bits, btns); }
+  form.append(Object.assign(document.createElement("h3"), { textContent: t("Add a subscription or an agent") }));
+  const pick = foxField(form, t("Which one"), document.createElement("select")); for (const p of AGENT_PRESETS) pick.append(new Option(t(p.label), p.id));
+  const name = foxField(form, t("Its name on this core"), Object.assign(document.createElement("input"), { type: "text", spellcheck: false }));
+  const command = foxField(form, t("The command that starts it"), Object.assign(document.createElement("input"), { type: "text", spellcheck: false }));
+  const npm = foxField(form, t("Its npm package, to install and update it from here (optional)"), Object.assign(document.createElement("input"), { type: "text", spellcheck: false }));
+  const hint = document.createElement("small"); hint.className = "empty"; form.append(hint);
+  const fill = () => { const p = AGENT_PRESETS.find((x) => x.id === pick.value); name.value = p.name; command.value = p.command || ""; npm.value = p.npm || ""; hint.textContent = t(p.hint);
+    for (const x of [command, npm]) x.parentElement.hidden = !!p.kind; };
+  pick.onchange = fill; fill();
+  const body = () => { const p = AGENT_PRESETS.find((x) => x.id === pick.value); return { name: name.value.trim(), preset: p.id, kind: p.kind || "acp", command: command.value.trim(), npm: npm.value.trim() }; };
+  const row = document.createElement("div"); row.className = "row2"; const add = foxBtn(t("Add"), null, "go");
+  // a name already there is replaced only when asked twice
+  add.onclick = () => { const b = body(); if (specs[b.name] && add.dataset.sure !== b.name) { add.dataset.sure = b.name; add.textContent = t("Replace {name}?", { name: b.name }); return; } harnessAct(node, "add", b, again); };
+  name.oninput = () => { delete add.dataset.sure; add.textContent = t("Add"); };
+  row.append(foxBtn(t("Test"), () => harnessAct(node, "test", body())), add); form.append(row);
+  sheet(t("Agents of {name}", { name: node }), [], t("A subscription is used through its own agent on this core. Added here, it serves from the next message; nothing to edit by hand."), form); }
+/* Inari's local engine on a core: its model servers (vLLM, Ollama, llama.cpp…), its default model and agent, its limits. */
+async function engineAct(node, harness, action, extra) { const at = Math.floor(Date.now() / 1000);
+  const r = await api("/api/engine", { node, harness, action, ...extra }); if (r.error) return;
+  toast(t("Sent to {name}…", { name: node }));
+  if (await until(() => ((snap.harness_results || {})[node] || {}).at >= at, 30000)) { const said = snap.harness_results[node], answers = (said.detail || "").match(/^It answers: (.*)$/);
+    toast(said.ok ? (answers ? t("It answers: {models}", { models: answers[1] }) : said.detail || t("Done.")) : said.error); if (!action.endsWith("_test")) setTimeout(() => engineSheet(node, harness), 2500); }
+  else toast(t("{name} did not answer", { name: node })); }
+function engineSheet(node, harness) { const n = snap.nodes.find((x) => x.node_id === node), st = (((n && n.capabilities) || {}).engine || {})[harness] || {}, form = foxForm();
+  const providers = st.providers || [], models = providers.flatMap((p) => (p.models || []).map((m) => `${p.id}/${m}`));
+  const model = foxField(form, t("Default model"), document.createElement("select")); model.append(new Option(models.length ? t("Choose a model") : t("Add a model server below first"), "", false, !st.model));
+  for (const m of models) model.append(new Option(m, m, false, m === st.model)); if (st.model && !models.includes(st.model)) model.append(new Option(st.model + " · " + t("not answering"), st.model, false, true));
+  const mode = foxField(form, t("Agent a new thread starts with"), document.createElement("select")); for (const m of st.modes || []) mode.append(new Option(`${m.name} — ${m.description}`, m.id, false, m.id === st.mode));
+  const win = foxField(form, t("The model's context, in tokens"), Object.assign(document.createElement("input"), { type: "number", min: 2048, value: st.context_window || 32768 }));
+  const steps = foxField(form, t("At most, model calls a turn"), Object.assign(document.createElement("input"), { type: "number", min: 1, max: 1000, value: st.max_steps || 100 }));
+  const limit = foxField(form, t("Longest turn"), document.createElement("select")); for (const m of [5, 15, 30, 60, 120, 240, 480]) limit.append(new Option(m < 60 ? t("{n} min", { n: m }) : t("{n} h", { n: m / 60 }), m * 60, false, m * 60 === st.turn_timeout));
+  const keep = foxField(form, t("A thread's folder between two turns"), document.createElement("select"));
+  keep.append(new Option(t("Kept on disk (dev server, processes, task board, branches)"), "1", false, st.keep_folder !== false), new Option(t("Put away into the thread"), "", false, st.keep_folder === false));
+  const save = foxBtn(t("Save"), () => engineAct(node, harness, "set", { model: model.value, mode: mode.value, context_window: Number(win.value), max_steps: Number(steps.value), turn_timeout: Number(limit.value), keep_folder: !!keep.value }), "go"); form.append(save);
+  foxRow(form, t("Instructions for every thread") + (st.instructions ? " · " + (st.instructions.length > 60 ? st.instructions.slice(0, 60) + "…" : st.instructions) : ""), [foxBtn(t("Edit"), () => textSheet(t("Instructions for every thread"), st.instructions || "", t("Added to the system prompt of every thread of this engine."), (v) => engineAct(node, harness, "set", { instructions: v })))]);
+  form.append(Object.assign(document.createElement("h3"), { textContent: t("Model servers") }));
+  for (const p of providers) { const del = foxBtn(t("Remove"), null); del.onclick = twice(del, t("Remove {name}?", { name: p.name || p.id }), () => engineAct(node, harness, "provider_remove", { id: p.id }));
+    foxRow(form, [p.name || p.id, p.url, p.reachable ? counted((p.models || []).length, "1 model", "{n} models") : t("not answering"), p.key ? t("with a key") : ""].filter(Boolean).join(" · "), [del]);
+    if (!p.reachable && p.problem) form.append(Object.assign(document.createElement("p"), { className: "bad", textContent: p.problem })); }
+  if (!providers.length) form.append(Object.assign(document.createElement("p"), { className: "empty", textContent: t("None yet.") }));
+  form.append(Object.assign(document.createElement("h3"), { textContent: t("Add a model server") }));
+  const pname = foxField(form, t("Name"), Object.assign(document.createElement("input"), { type: "text", placeholder: "vLLM 5080" }));
+  const purl = foxField(form, t("Its address"), Object.assign(document.createElement("input"), { type: "text", placeholder: "http://127.0.0.1:8000/v1", spellcheck: false }));
+  const key = foxField(form, t("API key (if the server asks for one)"), Object.assign(document.createElement("input"), { type: "password", autocomplete: "off" }));
+  const note = document.createElement("small"); note.className = "empty"; note.textContent = t("The key stays on this core, readable by it only: Inari never shows it again."); form.append(note);
+  const idOf = () => (pname.value.trim() || purl.value.trim()).toLowerCase().replace(/^https?:\/\//, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "server";
+  const row = document.createElement("div"); row.className = "row2"; row.append(foxBtn(t("Test"), () => engineAct(node, harness, "provider_test", { url: purl.value.trim(), key: key.value })),
+    foxBtn(t("Add"), () => { engineAct(node, harness, "provider_add", { id: idOf(), name: pname.value.trim() || purl.value.trim(), url: purl.value.trim(), key: key.value }); key.value = ""; }, "go")); form.append(row);
+  // the forges a thread is cloned from and published to: as many as wanted, none built in
+  form.append(Object.assign(document.createElement("h3"), { textContent: t("Git forges") }));
+  const kinds = { github: "GitHub", forgejo: t("Forgejo or Gitea") };
+  for (const f of st.forges || []) { const del = foxBtn(t("Remove"), null); del.onclick = twice(del, t("Remove {name}?", { name: f.name || f.id }), () => engineAct(node, harness, "forge_remove", { id: f.id }));
+    foxRow(form, [f.name || f.id, kinds[f.kind] || f.kind, f.ssh || f.url, f.user, f.token ? t("with a token") : t("no token")].filter(Boolean).join(" · "), [foxBtn(t("Change"), () => fill(f)), del]); }
+  if (!(st.forges || []).length) form.append(Object.assign(document.createElement("p"), { className: "empty", textContent: t("None yet.") }));
+  const fname = foxField(form, t("Name"), Object.assign(document.createElement("input"), { type: "text", placeholder: "Forgejo atelier" }));
+  const fkind = foxField(form, t("Kind of forge"), document.createElement("select")); for (const [k, l] of Object.entries(kinds)) fkind.append(new Option(l, k));
+  const furl = foxField(form, t("Its web address"), Object.assign(document.createElement("input"), { type: "text", placeholder: "http://atelier:3000", spellcheck: false }));
+  const fuser = foxField(form, t("The account that publishes"), Object.assign(document.createElement("input"), { type: "text", spellcheck: false, autocomplete: "off" }));
+  const ftoken = foxField(form, t("Its token (empty: keep the one kept)"), Object.assign(document.createElement("input"), { type: "password", autocomplete: "off" }));
+  const fssh = foxField(form, t("Git over SSH (optional)"), Object.assign(document.createElement("input"), { type: "text", placeholder: "ssh://git@atelier:2222", spellcheck: false }));
+  const fapi = foxField(form, t("Its API, if not the usual one (optional)"), Object.assign(document.createElement("input"), { type: "text", placeholder: "http://atelier:3000/api/v1", spellcheck: false }));
+  const fill = (f) => { fname.value = f.name || f.id; fkind.value = f.kind; furl.value = f.url || ""; fuser.value = f.user || ""; fssh.value = f.ssh || ""; fapi.value = f.api || ""; ftoken.value = ""; fname.focus(); };
+  form.append(Object.assign(document.createElement("small"), { className: "empty", textContent: t("The token stays on this core, readable by it only. It serves when you push and open a pull request from a thread, never the model.") }));
+  const forge = () => ({ id: (fname.value.trim() || furl.value.trim()).toLowerCase().replace(/^https?:\/\//, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "forge", name: fname.value.trim(), kind: fkind.value, url: furl.value.trim(), user: fuser.value.trim(), token: ftoken.value, ssh: fssh.value.trim(), api: fapi.value.trim() });
+  const frow = document.createElement("div"); frow.className = "row2"; frow.append(foxBtn(t("Test"), () => engineAct(node, harness, "forge_test", forge())), foxBtn(t("Add"), () => { engineAct(node, harness, "forge_add", forge()); ftoken.value = ""; }, "go")); form.append(frow);
+  form.append(Object.assign(document.createElement("h3"), { textContent: t("The engine's library") })); const lib = document.createElement("div"); lib.className = "row2"; lib.style.flexWrap = "wrap";
+  for (const [kind, label] of Object.entries(FOX_KINDS)) lib.append(foxBtn(t(label), () => foxLibrary(node, harness, kind)));
+  lib.append(foxBtn(t("MCP servers"), () => foxMcp(node, harness)), foxBtn(t("Tools"), () => foxTools(node, harness))); form.append(lib);
+  sheet(t("Local engine of {name}", { name: node }), [], t("Inari's own agent: the model runs on your server, its tools in this core. Nothing else to start."), form); }
 /* ---------- the mascot: FoxBot when its folder is served, else the orb ---------- */
 let foxFrame = null, foxReady = false, foxLast = "";
 function fox(method, a) { try { const f = foxFrame && foxFrame.contentWindow && foxFrame.contentWindow.fox; if (!f) return false; if (method === "event") f.setEvent && f.setEvent(a); else if (method === "persona") { if (!f.setPersona) return false; f.setPersona(a); } else if (method === "state") { f.setHarness && f.setHarness(a.harness); f.setHealth && f.setHealth(a.health); f.setActivity && f.setActivity(a.activity); } return true; } catch (e) { return false; } }
@@ -710,7 +818,7 @@ $("msg").onkeydown = (e) => { const box = $("msg");
 /* ---------- conversation ---------- */
 async function select(id) { selected = id; forkAt = null; viewing = null; files = null; events = []; tlStamp = 0; lastFiles = ""; critDraft = null; markPlanTab(); renderTop(); drawChat(); drawBench(); await refreshDetail();
   // an OpenFox thread opened before its panel came: ask for it
-  const a = snap.agents[id], n = a && snap.nodes.find((x) => x.node_id === a.node); if (!panels[id] && n && n.capabilities && n.capabilities.openfox) api("/api/openfox/thread", { agent: id, action: "refresh" });
+  const a = snap.agents[id], n = a && snap.nodes.find((x) => x.node_id === a.node); if (!panels[id] && n && n.capabilities && (n.capabilities.openfox || n.capabilities.engine)) api("/api/openfox/thread", { agent: id, action: "refresh" });
   if (snap) renderCores(Object.entries(snap.agents)); $("msg").focus(); }
 async function refreshDetail() { if (!selected) return; if (tlBusy) { refreshDetail.again = true; return; } tlBusy = true; refreshDetail.again = false; tlStamp = Date.now(); try { const id = selected, base = `/api/agent/${encodeURIComponent(id)}/timeline`, last = events.length ? events[events.length - 1].id : "";
     let tl = await api(last ? `${base}?after=${encodeURIComponent(last)}` : base); if (id !== selected) return;
@@ -784,7 +892,7 @@ function drawChat() {
       const path = (e.text.match(/(?:write_file|read_file|write|edit|create)[^:]*:\s*([\w./-]+\.\w+)/i) || [])[1]; if (path) { const b = document.createElement("button"); b.className = "btn small open"; b.innerHTML = icon("file") + "<span></span>"; b.lastChild.textContent = t("Open {path}", { path }); b.onclick = () => openFile(path); d.append(b); } box.append(d); }
     else if (e.kind === "provider_switch") note(t("Model <b>{name}</b>", { name: esc(shortModel(e.text)) }));
     else if (e.kind === "decision") note(esc(e.text));
-    else if (e.kind === "checkpoint") { const [why, ...rest] = e.text.split(": "); const map = { teleport: "Moved between cores", provider_error: "The model failed", harness_error: "The agent stopped", harness_timeout: "The agent took too long", model_refused: "Model not available", mode_changed: "Mode", stopped: "Stopped", steered: "Paused at the end of a step to read your message", auto_approved: "Allowed automatically", mode_refused: "Mode not available" }; note(esc(t(map[why] || "Checkpoint")) + (rest.length && why !== "teleport" ? ` — ${esc(rest.join(": ").slice(0, 120))}` : "")); } }
+    else if (e.kind === "checkpoint") { const [why, ...rest] = e.text.split(": "); const map = { teleport: "Moved between cores", provider_error: "The model failed", harness_error: "The agent stopped", harness_timeout: "The agent took too long", model_refused: "Model not available", mode_changed: "Mode", stopped: "Stopped", steered: "Paused at the end of a step to read your message", auto_approved: "Allowed automatically", mode_refused: "Mode not available", workflow_step: "Workflow step", workflow_waiting: "The workflow waits for you", workflow_done: "Workflow finished", workflow_blocked: "The workflow is blocked", published: "Pull request opened", compacted: "Conversation summarised", model_unavailable: "Model not available" }; note(esc(t(map[why] || "Checkpoint")) + (rest.length && why !== "teleport" ? ` — ${esc(rest.join(": ").slice(0, 120))}` : "")); } }
   // what OpenFox does beside its answer: its thinking, sub-agents, a question, a retry (panel)
   if (panels[selected]) { const live = foxLive(panels[selected]); if (live) box.insertAdjacentHTML("beforeend", `<div class="foxlive" data-k="foxlive" data-s="${live.length}:${hashOf(live)}">${live}</div>`); }
   // the answer being written shows as it comes; once journaled (the last answer starts with it) the message replaces it

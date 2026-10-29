@@ -9,6 +9,43 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Added
 
+- **The local engine does what OpenFox does, inside the core.** A thread on the local engine has
+  OpenFox's Plan tab (criteria, todos, review findings, thinking, questions, the queue of messages,
+  its context), sub-agents with a context of their own, skills and slash commands, workflows walked
+  as OpenFox's executor walks them (agent, sub-agent, shell, person and parallel steps), and the
+  tools of MCP servers (a command on the core, or a plain-http address), their secrets kept on the
+  core. Its library (agents, skills, commands, workflows, MCP servers) is set from its sheet.
+- **A thread's project on the local engine.** Its folder stays on disk between turns (a setting of
+  the engine); the Plan tab has its task board, its dev server (run by the core), the processes its
+  agent started, its branches and its instructions, all kept in the folder so they travel with it.
+- **Git forges, set in the interface.** The local engine's sheet lists the forges a thread is
+  cloned from and published to, as many as wanted, each GitHub or Forgejo/Gitea: its address, the
+  account that publishes, its token (kept on the core, never shown again), Git over SSH if wanted.
+  From a thread's Plan tab: clone a repository into its folder, then push its branch and open a
+  pull request. The token serves the person's actions only, never the model's commands.
+
+### Changed
+
+- OpenFox as a separate program is now offered as a legacy harness: the local engine does the same
+  inside Inari.
+
+- **Inari's local engine.** For local models, Inari no longer needs another program: a harness of
+  kind `local` is the OpenFox core inside the core. The model runs on any OpenAI-compatible
+  server on the machine or the private network (vLLM, SGLang, Ollama, llama.cpp, LM Studio),
+  streamed as it writes; its tools (read, write, edit a file, run a command) run in the thread's
+  folder and show in the thread as any agent's, with the diff of an edit. The builder and planner
+  agents and the prompts come from OpenFox (MIT, see THIRD-PARTY.md). A path outside the folder is
+  the person's to allow, and every write or command of a thread under a pass. Past 80 % of the
+  model's context, the conversation is summarised and the summary kept in the journal. It is added
+  from Settings → Agents and subscriptions (Local engine), and set in its own sheet: model servers
+  (tested, with a key kept on the core only), the default model and agent, the context, the
+  limits, instructions for every thread.
+- **Agents and subscriptions, from the interface.** Settings → Agents and subscriptions lists each
+  core's harnesses and adds one from presets (Claude Code, Codex, Gemini CLI, Kimi CLI, the local
+  engine, OpenFox, any ACP agent): try it, install or update it through npm, take it away. An agent
+  added serves from the next message, with no restart; the choices are kept in
+  `<data_dir>/harnesses.json` on top of the configuration.
+
 - **OpenFox's work around the thread, in Inari.** An OpenFox thread's folder now stays on disk
   between turns (Settings → OpenFox, on by default): it is still put away into the thread at the
   end of every turn and before the thread leaves for another core, and at the next turn only what
@@ -266,6 +303,15 @@ Newest first. An entry says what changed for someone using the thing.
   (60 s), so a client trickling bytes no longer holds a connection for hours.
 
 ### Fixed
+
+- **A revoked pass's open page goes dark at once.** The page's event stream checked the pass when
+  it opened only: a pass revoked or expired meanwhile kept receiving its own threads' updates until
+  the page was closed. The stream now ends as soon as the pass no longer holds.
+- **A turn that cannot run says why, in the thread.** When an agent could not start or answer
+  (OpenFox not running, a wrong address, a missing sign-in, a model refused), the reason was only
+  written to the thread's journal and a line of the activity feed: the message seemed to go
+  nowhere. It now shows in the thread at once ("The agent stopped — OpenFox does not answer at
+  http://…: is it running?"), and OpenFox's errors say what to do (Settings → OpenFox).
 
 - **The workbench tabs can be clicked.** The handle that resizes the workbench took the panes'
   340 px minimum width and lay over the tabs (Artifacts, Terminal, Viewer, Journal); it is 8 px

@@ -169,6 +169,12 @@ impl Turn {
     pub(crate) fn emit(&self, e: &TimelineEvent) {
         self.runner.emit(&self.agent, e);
     }
+    /// Journal an event and show it at once (a turn that cannot go on says why in the thread).
+    pub(crate) fn note(&self, kind: EventKind, data: Value) {
+        if let Some(e) = self.append(kind, data) {
+            self.emit(&e);
+        }
+    }
     pub(crate) fn phase(&self, phase: &str) {
         self.runner.set_phase(&self.agent, phase);
     }
@@ -478,7 +484,7 @@ impl AcpHarness {
 
     pub async fn turn(&self, t: &Turn) -> RunSummary {
         if let Err(e) = self.make_ready(t).await {
-            t.append(
+            t.note(
                 EventKind::Checkpoint,
                 json!({"reason": "model_unavailable", "detail": e}),
             );
@@ -491,11 +497,16 @@ impl AcpHarness {
         let mut child = match self.spawn(&t.workdir, &t.pass) {
             Ok(c) => c,
             Err(e) => {
+                let error = format!("cannot start the agent: {e}");
+                t.note(
+                    EventKind::Checkpoint,
+                    json!({"reason": "harness_error", "detail": error}),
+                );
                 return RunSummary {
                     stopped: "error".into(),
-                    error: format!("cannot start the agent: {e}"),
+                    error,
                     ..Default::default()
-                }
+                };
             }
         };
         let result = tokio::time::timeout(self.timeout, self.conversation(&mut child, t)).await;
@@ -503,7 +514,7 @@ impl AcpHarness {
         match result {
             Ok(s) => s,
             Err(_) => {
-                t.append(EventKind::Checkpoint, json!({"reason": "harness_timeout"}));
+                t.note(EventKind::Checkpoint, json!({"reason": "harness_timeout"}));
                 RunSummary {
                     stopped: "error".into(),
                     error: format!(
@@ -556,7 +567,7 @@ impl AcpHarness {
                 {
                     Ok(_) => known = Some(t.model.clone()),
                     Err(e) => {
-                        t.append(
+                        t.note(
                             EventKind::Checkpoint,
                             json!({"reason": "model_refused", "detail": e}),
                         );
@@ -590,7 +601,7 @@ impl AcpHarness {
                             .insert(sid.clone(), t.mode.clone());
                     }
                     Err(e) => {
-                        t.append(
+                        t.note(
                             EventKind::Checkpoint,
                             json!({"reason": "mode_refused", "detail": e}),
                         );
@@ -602,7 +613,7 @@ impl AcpHarness {
         let (sid, primed, caps) = match setup.await {
             Ok(x) => x,
             Err(e) => {
-                t.append(
+                t.note(
                     EventKind::Checkpoint,
                     json!({"reason": "harness_error", "detail": e}),
                 );
@@ -987,10 +998,20 @@ pub(crate) fn primer(t: &Turn, prime_chars: usize) -> Result<String, String> {
     ))
 }
 
-/// A thread's harness: an agent spoken to over ACP, or OpenFox driven natively (crate::openfox).
+/// A thread's harness: an agent spoken to over ACP, OpenFox driven natively (crate::openfox),
+/// or Inari's own engine (crate::engine). Always held in an Arc: its size does not matter.
+#[allow(clippy::large_enum_variant)]
 pub enum Harness {
     Acp(AcpHarness),
     OpenFox(crate::openfox::OpenFoxHarness),
+    /// Inari's own engine: the model on a local server, the tools in the core (crate::engine).
+    Local(crate::engine::LocalEngine),
+}
+
+impl From<crate::engine::LocalEngine> for Harness {
+    fn from(h: crate::engine::LocalEngine) -> Self {
+        Harness::Local(h)
+    }
 }
 
 impl From<AcpHarness> for Harness {
@@ -1011,6 +1032,7 @@ impl Harness {
         match self {
             Harness::Acp(h) => h.probe(cwd).await,
             Harness::OpenFox(h) => h.probe().await,
+            Harness::Local(h) => h.probe().await,
         }
     }
 
@@ -1028,6 +1050,7 @@ impl Harness {
             },
             Harness::Acp(h) => h.turn(t).await,
             Harness::OpenFox(h) => h.turn(t).await,
+            Harness::Local(h) => h.turn(t).await,
         }
     }
 
@@ -1035,7 +1058,15 @@ impl Harness {
     pub fn openfox(&self) -> Option<&crate::openfox::OpenFoxHarness> {
         match self {
             Harness::OpenFox(h) => Some(h),
-            Harness::Acp(_) => None,
+            _ => None,
+        }
+    }
+
+    /// Inari's local engine, when this is it.
+    pub fn local(&self) -> Option<&crate::engine::LocalEngine> {
+        match self {
+            Harness::Local(h) => Some(h),
+            _ => None,
         }
     }
 
@@ -1043,6 +1074,7 @@ impl Harness {
     /// processes and its task board need it; an ACP agent finds it afresh each turn).
     pub fn keeps_folder(&self) -> bool {
         self.openfox().is_some_and(|h| h.settings().keep_folder)
+            || self.local().is_some_and(|e| e.settings().keep_folder)
     }
 }
 
@@ -1054,7 +1086,9 @@ const DRAFT_EVERY: Duration = Duration::from_millis(120);
 /// Drives the agents a node holds: one turn at a time per agent.
 pub struct Runner {
     pub host: Arc<CapsuleHost>,
-    pub harnesses: BTreeMap<String, Harness>,
+    /// Who thinks for the threads, by name: from the configuration, and changed from the
+    /// interface while the node runs (a turn keeps the harness it started with).
+    harnesses: std::sync::RwLock<BTreeMap<String, Arc<Harness>>>,
     pub default_harness: String,
     publish: Option<Publisher>,
     approver: Option<Approver>,
@@ -1082,10 +1116,12 @@ impl Runner {
         let default_harness = harnesses.first().map(|h| h.0.clone()).unwrap_or_default();
         Arc::new(Self {
             host,
-            harnesses: harnesses
-                .into_iter()
-                .map(|(name, h)| (name, h.into()))
-                .collect(),
+            harnesses: std::sync::RwLock::new(
+                harnesses
+                    .into_iter()
+                    .map(|(name, h)| (name, Arc::new(h.into())))
+                    .collect(),
+            ),
             default_harness,
             publish,
             approver,
@@ -1119,18 +1155,70 @@ impl Runner {
         }
     }
 
-    /// The native OpenFox harness this thread runs on, if it runs on one.
-    pub fn openfox_of(&self, agent: &str) -> Option<&crate::openfox::OpenFoxHarness> {
+    /// A harness by name.
+    pub fn harness(&self, name: &str) -> Option<Arc<Harness>> {
         self.harnesses
-            .get(&self.harness_of(agent))
-            .and_then(Harness::openfox)
+            .read()
+            .expect("not poisoned")
+            .get(name)
+            .cloned()
+    }
+
+    /// Every harness, by name.
+    pub fn harness_list(&self) -> Vec<(String, Arc<Harness>)> {
+        self.harnesses
+            .read()
+            .expect("not poisoned")
+            .iter()
+            .map(|(k, v)| (k.clone(), Arc::clone(v)))
+            .collect()
+    }
+
+    /// Add a harness, or put a new one in place of the one of that name (its threads use it
+    /// from their next turn).
+    pub fn set_harness_named(&self, name: &str, h: Harness) {
+        self.harnesses
+            .write()
+            .expect("not poisoned")
+            .insert(name.into(), Arc::new(h));
+    }
+
+    /// Take a harness away; false when there was none. The node's default stays.
+    pub fn remove_harness(&self, name: &str) -> Result<bool, String> {
+        if name == self.default_harness {
+            return Err(format!("{name} is this core's default harness: it stays"));
+        }
+        Ok(self
+            .harnesses
+            .write()
+            .expect("not poisoned")
+            .remove(name)
+            .is_some())
+    }
+
+    fn has_harness(&self, name: &str) -> bool {
+        self.harnesses
+            .read()
+            .expect("not poisoned")
+            .contains_key(name)
+    }
+
+    /// The native OpenFox harness this thread runs on, if it runs on one.
+    pub fn openfox_of(&self, agent: &str) -> Option<Arc<Harness>> {
+        self.harness(&self.harness_of(agent))
+            .filter(|h| h.openfox().is_some())
+    }
+
+    /// The thread's harness when it is the local engine.
+    pub fn local_of(&self, agent: &str) -> Option<Arc<Harness>> {
+        self.harness(&self.harness_of(agent))
+            .filter(|h| h.local().is_some())
     }
 
     /// Whether this thread's folder stays on disk between its turns (Harness::keeps_folder).
     pub fn keeps_folder(&self, agent: &str) -> bool {
-        self.harnesses
-            .get(&self.harness_of(agent))
-            .is_some_and(Harness::keeps_folder)
+        self.harness(&self.harness_of(agent))
+            .is_some_and(|h| h.keeps_folder())
     }
 
     /// A kept folder changed outside a turn (a branch switched, say): the thread's files follow
@@ -1148,7 +1236,7 @@ impl Runner {
         self.labels(agent)
             .get("harness")
             .and_then(Value::as_str)
-            .filter(|h| self.harnesses.contains_key(*h))
+            .filter(|h| self.has_harness(h))
             .unwrap_or(&self.default_harness)
             .to_string()
     }
@@ -1285,7 +1373,7 @@ impl Runner {
         } else {
             harness.to_string()
         };
-        if !self.harnesses.contains_key(&harness) {
+        if !self.has_harness(&harness) {
             return Err(format!("no harness {harness:?} on this node"));
         }
         let staging = self.host.root.join("new").join(thread);
@@ -1375,7 +1463,7 @@ impl Runner {
     /// Choose who thinks for a thread; changing harness clears its model. Journaled
     /// as the reference does; false when nothing changed.
     pub fn set_harness(&self, agent: &str, name: &str) -> Result<bool, String> {
-        if !self.harnesses.contains_key(name) {
+        if !self.has_harness(name) {
             return Err(format!("no harness {name:?} on this node"));
         }
         if self.labels(agent).get("harness").and_then(Value::as_str) == Some(name) {
@@ -1404,6 +1492,15 @@ impl Runner {
                 .expect("not poisoned")
                 .insert(agent.into());
         }
+    }
+
+    /// The mode chosen for a thread (empty: the agent's default).
+    pub fn mode_of(&self, agent: &str) -> String {
+        self.labels(agent)
+            .get("mode")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string()
     }
 
     /// Remember the mode chosen for a thread (empty: the agent's default); false when unchanged.
@@ -1508,12 +1605,21 @@ impl Runner {
     ) -> RunSummary {
         // OpenFox takes a message during a turn into its own queue, and slips it in at its next step
         if attachments.is_empty() {
-            if let Some(h) = self
-                .harnesses
-                .get(&self.harness_of(agent))
-                .and_then(Harness::openfox)
-            {
-                if h.join(agent, text).await {
+            if let Some(h) = self.openfox_of(agent) {
+                if h.openfox()
+                    .expect("an OpenFox harness")
+                    .join(agent, text)
+                    .await
+                {
+                    return RunSummary {
+                        stopped: "joined".into(),
+                        ..Default::default()
+                    };
+                }
+            }
+            // so does the local engine, read at the model's next call
+            if let Some(h) = self.harness(&self.harness_of(agent)) {
+                if h.local().is_some_and(|e| e.join(agent, text)) {
                     return RunSummary {
                         stopped: "joined".into(),
                         ..Default::default()
@@ -1522,6 +1628,14 @@ impl Runner {
             }
         }
         self.take_turn(agent, text, attachments, false, None).await
+    }
+
+    /// A turn started once this one ends (a message that came too late for the model).
+    pub fn run_later(self: &Arc<Self>, agent: &str, text: String) {
+        let (r, a) = (Arc::clone(self), agent.to_string());
+        let later: std::pin::Pin<Box<dyn std::future::Future<Output = RunSummary> + Send>> =
+            Box::pin(async move { r.run(&a, &text, Vec::new()).await });
+        tokio::spawn(later);
     }
 
     /// Follow a turn the agent runs again of its own (OpenFox retrying after a model's failure):
@@ -1577,10 +1691,8 @@ impl Runner {
             .unwrap_or("")
             .to_string();
         let path = self.host.agents.join(agent);
-        let keep = self
-            .harnesses
-            .get(&harness_name)
-            .is_some_and(Harness::keeps_folder);
+        let harness = self.harness(&harness_name);
+        let keep = harness.as_ref().is_some_and(|h| h.keeps_folder());
         self.set_phase(agent, "listening");
         let files: Vec<Value> = attachments
             .iter()
@@ -1610,10 +1722,7 @@ impl Runner {
                 self.emit(agent, e);
             }
         }
-        let summary = match (
-            self.host.open_workdir(agent, keep),
-            self.harnesses.get(&harness_name),
-        ) {
+        let summary = match (self.host.open_workdir(agent, keep), harness) {
             (Ok(workdir), Some(h)) => {
                 let turn = Turn {
                     runner: Arc::clone(self),
@@ -1644,10 +1753,26 @@ impl Runner {
             },
             (_, None) => RunSummary {
                 stopped: "error".into(),
-                error: format!("no harness {harness_name:?}"),
+                error: format!("no harness {harness_name:?} on this core"),
                 ..Default::default()
             },
         };
+        if summary.stopped == "error" && !summary.error.is_empty() {
+            // said in the thread, not only in the activity feed: a turn never fails silently
+            let shown = io::load(&path).ok().is_some_and(|c| {
+                c.timeline
+                    .ordered()
+                    .last()
+                    .is_some_and(|e| e.kind == EventKind::Checkpoint)
+            });
+            if !shown {
+                let _ = self.journal(
+                    agent,
+                    EventKind::Checkpoint,
+                    json!({"reason": "harness_error", "detail": summary.error}),
+                );
+            }
+        }
         let was_stopped = self.cancels.lock().expect("not poisoned").remove(agent);
         if was_stopped || summary.stopped == "cancelled" {
             let _ = self.journal(agent, EventKind::Checkpoint, json!({"reason": "stopped"}));
