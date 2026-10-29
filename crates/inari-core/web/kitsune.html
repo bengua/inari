@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kitsune — Signature animée</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#0a0e1a;font-family:system-ui,sans-serif}
+#embers{position:absolute;top:0;left:0;width:100%;height:100%}
+#fox-stage{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:2}
+iframe{border:0;background:transparent;width:min(72vmin,560px);height:min(72vmin,560px)}
+#hud{position:absolute;left:14px;top:12px;color:#9e9aa8;font-size:13px;z-index:3;user-select:none}
+#hud b{color:#f3efe9}
+</style>
+</head>
+<body>
+<canvas id="embers"></canvas>
+<div id="fox-stage">
+<iframe id="fox" src="./foxbot/index.html?fox=1" title="FoxBot"></iframe>
+</div>
+<div id="hud"><b>Kitsune</b> — FoxBot prêt · <span id="state">veille</span></div>
+<script>
+var c=document.getElementById("embers"),x=c.getContext("2d");
+var dpr=Math.min(2,window.devicePixelRatio||1);
+function size(){c.width=innerWidth*dpr;c.height=innerHeight*dpr;}
+size();addEventListener("resize",size);
+</script>
+</body>
+</html>
