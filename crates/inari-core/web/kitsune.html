@@ -33,6 +33,25 @@
       <p id="ksay" role="status" aria-live="polite"></p>
     </section>
     <aside id="kside">
+      <section class="glass kcard" id="kcap">
+        <h2>Talk</h2>
+        <button class="ktalk" id="kTalk" type="button" aria-describedby="kTime">
+          <span class="kdot" aria-hidden="true"></span><span id="kTalkLabel">Hold to talk</span>
+        </button>
+        <p class="kmeta" id="kTime" aria-live="off"></p>
+        <label class="klab" for="kPlace">Place</label>
+        <input class="kfield" id="kPlace" type="text" placeholder="kitchen, car, office" autocomplete="off">
+        <details class="kmore">
+          <summary>Type it instead</summary>
+          <textarea class="kfield" id="kText" rows="2" placeholder="What should I remember?"></textarea>
+          <button class="btn small" id="kTextGo" type="button">Keep it</button>
+        </details>
+        <div id="kReview" hidden>
+          <label class="klab" for="kReviewText">What did you say?</label>
+          <textarea class="kfield" id="kReviewText" rows="3"></textarea>
+          <button class="btn small go" id="kReviewSave" type="button">Save the words</button>
+        </div>
+      </section>
       <section class="glass kcard">
         <h2>Memory</h2>
         <dl class="kgrid">
@@ -49,9 +68,8 @@
         </dl>
       </section>
       <section class="glass kcard">
-        <h2>What this page will do</h2>
+        <h2>Coming next</h2>
         <ul class="klist">
-          <li>Hold the talk button and speak: the note is stored and written out on this core.</li>
           <li>Search what you said, read it back aloud, correct or delete it.</li>
           <li>Set reminders by time or by place.</li>
           <li>Point the core at your own speech and embedding servers.</li>

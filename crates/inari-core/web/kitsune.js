@@ -176,6 +176,202 @@ async function load() {
   say(missing.length ? "Local " + missing.join(" and ") + " not set yet." : "Ready. Notes: " + state.notes + ".");
 }
 
+/* Talk: hold the button, record here, hand the core a 16 kHz mono wav. */
+const TARGET_RATE = 16000;
+const rec = { stream: null, media: null, chunks: [], t0: 0, tick: 0, busy: false, reviewId: 0 };
+
+function clock(ms) {
+  const s = Math.max(0, ms) / 1000;
+  return Math.floor(s / 60) + ":" + String(Math.floor(s % 60)).padStart(2, "0");
+}
+
+function recMime() {
+  if (typeof MediaRecorder === "undefined") return "";
+  const kinds = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
+  for (const k of kinds) if (MediaRecorder.isTypeSupported(k)) return k;
+  return "";
+}
+
+function micError(e) {
+  const n = e && e.name;
+  if (n === "NotAllowedError" || n === "SecurityError") return "The microphone is blocked. Allow it for this page, then try again.";
+  if (n === "NotFoundError" || n === "OverconstrainedError") return "No microphone answers on this machine.";
+  if (n === "NotReadableError") return "Another program holds the microphone.";
+  return "The microphone did not open: " + ((e && e.message) || "unknown reason") + ".";
+}
+
+async function startTalk() {
+  if (rec.media || rec.busy) return;
+  const mime = recMime();
+  if (!mime) return say("This browser cannot record audio. Type the note instead.");
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+  } catch (e) { return say(micError(e)); }
+  rec.stream = stream;
+  rec.chunks = [];
+  const m = new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 64000 });
+  rec.media = m;
+  m.addEventListener("dataavailable", (ev) => { if (ev.data && ev.data.size) rec.chunks.push(ev.data); });
+  m.start(250);
+  rec.t0 = performance.now();
+  activity("listening");
+  $("kTalk").classList.add("live");
+  $("kTalkLabel").textContent = "Listening — release to keep";
+  $("kTime").textContent = "0:00";
+  rec.tick = setInterval(() => { $("kTime").textContent = clock(performance.now() - rec.t0); }, 200);
+}
+
+async function stopTalk() {
+  const m = rec.media;
+  if (!m) return;
+  clearInterval(rec.tick);
+  rec.media = null;
+  $("kTalk").classList.remove("live");
+  $("kTalkLabel").textContent = "Hold to talk";
+  const stopped = new Promise((res) => m.addEventListener("stop", res, { once: true }));
+  if (m.state !== "inactive") m.stop();
+  if (rec.stream) rec.stream.getTracks().forEach((t) => t.stop());
+  rec.stream = null;
+  await stopped;
+  const blob = new Blob(rec.chunks, { type: m.mimeType || "audio/webm" });
+  rec.chunks = [];
+  const ms = performance.now() - rec.t0;
+  $("kTime").textContent = clock(ms);
+  if (ms < 400) { activity("idle"); return say("Too short. Hold the button while you speak."); }
+  rec.busy = true;
+  $("kTalk").disabled = true;
+  activity("working");
+  say("Writing it down on this core…");
+  try {
+    const wav = await toWav(blob);
+    const d = await api("/api/kitsune", { action: "ingest_voice", audio: b64(wav), place: $("kPlace").value.trim() });
+    if (d.error) say("The capture was not kept.");
+    else await keep(d.id);
+  } catch (e) {
+    toast("The audio could not be read: " + ((e && e.message) || e));
+  } finally {
+    rec.busy = false;
+    $("kTalk").disabled = false;
+    activity("idle");
+  }
+}
+
+async function toWav(blob) {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) throw new Error("this browser cannot decode audio");
+  const ctx = new AC();
+  let buf;
+  try { buf = await ctx.decodeAudioData(await blob.arrayBuffer()); }
+  finally { if (ctx.close) ctx.close(); }
+  let data;
+  if (buf.sampleRate === TARGET_RATE && buf.numberOfChannels === 1) data = buf.getChannelData(0);
+  else {
+    const frames = Math.max(1, Math.ceil(buf.duration * TARGET_RATE));
+    const off = new OfflineAudioContext(1, frames, TARGET_RATE);
+    const src = off.createBufferSource();
+    src.buffer = buf;
+    src.connect(off.destination);
+    src.start();
+    data = (await off.startRendering()).getChannelData(0);
+  }
+  return pcm16(data);
+}
+
+function pcm16(samples) {
+  const out = new Uint8Array(44 + samples.length * 2);
+  const v = new DataView(out.buffer);
+  const tag = (at, s) => { for (let i = 0; i < s.length; i++) out[at + i] = s.charCodeAt(i); };
+  tag(0, "RIFF");
+  v.setUint32(4, 36 + samples.length * 2, true);
+  tag(8, "WAVEfmt ");
+  v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true);
+  v.setUint16(22, 1, true);
+  v.setUint32(24, TARGET_RATE, true);
+  v.setUint32(28, TARGET_RATE * 2, true);
+  v.setUint16(32, 2, true);
+  v.setUint16(34, 16, true);
+  tag(36, "data");
+  v.setUint32(40, samples.length * 2, true);
+  for (let i = 0, at = 44; i < samples.length; i++, at += 2) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    v.setInt16(at, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+  return out;
+}
+
+function b64(bytes) {
+  const step = 0x8000;
+  let s = "";
+  for (let i = 0; i < bytes.length; i += step) s += String.fromCharCode.apply(null, bytes.subarray(i, i + step));
+  return btoa(s);
+}
+
+async function keep(id) {
+  const d = await api("/api/kitsune", { action: "get_note", id });
+  if (d.error) return;
+  const n = d.note || {};
+  await load();
+  if (n.status === "needs_review") return showReview(n);
+  hideReview();
+  say(n.text ? "Kept: " + n.text : "Kept, with the audio.");
+}
+
+function showReview(n) {
+  rec.reviewId = n.id;
+  $("kReview").hidden = false;
+  $("kReviewText").value = n.text || "";
+  $("kReviewText").focus();
+  say("I kept the audio but could not write it out. Type what you said.");
+}
+
+function hideReview() {
+  $("kReview").hidden = true;
+  rec.reviewId = 0;
+}
+
+async function saveReview() {
+  const id = rec.reviewId, words = $("kReviewText").value.trim();
+  if (!id) return;
+  if (!words) { toast("Write what you said first."); $("kReviewText").focus(); return; }
+  activity("working");
+  const d = await api("/api/kitsune", { action: "correct_note", id, text: words });
+  activity("idle");
+  if (d.error) return;
+  hideReview();
+  await load();
+  say("Corrected: " + words);
+}
+
+async function keepTyped() {
+  const words = $("kText").value.trim();
+  if (!words) return $("kText").focus();
+  $("kTextGo").disabled = true;
+  activity("working");
+  const d = await api("/api/kitsune", { action: "capture_text", text: words, tags: [] });
+  activity("idle");
+  $("kTextGo").disabled = false;
+  if (d.error) return;
+  $("kText").value = "";
+  await keep(d.id);
+}
+
+$("kTalk").addEventListener("pointerdown", (ev) => { ev.preventDefault(); startTalk(); });
+window.addEventListener("pointerup", stopTalk);
+window.addEventListener("pointercancel", stopTalk);
+$("kTalk").addEventListener("keydown", (ev) => {
+  if ((ev.key === " " || ev.key === "Enter") && !ev.repeat) { ev.preventDefault(); startTalk(); }
+});
+$("kTalk").addEventListener("keyup", (ev) => {
+  if (ev.key === " " || ev.key === "Enter") { ev.preventDefault(); stopTalk(); }
+});
+$("kTalk").addEventListener("blur", stopTalk);
+$("kTextGo").addEventListener("click", keepTyped);
+$("kReviewSave").addEventListener("click", saveReview);
+
 async function connect() {
   const hash = new URLSearchParams(location.hash.slice(1));
   const linked = hash.get("pass") || hash.get("token");
