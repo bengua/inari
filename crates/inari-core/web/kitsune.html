@@ -59,19 +59,24 @@
           <dt>Reminders</dt><dd id="kTriggers">—</dd>
         </dl>
       </section>
-      <section class="glass kcard">
+      <section class="glass kcard" aria-label="Servers">
         <h2>Local servers</h2>
-        <dl class="kgrid">
-          <dt>Speech to text</dt><dd id="kAsrUrl">—</dd>
-          <dt>Text to speech</dt><dd id="kTtsUrl">—</dd>
-          <dt>Embeddings</dt><dd id="kEmbed">—</dd>
-        </dl>
-      </section>
-      <section class="glass kcard">
-        <h2>Coming next</h2>
-        <ul class="klist">
-          <li>Point the core at your own speech and embedding servers.</li>
-        </ul>
+        <form id="kSet">
+          <label class="klab" for="kSetAsrUrl">Speech to text</label>
+          <input class="kfield" id="kSetAsrUrl" type="text" placeholder="http://127.0.0.1:8080/v1" autocomplete="off">
+          <label class="klab" for="kSetAsrModel">Its model</label>
+          <input class="kfield" id="kSetAsrModel" type="text" placeholder="whisper-1" autocomplete="off">
+          <label class="klab" for="kSetAsrLang">Spoken language</label>
+          <input class="kfield" id="kSetAsrLang" type="text" placeholder="fr" autocomplete="off">
+          <label class="klab" for="kSetTtsUrl">Text to speech</label>
+          <input class="kfield" id="kSetTtsUrl" type="text" placeholder="http://127.0.0.1:8880/v1" autocomplete="off">
+          <label class="klab" for="kSetTtsVoice">Its voice</label>
+          <input class="kfield" id="kSetTtsVoice" type="text" placeholder="fr_FR-siwis-medium" autocomplete="off">
+          <label class="klab" for="kSetEmbed">Embedding model</label>
+          <input class="kfield" id="kSetEmbed" type="text" placeholder="bge-m3" autocomplete="off">
+          <button class="btn small go" id="kSetGo" type="submit">Save</button>
+          <p class="kmeta" id="kSetState" aria-live="polite"></p>
+        </form>
       </section>
     </aside>
     <section class="glass kcard" id="kmem" aria-label="Memory">
