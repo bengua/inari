@@ -1,6 +1,7 @@
 package app.inari.client
 
 import android.content.Intent
+import android.widget.Toast
 import android.os.Bundle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -140,6 +141,7 @@ fun InariApp(unlock: (onOk: () -> Unit) -> Unit, shared: Handoff?, sharedTaken: 
                         installing = true
                         scope.launch {
                             runCatching { withContext(Dispatchers.IO) { Updates.install(context, info) } }
+                                .onFailure { Toast.makeText(context, "Update failed: ${it.message}", Toast.LENGTH_LONG).show() }
                             installing = false
                         }
                     }) { Text(stringResource(R.string.update_install)) }
