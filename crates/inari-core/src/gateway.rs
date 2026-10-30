@@ -482,8 +482,8 @@ impl Gateway {
             usage_interval: Duration::from_secs(60),
             sessions: crate::session::Sessions::open(data_dir),
             personas: crate::personas::Choices::open(data_dir),
-            kitsune: match kitsune::Kitsune::open(&data_dir.join("kitsune")) {
-                Ok(k) => Some(Arc::new(std::sync::Mutex::new(k))),
+            kitsune: match kitsune::Kitsune::shared(&data_dir.join("kitsune")) {
+                Ok(k) => Some(k),
                 Err(e) => {
                     eprintln!("kitsune: {e}");
                     None
