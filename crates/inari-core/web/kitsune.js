@@ -698,6 +698,57 @@ $("kTalk").addEventListener("blur", stopTalk);
 $("kTextGo").addEventListener("click", keepTyped);
 $("kReviewSave").addEventListener("click", saveReview);
 
+/* Rings: a reminder that comes back stays on screen until it is done or put off. */
+const ring = { queue: [], es: null };
+
+function ringShow() {
+  const n = ring.queue[0];
+  $("kRing").hidden = !n;
+  if (!n) return;
+  $("kRingText").textContent = words(n) || "Reminder #" + n.id;
+  $("kRingMore").textContent = n.trigger_type === "geofence" ? "You are at " + (n.location_raw || "the place") + "." : stamp(n.due_date);
+}
+
+function ringHeard(n) {
+  if (ring.queue.some((x) => x.id === n.id)) return;
+  ring.queue.push(n);
+  ringShow();
+  say("Reminder: " + (words(n) || "#" + n.id));
+  try { if (navigator.vibrate) navigator.vibrate([200, 100, 200]); } catch (e) {}
+  try {
+    if (window.Notification && Notification.permission === "granted" && document.hidden) new Notification("Kitsune", { body: words(n), tag: "kitsune-" + n.id });
+  } catch (e) {}
+  load();
+}
+
+function ringListen() {
+  if (ring.es || !window.EventSource) return;
+  ring.es = new EventSource("/api/kitsune/events");
+  ring.es.addEventListener("ring", (ev) => {
+    try { ringHeard(JSON.parse(ev.data)); } catch (e) {}
+  });
+}
+
+$("kRing").addEventListener("click", async (ev) => {
+  const b = ev.target.closest("button[data-act]");
+  const n = ring.queue[0];
+  if (!b || !n) return;
+  const d = b.dataset.act === "later"
+    ? await api("/api/kitsune", { action: "snooze", id: n.id, due_date: isoUtc(Math.round(Date.now() / 1000) + 3600) })
+    : await api("/api/kitsune", { action: "dismiss", id: n.id });
+  if (d.error) return;
+  ring.queue.shift();
+  ringShow();
+  await load();
+  say(b.dataset.act === "later" ? "It comes back in an hour." : "Done.");
+});
+
+// asked once, on a gesture, so a reminder can reach the person when the page is hidden
+function askToNotify() {
+  try { if (window.Notification && Notification.permission === "default") Notification.requestPermission(); } catch (e) {}
+}
+$("kTalk").addEventListener("pointerdown", askToNotify, { once: true });
+
 async function connect() {
   const hash = new URLSearchParams(location.hash.slice(1));
   const linked = hash.get("pass") || hash.get("token");
@@ -712,6 +763,7 @@ async function connect() {
   $("kapp").hidden = false;
   await load();
   mountFox();
+  ringListen();
 }
 
 $("tokenGo").addEventListener("click", async () => {

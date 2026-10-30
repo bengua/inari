@@ -250,6 +250,8 @@ pub struct Gateway {
     personas: crate::personas::Choices,
     /// The voice second brain this core holds (None when it could not be opened).
     kitsune: Option<Arc<std::sync::Mutex<kitsune::Kitsune>>>,
+    /// Reminders as they ring (a note), streamed to the owner's Kitsune pages.
+    rings: broadcast::Sender<Value>,
 }
 
 /// An OpenFox thread's panel, as an SSE event of its own (`panel`).
@@ -460,6 +462,7 @@ impl Gateway {
         let (clients, _) = broadcast::channel(50); // a slow client loses old frames, not the stream
         let (drafts, _) = broadcast::channel(256);
         let (panels, _) = broadcast::channel(256);
+        let (rings, _) = broadcast::channel(64);
         let mut full_ui = Map::new();
         full_ui.insert("footer".into(), json!(""));
         full_ui.extend(ui);
@@ -486,6 +489,7 @@ impl Gateway {
                     None
                 }
             },
+            rings,
         });
         g.subscribe();
         g
@@ -904,7 +908,73 @@ impl Gateway {
             let me = Arc::clone(self);
             tokio::spawn(async move { me.poll_usage().await });
         }
+        if self.kitsune.is_some() {
+            let me = Arc::clone(self);
+            tokio::spawn(async move { me.ring_reminders().await });
+        }
         Ok(bound)
+    }
+
+    /// Kitsune's scheduler: every `tick_seconds` (a setting, read each beat) the time reminders
+    /// due ring — on the owner's pages, then on the local webhook — and every `retry_seconds` what
+    /// waited for a server is tried again. Woken late (the core was off), what was missed rings.
+    async fn ring_reminders(self: Arc<Self>) {
+        let mut last_tick = 0i64;
+        let mut last_retry = kitsune::clock::now();
+        loop {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            let now = kitsune::clock::now();
+            let Some(cfg) = self.with_kitsune(|k| k.settings().rings.clone()).await else {
+                return;
+            };
+            if now - last_tick < cfg.tick_seconds.max(1) as i64 {
+                continue;
+            }
+            last_tick = now;
+            let Some(Ok(tick)) = self.with_kitsune(move |k| k.tick(now, last_retry)).await else {
+                continue;
+            };
+            if tick.retried.is_some() {
+                last_retry = now;
+            }
+            self.ring(&cfg, tick.rang).await;
+        }
+    }
+
+    /// Ring notes: to the owner's pages now, and to the webhook (off the runtime, best effort).
+    async fn ring(&self, cfg: &kitsune::RingConfig, rang: Vec<kitsune::Note>) {
+        if rang.is_empty() {
+            return;
+        }
+        for n in &rang {
+            let _ = self.rings.send(json!(n));
+        }
+        let cfg = cfg.clone();
+        let told =
+            tokio::task::spawn_blocking(move || kitsune::rings::tell_webhook(&cfg, &rang)).await;
+        if let Ok(Err(e)) = told {
+            eprintln!("kitsune: the webhook was not told: {e}");
+        }
+    }
+
+    /// GET /api/kitsune/events: the reminders as they ring (`event: ring`), for the owner's page.
+    async fn kitsune_events(&self, w: &mut TcpStream) -> std::io::Result<()> {
+        let mut rx = self.rings.subscribe();
+        w.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\nConnection: keep-alive\r\n\r\n: ready\n\n").await?;
+        w.flush().await?;
+        loop {
+            let tick = tokio::time::sleep(Duration::from_secs(15));
+            let frame = tokio::select! {
+                got = rx.recv() => match got {
+                    Ok(note) => format!("event: ring\ndata: {note}\n\n"),
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => return Ok(()),
+                },
+                _ = tick => ": keep-alive\n\n".to_string(),
+            };
+            w.write_all(frame.as_bytes()).await?;
+            w.flush().await?;
+        }
     }
 
     async fn poll_usage(self: Arc<Self>) {
@@ -2127,6 +2197,9 @@ impl Gateway {
                 _ => send_json(w, 404, &json!({"error": "no such audio"})).await,
             };
         }
+        if r.method == "GET" && r.path == "/api/kitsune/events" {
+            return self.kitsune_events(w).await;
+        }
         if r.method == "GET" {
             let mascot = self.mascot_dir.is_some();
             let status = self
@@ -2279,6 +2352,33 @@ impl Gateway {
                             Ok(json!({"ok": true}))
                         })
                         .await
+                    }
+                    _ => Some(Err("lat and lon are numbers".into())),
+                }
+            }
+            "entered" => {
+                // the phone's geofencing says a place was entered: its reminders ring
+                match (
+                    d.get("lat").and_then(Value::as_f64),
+                    d.get("lon").and_then(Value::as_f64),
+                ) {
+                    (Some(la), Some(lo)) => {
+                        let got = self
+                            .with_kitsune(move |k| {
+                                k.entered(la, lo)
+                                    .map(|rang| (rang, k.settings().rings.clone()))
+                                    .map_err(|e| e.to_string())
+                            })
+                            .await;
+                        match got {
+                            Some(Ok((rang, cfg))) => {
+                                let reply = json!({"rang": rang});
+                                self.ring(&cfg, rang).await;
+                                Some(Ok(reply))
+                            }
+                            Some(Err(e)) => Some(Err(e)),
+                            None => None,
+                        }
                     }
                     _ => Some(Err("lat and lon are numbers".into())),
                 }
