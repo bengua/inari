@@ -93,6 +93,26 @@ KITSUNE_EMBED_URL=http://127.0.0.1:8082/v1 KITSUNE_EMBED_MODEL=multilingual-e5-s
   cargo test -p kitsune --release --test live_models -- --ignored --nocapture
 ```
 
+## Les rappels qui sonnent
+
+L'ordonnanceur du cœur regarde toutes les `tick_seconds` (30 par défaut) quels rappels d'heure sont
+dus. Chacun **sonne une seule fois**. Si le cœur était éteint, ce qui a été manqué sonne d'un coup
+au réveil. Toutes les `retry_seconds` (300 par défaut), il relance `retry`.
+
+Un rappel qui sonne :
+
+- s'affiche sur la page Kitsune (flux SSE `GET /api/kitsune/events`, réservé au propriétaire) et
+  **reste à l'écran** jusqu'à « Done » ou « In 1 h » : pour une personne TDAH, un rappel qui
+  disparaît tout seul est un rappel perdu. La page vibre, et elle notifie quand elle est cachée, si
+  la permission a été donnée ;
+- est envoyé au **webhook local** réglé (n8n, Home Assistant…), en `POST {event:
+  "kitsune.reminder", note}`, sur le réseau privé uniquement.
+
+Les rappels de lieu ne sondent jamais le GPS. C'est le **géorepérage du système** du téléphone qui
+signale une entrée (action `entered {lat, lon}`). Les rappels de la zone sonnent alors, puis se
+taisent pendant `geofence_quiet_minutes` (30 par défaut), pour ne pas sonner à chaque passage
+devant la porte. Tous ces réglages sont dans `rings`.
+
 ## Le chiffrement au repos (incrément 4)
 
 Les fichiers audio — captures vocales brutes et voix synthétisée, le gros de ce qui est
@@ -148,10 +168,11 @@ l'expose par une API **réservée au propriétaire** :
 - `POST /api/kitsune {action, …}` — `set_settings`, `capture_text`, `ingest_voice` (audio en
   base64), `list_notes`, `search` (`mode` `hybrid` | `fts` | `semantic`, `limit`, `filters`),
   `speak`, `get_note`, `correct_note`, `delete_note`, `seen_at` (position passive du téléphone),
-  `retry`, et pour les rappels `set_reminder`
+  `entered` (le géorepérage du téléphone signale une entrée), `retry`, et pour les rappels `set_reminder`
   (`{trigger_type: "time", due_date}` ou `{trigger_type: "geofence", latitude, longitude,
   radius_meters}`), `reminders` (`trigger_type` facultatif), `snooze` (`due_date`) et `dismiss`.
 - `GET /api/kitsune/audio?path=` — l'audio scellé, ouvert.
+- `GET /api/kitsune/events` — les rappels au moment où ils sonnent (SSE, `event: ring`).
 
 Et **une porte pour le réseau agentique** : `POST /api/kitsune/mcp` reçoit une requête MCP
 (JSON-RPC). Le propriétaire y accède toujours ; un autre appelant (n8n, Home Assistant) présente

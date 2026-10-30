@@ -454,6 +454,14 @@ impl Store {
         )? == 1)
     }
 
+    /// Mark a note as having rung at `at` (seconds since the epoch).
+    pub fn mark_notified(&self, id: i64, at: i64) -> Result<bool> {
+        Ok(self.conn.execute(
+            "UPDATE notes SET notified_at = ?2 WHERE id = ?1",
+            params![id, clock::iso(at)],
+        )? == 1)
+    }
+
     /// The notes whose audio still waits for its words, oldest first.
     pub fn pending_transcriptions(&self) -> Result<Vec<Note>> {
         let mut st = self.conn.prepare(&format!(

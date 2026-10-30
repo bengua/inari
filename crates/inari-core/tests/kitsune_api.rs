@@ -695,3 +695,116 @@ async fn a_capture_heard_too_poorly_is_refused_and_nothing_is_kept() {
     let (_, status) = call(port, owner, "GET", "/api/kitsune", None).await;
     assert_eq!(status["notes"], 0);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_due_reminder_rings_on_the_page_and_a_place_rings_on_entry() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let dir = tempfile::tempdir().unwrap();
+    let home = node(dir.path()).await;
+    let port = home.gateway_port;
+    let owner = "token=owner";
+    call(
+        port,
+        owner,
+        "POST",
+        "/api/kitsune",
+        Some(json!({"action": "set_settings", "settings": {"rings": {"tick_seconds": 1}}})),
+    )
+    .await;
+
+    // the page listens
+    let mut s = tokio::net::TcpStream::connect(("127.0.0.1", port))
+        .await
+        .unwrap();
+    s.write_all(format!("GET /api/kitsune/events?{owner} HTTP/1.1\r\nHost: x\r\n\r\n").as_bytes())
+        .await
+        .unwrap();
+
+    // a reminder already due
+    let (_, kept) = call(
+        port,
+        owner,
+        "POST",
+        "/api/kitsune",
+        Some(json!({"action": "capture_text", "text": "Appeler le comptable"})),
+    )
+    .await;
+    let id = kept["id"].as_i64().unwrap();
+    call(
+        port,
+        owner,
+        "POST",
+        "/api/kitsune",
+        Some(json!({"action": "set_reminder", "id": id,
+        "reminder": {"trigger_type": "time", "due_date": "2020-01-01T09:00:00Z"}})),
+    )
+    .await;
+
+    let mut got = Vec::new();
+    let mut buf = [0u8; 4096];
+    let rang = tokio::time::timeout(Duration::from_secs(10), async {
+        while !String::from_utf8_lossy(&got).contains("event: ring")
+            || !String::from_utf8_lossy(&got).ends_with("\n\n")
+        {
+            let n = s.read(&mut buf).await.unwrap();
+            assert!(n > 0, "the stream closed");
+            got.extend_from_slice(&buf[..n]);
+        }
+    })
+    .await;
+    assert!(
+        rang.is_ok(),
+        "no ring within 10 s: {}",
+        String::from_utf8_lossy(&got)
+    );
+    let text = String::from_utf8_lossy(&got);
+    assert!(text.starts_with("HTTP/1.1 200"), "{text}");
+    assert!(
+        text.contains("Appeler le comptable") && text.contains("\"notified_at\""),
+        "{text}"
+    );
+
+    // a place reminder rings when the phone says it was entered, then stays quiet
+    let (_, julie) = call(
+        port,
+        owner,
+        "POST",
+        "/api/kitsune",
+        Some(json!({"action": "capture_text", "text": "Donner le code à Julie"})),
+    )
+    .await;
+    let jid = julie["id"].as_i64().unwrap();
+    call(port, owner, "POST", "/api/kitsune", Some(json!({"action": "set_reminder", "id": jid,
+        "reminder": {"trigger_type": "geofence", "latitude": 48.8650, "longitude": 2.3780, "radius_meters": 100}}))).await;
+    let (st, far) = call(
+        port,
+        owner,
+        "POST",
+        "/api/kitsune",
+        Some(json!({"action": "entered", "lat": 48.8704, "lon": 2.3780})),
+    )
+    .await;
+    assert_eq!((st, far["rang"].as_array().unwrap().len()), (200, 0));
+    let (_, near) = call(
+        port,
+        owner,
+        "POST",
+        "/api/kitsune",
+        Some(json!({"action": "entered", "lat": 48.8654, "lon": 2.3780})),
+    )
+    .await;
+    assert_eq!(near["rang"][0]["id"], jid);
+    let (_, again) = call(
+        port,
+        owner,
+        "POST",
+        "/api/kitsune",
+        Some(json!({"action": "entered", "lat": 48.8654, "lon": 2.3780})),
+    )
+    .await;
+    assert_eq!(again["rang"].as_array().unwrap().len(), 0);
+
+    // a guest cannot listen
+    let (st, _) = call(port, "token=nope", "GET", "/api/kitsune/events", None).await;
+    assert_eq!(st, 401);
+}

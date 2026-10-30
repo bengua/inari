@@ -48,6 +48,9 @@ pub struct Settings {
     /// What the MCP face offers the agentic network.
     #[serde(default)]
     pub mcp: McpConfig,
+    /// How reminders ring.
+    #[serde(default)]
+    pub rings: crate::rings::RingConfig,
 }
 
 /// A thought to keep, and where it comes from.

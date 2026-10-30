@@ -69,3 +69,7 @@ textarea.kfield { resize:vertical; min-height:56px; }
 .ktri .kmeta { margin-top:4px; }
 .ktri.off .ktri-text { color:var(--faint); }
 @media (max-width:820px) { #kmain { grid-template-columns:minmax(0,1fr); } #kstage { min-height:46vh; } .kwhen { width:auto; flex:1 1 8em; } }
+
+.kring { justify-self:stretch; padding:14px 16px; border:1px solid var(--copper); border-radius:13px; background:var(--panel-solid); box-shadow:var(--shadow); }
+.kring-text { margin:0; font-size:16px; line-height:1.45; overflow-wrap:anywhere; }
+.kring-acts { display:flex; gap:8px; justify-content:flex-end; margin-top:10px; }
