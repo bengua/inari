@@ -36,10 +36,16 @@ const MIGRATIONS: &[Migration] = &[
         up: include_str!("../migrations/0004_triggers.up.sql"),
         down: include_str!("../migrations/0004_triggers.down.sql"),
     },
+    Migration {
+        version: 5,
+        name: "brain",
+        up: include_str!("../migrations/0005_brain.up.sql"),
+        down: include_str!("../migrations/0005_brain.down.sql"),
+    },
 ];
 
 /// The newest schema this build knows.
-pub const LATEST: u32 = 4;
+pub const LATEST: u32 = 5;
 
 fn ledger(conn: &Connection) -> Result<()> {
     conn.execute_batch(
@@ -69,6 +75,20 @@ pub fn migrate_to(conn: &mut Connection, target: u32) -> Result<u32> {
             "schema {target} is newer than this build knows ({LATEST})"
         )));
     }
+    // vec0 tables need sqlite-vec on this connection; and a table rebuilt by a migration must not
+    // set off the cascades of the tables that point at it (the audio of a note), so foreign keys
+    // stay off while the schema moves (they cannot change inside a transaction)
+    crate::vecext::load(conn)?;
+    let keys: i64 = conn.query_row("PRAGMA foreign_keys", [], |r| r.get(0))?;
+    conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
+    let moved = step(conn, target);
+    if keys == 1 {
+        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+    }
+    moved
+}
+
+fn step(conn: &mut Connection, target: u32) -> Result<u32> {
     let mut now = version(conn)?;
     if now > LATEST {
         return Err(Error::Invalid(format!(
@@ -81,7 +101,7 @@ pub fn migrate_to(conn: &mut Connection, target: u32) -> Result<u32> {
         tx.execute_batch(m.up)?;
         tx.execute(
             "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?1, ?2, ?3)",
-            params![m.version, m.name, crate::store::now()],
+            params![m.version, m.name, crate::clock::now() as f64],
         )?;
         tx.commit()?;
         now = m.version;
@@ -136,7 +156,14 @@ mod tests {
             assert_eq!(version(&conn).unwrap(), v);
             seen.push(objects(&conn));
         }
-        assert!(seen.last().unwrap().contains(&"triggers".to_string()));
+        let last = seen.last().unwrap();
+        for t in ["notes", "notes_fts", "notes_vec", "notes_geo", "audio_refs"] {
+            assert!(last.contains(&t.to_string()), "{t} in {last:?}");
+        }
+        assert!(
+            !last.contains(&"triggers".to_string()),
+            "reminders live on the note now"
+        );
         // down one at a time: each step leaves exactly what the step below had
         for v in (0..LATEST).rev() {
             migrate_to(&mut conn, v).unwrap();

@@ -1,16 +1,20 @@
-//! The whole second brain behind one door: the store, the sealed audio, and the servers it uses
-//! (voice-to-text now, voice synthesis later). This is what a core holds and what the GUI
-//! configures; everything a path or a server address is a setting kept in `config.json`, never
+//! The whole second brain behind one door: the store (`brain.db`), the sealed audio, and the local
+//! servers it uses (voice-to-text, voice synthesis). This is what a core holds and what the GUI
+//! configures; every path and server address is a setting kept in `config.json`, never
 //! hard-coded. Opening it readies the store (its schema) and the audio key.
 
 use crate::asr::{self, AsrConfig};
-use crate::mcp::Config as McpConfig;
-use crate::store::{AudioRef, NewNote};
+use crate::mcp::{Config as McpConfig, Memory};
+use crate::search::{Mode, SearchOptions};
+use crate::store::{AudioRef, NewNote, Note};
 use crate::tts::{self, TtsConfig};
-use crate::{AudioVault, Key, Result, Store};
+use crate::{AudioVault, Error, Key, Result, Store};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
+
+/// The store's file under the brain's folder.
+pub const DB_FILE: &str = "brain.db";
 
 /// Everything the brain is told, from the GUI. Nothing here is assumed.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -35,11 +39,23 @@ pub struct Kitsune {
 }
 
 impl Kitsune {
-    /// Open (or create) a brain under `dir`: the store at `dir/kitsune.db`, the audio sealed under
-    /// `dir/audio/` with the key at `dir/audio.key`, the settings at `dir/config.json`.
+    /// Open (or create) a brain under `dir`: the store at `dir/brain.db` (an earlier
+    /// `kitsune.db` is taken over), the audio sealed under `dir/audio/` with the key at
+    /// `dir/audio.key`, the settings at `dir/config.json`.
     pub fn open(dir: &Path) -> Result<Self> {
-        std::fs::create_dir_all(dir).map_err(|e| crate::Error::Invalid(e.to_string()))?;
-        let store = Store::open(&dir.join("kitsune.db"))?;
+        std::fs::create_dir_all(dir).map_err(|e| Error::Invalid(e.to_string()))?;
+        let db = dir.join(DB_FILE);
+        let old = dir.join("kitsune.db");
+        if !db.exists() && old.exists() {
+            for ext in ["", "-wal", "-shm"] {
+                let from = PathBuf::from(format!("{}{ext}", old.display()));
+                if from.exists() {
+                    std::fs::rename(&from, format!("{}{ext}", db.display()))
+                        .map_err(|e| Error::Invalid(e.to_string()))?;
+                }
+            }
+        }
+        let store = Store::open(&db)?;
         let key = Key::load_or_create(&dir.join("audio.key"))?;
         let vault = AudioVault::new(dir, key);
         let settings = std::fs::read(dir.join("config.json"))
@@ -63,7 +79,7 @@ impl Kitsune {
             self.dir.join("config.json"),
             serde_json::to_vec_pretty(&s).expect("serializes"),
         )
-        .map_err(|e| crate::Error::Invalid(e.to_string()))?;
+        .map_err(|e| Error::Invalid(e.to_string()))?;
         self.settings = s;
         Ok(())
     }
@@ -76,47 +92,51 @@ impl Kitsune {
         &self.vault
     }
 
-    /// Keep a written note.
-    pub fn capture_text(&self, text: &str, tags: Vec<String>) -> Result<i64> {
-        self.store.capture_note(&NewNote {
-            text: text.into(),
-            source: "text".into(),
+    /// Keep a note from words, read the way every note is read.
+    pub fn note_from_words(&self, raw: &str, source: &str, tags: Vec<String>) -> Result<Note> {
+        let id = self.store.insert_note(&NewNote {
+            raw_transcript: raw.into(),
+            source: source.into(),
             tags,
             ..Default::default()
-        })
+        })?;
+        Ok(self.store.get_note(id)?.expect("just kept"))
+    }
+
+    /// Keep a written note.
+    pub fn capture_text(&self, text: &str, tags: Vec<String>) -> Result<i64> {
+        Ok(self.note_from_words(text, "text", tags)?.id)
     }
 
     /// A voice capture, start to end: seal the audio, transcribe it, keep the note linked to it.
-    /// When the server cannot transcribe, the audio is kept and the note waits for a review, so
-    /// nothing the person said is ever lost.
+    /// When the server cannot be reached, the audio is kept and the note waits for its
+    /// transcription, so nothing the person said is ever lost.
     pub fn ingest_voice(&self, wav: &[u8], place: &str, at: Option<(f64, f64)>) -> Result<i64> {
         let rel = self.vault.put(wav, "wav")?;
-        let transcription = asr::transcribe(&self.settings.asr, wav);
         let (lat, lon) = match at {
             Some((la, lo)) => (Some(la), Some(lo)),
             None => (None, None),
         };
-        let note = match &transcription {
+        let note = match asr::transcribe(&self.settings.asr, wav) {
             Ok(text) => NewNote {
-                text: text.clone(),
+                raw_transcript: text,
                 source: "voice".into(),
                 lang: self.settings.asr.language.clone(),
-                place: place.into(),
-                lat,
-                lon,
+                location_raw: place.into(),
+                latitude: lat,
+                longitude: lon,
                 ..Default::default()
             },
             Err(_) => NewNote {
-                text: String::new(),
                 source: "voice".into(),
-                needs_review: true,
-                place: place.into(),
-                lat,
-                lon,
+                status: "pending_transcription".into(),
+                location_raw: place.into(),
+                latitude: lat,
+                longitude: lon,
                 ..Default::default()
             },
         };
-        let note_id = self.store.capture_note(&note)?;
+        let note_id = self.store.insert_note(&note)?;
         self.store.add_audio(&AudioRef {
             id: 0,
             kind: "capture".into(),
@@ -136,7 +156,7 @@ impl Kitsune {
     pub fn speak(&self, text: &str, note_id: Option<i64>) -> Result<(Vec<u8>, String, String)> {
         if let Some(id) = note_id {
             if self.store.get_note(id)?.is_none() {
-                return Err(crate::Error::Invalid(format!("no note {id} to speak")));
+                return Err(Error::Invalid(format!("no note {id} to speak")));
             }
         }
         let (audio, format) = tts::synthesize(&self.settings.tts, text)?;
@@ -156,60 +176,39 @@ impl Kitsune {
         Ok((audio, mime, rel))
     }
 
+    /// Search the notes as the search box and the MCP tool ask.
+    pub fn search(&self, query: &str, opts: &SearchOptions) -> Result<Vec<crate::Hit>> {
+        self.store.search(query, None, opts)
+    }
+
     /// Answer one MCP request against the brain (the agentic network's door).
     pub fn mcp(&self, request: &Value) -> Option<Value> {
-        // synthesize_speech needs the vault and the voice server, so the facade answers it here;
-        // the rest is the store-only handler
-        let method = request.get("method").and_then(Value::as_str).unwrap_or("");
-        let name = request
-            .pointer("/params/name")
-            .and_then(Value::as_str)
-            .unwrap_or("");
-        if method == "tools/call"
-            && name == "synthesize_speech"
-            && self.settings.mcp.offers("synthesize_speech")
-        {
-            let id = request.get("id").cloned()?;
-            let args = request
-                .pointer("/params/arguments")
-                .cloned()
-                .unwrap_or(json!({}));
-            if !self.settings.mcp.token.is_empty()
-                && args.get("_auth").and_then(Value::as_str)
-                    != Some(self.settings.mcp.token.as_str())
-            {
-                return Some(
-                    json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32001, "message": "this tool needs the right _auth token"}}),
-                );
-            }
-            let text = args.get("text").and_then(Value::as_str).unwrap_or("");
-            let note_id = args.get("note_id").and_then(Value::as_i64);
-            let result = match self.speak(text, note_id) {
-                Ok((_audio, mime, rel)) => {
-                    json!({"content": [{"type": "text", "text": format!("Spoke it ({mime}), kept at {rel}.")}]})
-                }
-                Err(e) => {
-                    json!({"content": [{"type": "text", "text": e.to_string()}], "isError": true})
-                }
-            };
-            return Some(json!({"jsonrpc": "2.0", "id": id, "result": result}));
-        }
-        let mut cfg = self.settings.mcp.clone();
-        if cfg.embed_model.is_empty() {
-            cfg.embed_model = self.settings.embed_model.clone();
-        }
-        let mut reply = crate::mcp::handle(&self.store, &cfg, request)?;
-        // add synthesize_speech to the list the facade can serve (the store handler does not know it)
-        if method == "tools/list" && self.settings.tts.ready() && cfg.offers("synthesize_speech") {
-            if let Some(tools) = reply
-                .pointer_mut("/result/tools")
-                .and_then(Value::as_array_mut)
-            {
-                tools.push(json!({"name": "synthesize_speech", "description": "Say a text aloud in the configured voice; keeps the audio, linked to a note when note_id is given.",
-                    "inputSchema": {"type": "object", "properties": {"text": {"type": "string"}, "note_id": {"type": "integer"}}, "required": ["text"]}}));
-            }
-        }
-        Some(reply)
+        crate::mcp::handle(self, &self.settings.mcp, request)
+    }
+}
+
+/// The four MCP tools, done by the whole brain.
+impl Memory for Kitsune {
+    fn search_notes(&self, query: &str, mode: Mode, limit: usize) -> Result<Vec<Note>> {
+        let opts = SearchOptions {
+            mode,
+            limit,
+            ..Default::default()
+        };
+        Ok(self
+            .search(query, &opts)?
+            .into_iter()
+            .map(|h| h.note)
+            .collect())
+    }
+    fn get_active_reminders(&self, trigger_type: Option<&str>) -> Result<Vec<Note>> {
+        self.store.active_reminders(trigger_type)
+    }
+    fn create_note(&self, raw_transcript: &str) -> Result<Note> {
+        self.note_from_words(raw_transcript, "mcp", Vec::new())
+    }
+    fn dismiss_reminder(&self, note_id: i64) -> Result<bool> {
+        self.store.dismiss(note_id)
     }
 }
 
@@ -283,12 +282,20 @@ mod tests {
             .unwrap();
         let note = k.store().get_note(id).unwrap().unwrap();
         assert_eq!(
-            (note.text.as_str(), note.status.as_str(), note.lang.as_str()),
-            ("Acheter des piles", "ok", "fr")
+            (
+                note.raw_transcript.as_str(),
+                note.status.as_str(),
+                note.lang.as_str()
+            ),
+            ("Acheter des piles", "active", "fr")
         );
-        assert_eq!(note.place, "Cuisine");
+        assert_eq!(
+            (note.location_raw.as_str(), note.source.as_str()),
+            ("Cuisine", "voice")
+        );
+        assert!(dir.path().join(DB_FILE).is_file(), "the store is brain.db");
         // found by word, accents folded
-        assert_eq!(k.store().search_text("piles", 5).unwrap()[0].0.id, id);
+        assert_eq!(k.store().fts("piles", 5).unwrap()[0].0, id);
         // the audio is sealed on disk and reads back
         let audio = k.store().audio_of(id).unwrap();
         assert_eq!(audio.len(), 1);
@@ -325,30 +332,43 @@ mod tests {
         .unwrap();
         let id = k.ingest_voice(b"RIFF fake wav", "", None).unwrap();
         let note = k.store().get_note(id).unwrap().unwrap();
-        assert_eq!(note.status, "needs_review");
+        assert_eq!(note.status, "pending_transcription");
         // the audio is still there, so nothing said is lost
         assert_eq!(k.store().audio_of(id).unwrap().len(), 1);
-        // a correction later makes it ok
+        // a correction later makes it active
         k.store().correct_note(id, "Rappeler le médecin").unwrap();
-        assert_eq!(k.store().get_note(id).unwrap().unwrap().status, "ok");
+        assert_eq!(k.store().get_note(id).unwrap().unwrap().status, "active");
     }
 
     #[test]
-    fn the_mcp_door_uses_the_configured_embedding_model() {
+    fn the_mcp_door_is_the_whole_brain() {
         let dir = tempfile::tempdir().unwrap();
-        let mut k = Kitsune::open(dir.path()).unwrap();
-        k.set_settings(Settings {
-            embed_model: "minilm".into(),
-            ..Default::default()
-        })
-        .unwrap();
+        let k = Kitsune::open(dir.path()).unwrap();
         k.capture_text("note écrite", vec!["perso".into()]).unwrap();
         let req = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "search_notes", "arguments": {"query": "écrite"}}});
         let reply = k.mcp(&req).unwrap();
-        assert!(reply["result"]["content"][0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("note écrite"));
+        assert_eq!(
+            reply["result"]["structuredContent"]["notes"][0]["clean_summary"],
+            "note écrite"
+        );
+        let made = k.mcp(&json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "create_note", "arguments": {"raw_transcript": "dicté par un agent"}}})).unwrap();
+        assert_eq!(made["result"]["structuredContent"]["note"]["source"], "mcp");
+    }
+
+    #[test]
+    fn an_earlier_kitsune_db_is_taken_over() {
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let s = Store::open(&dir.path().join("kitsune.db")).unwrap();
+            s.insert_note(&NewNote {
+                raw_transcript: "ancienne note".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        }
+        let k = Kitsune::open(dir.path()).unwrap();
+        assert!(!dir.path().join("kitsune.db").exists());
+        assert_eq!(k.store().fts("ancienne", 3).unwrap().len(), 1);
     }
 
     /// A stand-in voice server: answers raw audio bytes with a content type.
@@ -395,7 +415,7 @@ mod tests {
     }
 
     #[test]
-    fn a_note_is_spoken_sealed_and_offered_over_mcp() {
+    fn a_note_is_spoken_and_sealed() {
         let dir = tempfile::tempdir().unwrap();
         let (url, seen) = fake_tts(b"ID3 fake mp3 audio", "audio/mpeg", "200 OK");
         let mut k = Kitsune::open(dir.path()).unwrap();
@@ -434,41 +454,17 @@ mod tests {
         // speaking an unknown note is refused
         assert!(k.speak("x", Some(999)).is_err());
 
-        // over MCP: the tool is listed (tts ready) and calling it speaks
+        // speech stays the owner's (the page's voice): the MCP face offers only the four tools
         let list = k
             .mcp(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}))
             .unwrap();
-        let names: Vec<&str> = list["result"]["tools"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|t| t["name"].as_str().unwrap())
-            .collect();
-        assert!(names.contains(&"synthesize_speech"));
-        let call = k.mcp(&json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "synthesize_speech", "arguments": {"text": "Salut"}}})).unwrap();
-        assert!(call["result"]["content"][0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("Spoke it"));
+        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 4);
     }
 
     #[test]
-    fn without_a_voice_server_speaking_says_so_and_mcp_hides_the_tool() {
+    fn without_a_voice_server_speaking_says_so() {
         let dir = tempfile::tempdir().unwrap();
         let k = Kitsune::open(dir.path()).unwrap();
         assert!(k.speak("x", None).is_err());
-        let list = k
-            .mcp(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}))
-            .unwrap();
-        let names: Vec<&str> = list["result"]["tools"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|t| t["name"].as_str().unwrap())
-            .collect();
-        assert!(
-            !names.contains(&"synthesize_speech"),
-            "no voice server: the tool is not offered"
-        );
     }
 }

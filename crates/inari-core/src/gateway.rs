@@ -2133,8 +2133,8 @@ impl Gateway {
                 .with_kitsune(move |k| {
                     let s = k.settings();
                     json!({"settings": s, "asr_ready": s.asr.ready(), "tts_ready": s.tts.ready(),
-                           "notes": k.store().notes_between(0.0, f64::MAX).map(|n| n.len()).unwrap_or(0),
-                           "triggers": k.store().list_triggers().map(|t| t.len()).unwrap_or(0),
+                           "notes": k.store().count_notes().unwrap_or(0),
+                           "reminders": k.store().active_reminders(None).map(|r| r.len()).unwrap_or(0),
                            "mascot": mascot})
                 })
                 .await
@@ -2215,23 +2215,29 @@ impl Gateway {
             }
             "search" => {
                 let query = s(&d, "query");
-                let opts = kitsune::SearchOptions {
-                    k: d.get("k")
+                let mode: std::result::Result<kitsune::Mode, _> = s(&d, "mode").parse();
+                let opts = mode.map(|mode| kitsune::SearchOptions {
+                    mode,
+                    limit: d
+                        .get("limit")
                         .and_then(Value::as_u64)
                         .unwrap_or(10)
                         .clamp(1, 100) as usize,
                     filters: serde_json::from_value(d.get("filters").cloned().unwrap_or(json!({})))
                         .unwrap_or_default(),
                     ..Default::default()
-                };
-                self.with_kitsune(move |k| {
-                    let model = k.settings().embed_model.clone();
-                    k.store()
-                        .search(&query, None, &model, &opts)
-                        .map(|hits| json!({"hits": hits}))
-                        .map_err(|e| e.to_string())
-                })
-                .await
+                });
+                match opts {
+                    Ok(opts) => {
+                        self.with_kitsune(move |k| {
+                            k.search(&query, &opts)
+                                .map(|hits| json!({"hits": hits}))
+                                .map_err(|e| e.to_string())
+                        })
+                        .await
+                    }
+                    Err(e) => Some(Err(e.to_string())),
+                }
             }
             "speak" => {
                 let text = s(&d, "text");
@@ -2243,34 +2249,53 @@ impl Gateway {
                 })
                 .await
             }
-            "create_trigger" => {
-                let kind = s(&d, "kind");
-                let spec = d.get("spec").cloned().unwrap_or(json!({}));
-                let note_id = d.get("note_id").and_then(Value::as_i64);
-                let next_at = d.get("next_at").and_then(Value::as_f64);
+            "set_reminder" => {
+                let id = d.get("id").and_then(Value::as_i64).unwrap_or(-1);
+                let reminder: std::result::Result<kitsune::Reminder, _> =
+                    serde_json::from_value(d.get("reminder").cloned().unwrap_or(Value::Null));
+                match reminder {
+                    Ok(reminder) => {
+                        self.with_kitsune(move |k| {
+                            k.store()
+                                .set_reminder(id, &reminder)
+                                .map(|ok| json!({"ok": ok}))
+                                .map_err(|e| e.to_string())
+                        })
+                        .await
+                    }
+                    Err(e) => Some(Err(format!("bad reminder: {e}"))),
+                }
+            }
+            "reminders" => {
+                let kind = d
+                    .get("trigger_type")
+                    .and_then(Value::as_str)
+                    .map(String::from);
                 self.with_kitsune(move |k| {
                     k.store()
-                        .create_trigger(&kind, note_id, &spec, next_at)
-                        .map(|id| json!({"id": id}))
+                        .active_reminders(kind.as_deref())
+                        .map(|r| json!({"reminders": r}))
                         .map_err(|e| e.to_string())
                 })
                 .await
             }
-            "list_triggers" => {
-                self.with_kitsune(|k| {
-                    k.store()
-                        .list_triggers()
-                        .map(|t| json!({"triggers": t}))
-                        .map_err(|e| e.to_string())
-                })
-                .await
-            }
-            "delete_trigger" => {
+            "dismiss" => {
                 let id = d.get("id").and_then(Value::as_i64).unwrap_or(-1);
                 self.with_kitsune(move |k| {
                     k.store()
-                        .delete_trigger(id)
-                        .map(|gone| json!({"removed": gone}))
+                        .dismiss(id)
+                        .map(|ok| json!({"ok": ok}))
+                        .map_err(|e| e.to_string())
+                })
+                .await
+            }
+            "snooze" => {
+                let id = d.get("id").and_then(Value::as_i64).unwrap_or(-1);
+                let due = s(&d, "due_date");
+                self.with_kitsune(move |k| {
+                    k.store()
+                        .snooze(id, &due)
+                        .map(|ok| json!({"ok": ok}))
                         .map_err(|e| e.to_string())
                 })
                 .await
