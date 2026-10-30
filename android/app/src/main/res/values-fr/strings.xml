@@ -28,4 +28,13 @@
     <string name="inari_hint_core">L’adresse répond mais pas le cœur : vérifiez que le cœur tourne sur cette machine.</string>
     <string name="inari_hint_certificate">L’adresse présente un certificat auquel le téléphone ne fait pas confiance : vérifiez l’adresse dans les réglages.</string>
     <string name="inari_hint_other">Vérifiez l’adresse dans les réglages et le réseau, puis réessayez.</string>
+    <!-- Kitsune on the phone: the widget, the reminders that ring. -->
+    <string name="kitsune_widget_label">Parler à Kitsune</string>
+    <string name="kitsune_widget_about">Un geste, et Kitsune écoute.</string>
+    <string name="kitsune_channel">Rappels Kitsune</string>
+    <string name="kitsune_channel_about">Les notes qui reviennent à une heure ou à un lieu.</string>
+    <string name="kitsune_reminder">Rappel Kitsune</string>
+    <string name="kitsune_done">Fait</string>
+    <string name="kitsune_later">Dans 1 h</string>
+    <string name="kitsune_places_denied">Les rappels de lieu ont besoin de la position, tout le temps : autorisez-la dans les réglages pour qu’ils sonnent.</string>
 </resources>

@@ -5,6 +5,16 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- The app installs its own updates (no store): Android still asks each time. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Kitsune: the voice capture in the page, and its reminders ringing on the phone. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Place reminders: the system's geofencing, which needs the location even in the background.
+         Kitsune itself never asks for a position. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
 
     <application
         android:allowBackup="false"
@@ -52,5 +62,22 @@
                 android:resource="@xml/file_paths" />
         </provider>
         <receiver android:name=".InstallReceiver" android:exported="false" />
+        <!-- Kitsune: alarms, geofences and notification buttons are the app's own; the boot
+             receiver puts them back after a restart or an update. -->
+        <receiver android:name=".KitsuneAlarmReceiver" android:exported="false" />
+        <receiver android:name=".KitsuneGeofenceReceiver" android:exported="false" />
+        <receiver android:name=".KitsuneActionReceiver" android:exported="false" />
+        <receiver android:name=".KitsuneBootReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+        <receiver android:name=".TalkWidget" android:exported="true" android:label="@string/kitsune_widget_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_talk_info" />
+        </receiver>
     </application>
 </manifest>
