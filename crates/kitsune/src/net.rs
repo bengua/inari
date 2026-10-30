@@ -1,12 +1,53 @@
 //! A small blocking HTTP client for the model servers Kitsune uses on the machine or the private
-//! network (a Whisper transcription server, a text-to-speech server): plain HTTP, as Inari's
-//! local engine speaks it, so no async runtime and no TLS stack are pulled into this crate. The
-//! frontier services are not reached from here — these are local models the person runs.
+//! network (transcription, the small language model, embeddings, the geocoder, the voice): plain
+//! HTTP, as Inari's local engine speaks it, so no async runtime and no TLS stack are pulled into
+//! this crate.
+//!
+//! Zero cloud is enforced here, not hoped for: every address a request goes to is resolved first,
+//! and the request is refused unless all of them are on this machine or a private network
+//! (loopback, RFC 1918, link-local, CGNAT/Tailscale, IPv6 ULA). Audio, words and vectors cannot
+//! leave the house through this client, whatever URL a setting holds.
 
 use crate::{Error, Result};
 use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
 use std::time::Duration;
+
+/// Is this address on the machine or a private network?
+pub fn is_private(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            let o = v4.octets();
+            v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || (o[0] == 100 && (64..128).contains(&o[1]))
+        }
+        IpAddr::V6(v6) => {
+            let s = v6.segments();
+            v6.is_loopback()
+                || (s[0] & 0xfe00) == 0xfc00
+                || (s[0] & 0xffc0) == 0xfe80
+                || v6
+                    .to_ipv4_mapped()
+                    .is_some_and(|v4| is_private(IpAddr::V4(v4)))
+        }
+    }
+}
+
+/// The addresses of `host:port`, refused unless every one of them is private.
+fn local_addrs(host: &str, url: &str) -> Result<Vec<SocketAddr>> {
+    let addrs: Vec<SocketAddr> = host
+        .to_socket_addrs()
+        .map_err(|e| Error::Invalid(format!("{url}: the host cannot be resolved ({e})")))?
+        .collect();
+    if addrs.is_empty() || addrs.iter().any(|a| !is_private(a.ip())) {
+        return Err(Error::Invalid(format!(
+            "{url} is not on this machine or the private network: Kitsune sends nothing to the cloud"
+        )));
+    }
+    Ok(addrs)
+}
 
 /// A reply read whole.
 pub struct Response {
@@ -54,7 +95,14 @@ fn target(url: &str) -> Result<Target> {
     })
 }
 
+/// Why a request did not get an answer: the server could not be reached at all (worth trying
+/// again later), as opposed to a server that answered something wrong.
+pub fn unreachable(e: &Error) -> bool {
+    matches!(e, Error::Invalid(m) if m.contains("does not answer") || m.contains("cannot be resolved"))
+}
+
 fn send(
+    method: &str,
     url: &str,
     content_type: &str,
     body: &[u8],
@@ -62,16 +110,21 @@ fn send(
     wait: Duration,
 ) -> Result<Response> {
     let t = target(url)?;
-    let mut stream = TcpStream::connect(&t.host)
+    let addrs = local_addrs(&t.host, url)?;
+    let mut stream = TcpStream::connect(&addrs[..])
         .map_err(|e| Error::Invalid(format!("{url} does not answer ({e})")))?;
     stream.set_read_timeout(Some(wait)).ok();
     stream.set_write_timeout(Some(wait)).ok();
     let mut head = format!(
-        "POST {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\n",
-        t.path,
-        t.authority,
-        body.len()
+        "{method} {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n",
+        t.path, t.authority
     );
+    if method == "POST" {
+        head.push_str(&format!(
+            "Content-Type: {content_type}\r\nContent-Length: {}\r\n",
+            body.len()
+        ));
+    }
     for (k, v) in extra {
         if k.contains([':', '\r', '\n']) || v.contains(['\r', '\n']) {
             return Err(Error::Invalid(format!("a bad header: {k}")));
@@ -131,6 +184,24 @@ fn dechunk(mut data: &[u8]) -> Vec<u8> {
     out
 }
 
+/// GET a URL and read the reply.
+pub fn get(url: &str, extra: &[(String, String)], wait: Duration) -> Result<Response> {
+    send("GET", url, "", &[], extra, wait)
+}
+
+/// A query-string value, percent-encoded (RFC 3986 unreserved characters kept).
+pub fn encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
 /// POST a JSON body and read the reply.
 pub fn post_json(
     url: &str,
@@ -139,6 +210,7 @@ pub fn post_json(
     wait: Duration,
 ) -> Result<Response> {
     send(
+        "POST",
         url,
         "application/json",
         &serde_json::to_vec(body)?,
@@ -199,10 +271,61 @@ pub fn post_multipart(
     }
     body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
     send(
+        "POST",
         url,
         &format!("multipart/form-data; boundary={boundary}"),
         &body,
         extra,
         wait,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_the_machine_and_the_private_network_are_reached() {
+        for ok in [
+            "127.0.0.1",
+            "10.0.0.5",
+            "192.168.1.20",
+            "172.16.3.4",
+            "100.101.102.103",
+            "169.254.1.1",
+            "::1",
+            "fd00::1",
+            "fe80::1",
+        ] {
+            assert!(is_private(ok.parse().unwrap()), "{ok}");
+        }
+        for cloud in [
+            "8.8.8.8",
+            "1.1.1.1",
+            "34.120.0.1",
+            "2001:4860:4860::8888",
+            "100.128.0.1",
+        ] {
+            assert!(!is_private(cloud.parse().unwrap()), "{cloud}");
+        }
+        let e = post_json(
+            "http://1.1.1.1/v1/chat/completions",
+            &serde_json::json!({}),
+            &[],
+            Duration::from_secs(1),
+        )
+        .err()
+        .unwrap();
+        assert!(e.to_string().contains("nothing to the cloud"), "{e}");
+        assert!(!unreachable(&e), "a refused cloud address is not retried");
+    }
+
+    #[test]
+    fn a_query_value_is_encoded() {
+        assert_eq!(
+            encode("12 rue de la Paix, Paris"),
+            "12%20rue%20de%20la%20Paix%2C%20Paris"
+        );
+        assert_eq!(encode("é"), "%C3%A9");
+    }
 }

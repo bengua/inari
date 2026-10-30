@@ -43,6 +43,56 @@ Supprimer une note purge aussi son texte indexé, son vecteur et sa zone (testé
 notes, une recherche plein-texte prend environ 1 ms et une recherche par le sens environ 9 ms
 (benchmark `ten_thousand_notes_are_searched_within_the_budget`, en release).
 
+## Le pipeline de capture
+
+Une pensée suit toujours le même chemin, qu'elle vienne de la voix, du clavier ou d'un agent par
+MCP : **entendue → lue → placée → gardée → comprise**. Chaque serveur est local, réglé dans la GUI,
+et facultatif. Sans lui, la note est quand même gardée et rien n'est perdu.
+
+1. **Entendue** : Whisper (whisper.cpp, faster-whisper) répond en `verbose_json`. Si la moyenne
+   des `avg_logprob` est sous **-1,0**, ou celle des `no_speech_prob` au-dessus de **0,6**, la
+   capture est **refusée comme inaudible** (`AudioInaudible`, HTTP 422). Rien n'est inséré, aucun
+   audio n'est gardé, et Kitsune dit simplement « je n'ai pas bien entendu, redis-le ». Les deux
+   seuils sont des réglages. Si le serveur est absent, l'audio est gardé et la note attend ses mots
+   (`pending_transcription`).
+2. **Lue** : un petit modèle (≤ 3B, llama.cpp…) reçoit la transcription. Son JSON est **contraint par
+   un schéma** (`response_format: json_schema` strict, que llama.cpp compile en grammaire GBNF) :
+   résumé, catégorie (liste réglable), tags, `trigger_type`, moment, lieu. La réponse est lue par
+   serde **telle quelle** : un champ en trop, une valeur hors schéma ou des balises markdown, et
+   elle est refusée, jamais réparée par regex. Sans modèle, ou s'il échoue, la note est gardée
+   telle qu'elle a été dite.
+3. **Les dates sont calculées en Rust, pas par le modèle.** Le modèle dit quel jour (décalage ou
+   date) et quel moment (matin, midi, après-midi, soir, nuit, ou une heure dite). Rust en fait un
+   instant ISO 8601 UTC. « Demain matin » donne le lendemain à **09:00:00 UTC**, et les heures des
+   moments de la journée sont des réglages. Une heure déjà passée aujourd'hui glisse au lendemain :
+   un rappel ne sonne jamais dans le passé.
+4. **Placée** : pour un rappel de lieu, le lieu est cherché sur le géocodeur **auto-hébergé**
+   (Nominatim ou Photon, jamais une instance publique).
+   - Aucun résultat : pas de rappel, statut `failed_geocode`, tag `erreur:geocodage`.
+   - Plusieurs résultats : s'ils désignent le même endroit, c'est lui. Sinon, Kitsune prend le plus
+     proche de la dernière position donnée par le téléphone (passivement, jamais demandée). Sans
+     position connue, le statut est `ambiguous_geocode`.
+   - Géocodeur injoignable : statut `pending_geocode`, et le lieu est réessayé plus tard.
+5. **Comprise** : le résumé reçoit son vecteur de 384 dimensions (serveur d'embeddings local, par
+   exemple multilingual-e5-small). Un modèle qui n'en donne pas 384 est refusé, pas tronqué.
+
+`Kitsune::retry` (action `retry` de l'API) reprend tout ce qui attendait un serveur : l'audio sans
+mots, les lieux pas encore trouvés, les notes sans vecteur.
+
+**Zéro cloud, appliqué dans le code** : chaque adresse est résolue avant l'envoi, et la requête est
+refusée si l'adresse n'est pas sur la machine ou un réseau privé (boucle locale, RFC 1918,
+link-local, CGNAT/Tailscale, ULA IPv6). Même un réglage qui pointerait vers un service public ne
+laisserait sortir ni audio, ni mots, ni vecteurs.
+
+Les tests sur **tes** modèles (les 20 transcriptions en JSON strict, la largeur 384) tournent sur la
+machine qui les sert :
+
+```text
+KITSUNE_SLM_URL=http://127.0.0.1:8081/v1 KITSUNE_SLM_MODEL=qwen2.5-3b-instruct \
+KITSUNE_EMBED_URL=http://127.0.0.1:8082/v1 KITSUNE_EMBED_MODEL=multilingual-e5-small \
+  cargo test -p kitsune --release --test live_models -- --ignored --nocapture
+```
+
 ## Le chiffrement au repos (incrément 4)
 
 Les fichiers audio — captures vocales brutes et voix synthétisée, le gros de ce qui est
@@ -97,7 +147,8 @@ l'expose par une API **réservée au propriétaire** :
   actifs).
 - `POST /api/kitsune {action, …}` — `set_settings`, `capture_text`, `ingest_voice` (audio en
   base64), `list_notes`, `search` (`mode` `hybrid` | `fts` | `semantic`, `limit`, `filters`),
-  `speak`, `get_note`, `correct_note`, `delete_note`, et pour les rappels `set_reminder`
+  `speak`, `get_note`, `correct_note`, `delete_note`, `seen_at` (position passive du téléphone),
+  `retry`, et pour les rappels `set_reminder`
   (`{trigger_type: "time", due_date}` ou `{trigger_type: "geofence", latitude, longitude,
   radius_meters}`), `reminders` (`trigger_type` facultatif), `snooze` (`due_date`) et `dismiss`.
 - `GET /api/kitsune/audio?path=` — l'audio scellé, ouvert.

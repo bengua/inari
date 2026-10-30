@@ -157,6 +157,7 @@ function render() {
    caret, and sent back whole so nothing the page does not know about is lost. */
 function setFill() {
   const s = state.settings || {}, asr = s.asr || {}, tts = s.tts || {};
+  const slm = s.slm || {}, emb = s.embed || {}, geo = s.geocoder || {};
   const put = (id, v) => {
     const el = $(id);
     if (el && document.activeElement !== el) el.value = v || "";
@@ -166,7 +167,12 @@ function setFill() {
   put("kSetAsrLang", asr.language);
   put("kSetTtsUrl", tts.url);
   put("kSetTtsVoice", tts.voice);
-  put("kSetEmbed", s.embed_model);
+  put("kSetSlmUrl", slm.url);
+  put("kSetSlmModel", slm.model);
+  put("kSetEmbedUrl", emb.url);
+  put("kSetEmbed", emb.model);
+  put("kSetGeoUrl", geo.url);
+  put("kSetGeoKind", geo.kind || "nominatim");
 }
 
 async function setSave() {
@@ -178,7 +184,15 @@ async function setSave() {
   s.asr.language = $("kSetAsrLang").value.trim();
   s.tts.url = $("kSetTtsUrl").value.trim();
   s.tts.voice = $("kSetTtsVoice").value.trim();
-  s.embed_model = $("kSetEmbed").value.trim();
+  s.slm = s.slm || {};
+  s.embed = s.embed || {};
+  s.geocoder = s.geocoder || {};
+  s.slm.url = $("kSetSlmUrl").value.trim();
+  s.slm.model = $("kSetSlmModel").value.trim();
+  s.embed.url = $("kSetEmbedUrl").value.trim();
+  s.embed.model = $("kSetEmbed").value.trim();
+  s.geocoder.url = $("kSetGeoUrl").value.trim();
+  s.geocoder.kind = $("kSetGeoKind").value;
   $("kSetState").textContent = "Saving…";
   const d = await api("/api/kitsune", { action: "set_settings", settings: s });
   if (!d || d.error) {
@@ -189,7 +203,9 @@ async function setSave() {
   const on = [];
   if (s.asr.url) on.push("speech to text");
   if (s.tts.url) on.push("text to speech");
-  if (s.embed_model) on.push("embeddings");
+  if (s.slm.url) on.push("understanding");
+  if (s.embed.url) on.push("meaning");
+  if (s.geocoder.url) on.push("places");
   $("kSetState").textContent = on.length ? "Saved. " + on.join(", ") + " on." : "Saved. No server set.";
   say("Settings kept.");
 }
@@ -294,7 +310,8 @@ async function stopTalk() {
   try {
     const wav = await toWav(blob);
     const d = await api("/api/kitsune", { action: "ingest_voice", audio: b64(wav), place: $("kPlace").value.trim() });
-    if (d.error) say("The capture was not kept.");
+    if (d.inaudible) say(d.error);
+    else if (d.error) say("The capture was not kept.");
     else await keep(d.id);
   } catch (e) {
     toast("The audio could not be read: " + ((e && e.message) || e));
@@ -356,6 +373,17 @@ function b64(bytes) {
   return btoa(s);
 }
 
+// what happens next to a kept note, said in one short sentence
+function comesBack(n) {
+  const where = n.location_raw || "that place";
+  if (n.status === "pending_geocode") return ". I will place " + where + " when the map answers.";
+  if (n.status === "failed_geocode") return ". I could not find " + where + ", so no place reminder.";
+  if (n.status === "ambiguous_geocode") return ". Several places are called " + where + ": set it by hand.";
+  if (n.trigger_type === "time") return ". It comes back " + stamp(n.due_date) + ".";
+  if (n.trigger_type === "geofence") return ". It comes back at " + where + ".";
+  return ".";
+}
+
 async function keep(id) {
   const d = await api("/api/kitsune", { action: "get_note", id });
   if (d.error) return;
@@ -363,7 +391,7 @@ async function keep(id) {
   await load();
   if (n.status === "pending_transcription") return showReview(n);
   hideReview();
-  say(words(n) ? "Kept: " + words(n) : "Kept, with the audio.");
+  say(words(n) ? "Kept: " + words(n) + comesBack(n) : "Kept, with the audio.");
 }
 
 function showReview(n) {
