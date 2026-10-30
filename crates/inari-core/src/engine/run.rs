@@ -147,6 +147,32 @@ impl LocalEngine {
         Ok((self.server(provider), model.to_string(), chosen.clone()))
     }
 
+    /// The model an agent or a step names (a tier, or "<provider>/<model>"), else `fallback`
+    /// (the thread's model, or the caller's): a tier that is not set, or a provider that is
+    /// gone, works on the fallback rather than failing the turn.
+    pub(crate) fn model_named(
+        &self,
+        want: &str,
+        fallback: (&llm::Server, &str),
+    ) -> (llm::Server, String) {
+        let s = self.settings();
+        let want = want.trim();
+        let chosen = if want.contains('/') {
+            want
+        } else {
+            s.tiers.get(want).map(String::as_str).unwrap_or("")
+        };
+        chosen
+            .split_once('/')
+            .and_then(|(pid, model)| {
+                s.providers
+                    .iter()
+                    .find(|p| p.id == pid)
+                    .map(|p| (self.server(p), model.to_string()))
+            })
+            .unwrap_or_else(|| (fallback.0.clone(), fallback.1.to_string()))
+    }
+
     /// The system prompt (the same for every top-level agent, so the server's cache keeps it).
     pub(crate) fn system_for(&self, t: &Turn, shown_model: &str) -> String {
         let s = self.settings();
@@ -712,7 +738,7 @@ impl LocalEngine {
             "call_sub_agent" => {
                 let kind = text("subAgentType");
                 let prompt = text("prompt");
-                let out = self.sub_agent(t, run, &kind, &prompt).await?;
+                let out = self.sub_agent(t, run, &kind, &prompt, None).await?;
                 Ok(out.0)
             }
             "step_done" => {
@@ -739,13 +765,17 @@ impl LocalEngine {
         parent: &Run,
         kind: &str,
         prompt: &str,
+        model: Option<&str>,
     ) -> Result<(String, Option<String>), String> {
         let def = defs::agents(&self.dir, Some(&t.workdir))
             .into_iter()
             .find(|a| a.id == kind && a.subagent)
             .ok_or_else(|| format!("no sub-agent {kind:?}"))?;
         let tools = self.tools_for(&def, &["return_value"]);
-        let shown_model = parent.model.to_string();
+        // a sub-agent may work on its own tier: the small jobs on a small model
+        let want = model.unwrap_or(&def.model).to_string();
+        let (server, model) = self.model_named(&want, (&parent.server, &parent.model));
+        let shown_model = model.clone();
         let system = prompts::subagent_system(&self.system_for(t, &shown_model), &def);
         let state = ThreadState::load(&t.path());
         let mut context = prompt.to_string();
@@ -753,8 +783,8 @@ impl LocalEngine {
             context.push_str(&format!("\n\n## Criteria\n{}", state.criteria_list()));
         }
         let mut run = Run {
-            server: parent.server.clone(),
-            model: parent.model.clone(),
+            server,
+            model,
             agent: def,
             tools,
             messages: vec![

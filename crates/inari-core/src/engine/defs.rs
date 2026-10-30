@@ -21,6 +21,9 @@ pub struct AgentDef {
     pub prompt: String,
     /// builtin, user or project.
     pub scope: String,
+    /// The model it works on: a tier the settings map (fast, standard, expert…) or
+    /// "<provider>/<model>"; empty, the thread's (or its caller's) model.
+    pub model: String,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
@@ -148,6 +151,7 @@ pub fn parse_agent(raw: &str, scope: &str) -> Option<AgentDef> {
             .unwrap_or_default(),
         prompt: body,
         scope: scope.into(),
+        model: text(&m, "model"),
     })
 }
 
@@ -300,8 +304,13 @@ pub fn workflows(engine_dir: &Path, workdir: Option<&Path>) -> Vec<(Value, Strin
 /// A definition written back in OpenFox's format.
 pub fn agent_file(a: &AgentDef) -> String {
     let tools: String = a.tools.iter().map(|t| format!("\n  - {t}")).collect();
+    let model = if a.model.is_empty() {
+        String::new()
+    } else {
+        format!("model: {}\n", one_line(&a.model))
+    };
     format!(
-        "---\nid: {}\nname: {}\ndescription: {}\nsubagent: {}\nallowedTools:{tools}\n---\n\n{}\n",
+        "---\nid: {}\nname: {}\ndescription: {}\nsubagent: {}\n{model}allowedTools:{tools}\n---\n\n{}\n",
         a.id,
         one_line(&a.name),
         one_line(&a.description),
