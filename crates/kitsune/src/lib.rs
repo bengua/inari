@@ -6,6 +6,8 @@ pub mod asr;
 pub mod brain;
 pub mod clock;
 pub mod crypto;
+pub mod embed;
+pub mod geocode;
 pub mod mcp;
 pub mod migrate;
 pub mod net;
@@ -13,16 +15,20 @@ pub mod reminders;
 pub mod search;
 pub mod store;
 pub mod tts;
+pub mod understand;
 pub mod vecext;
 
 pub use asr::AsrConfig;
-pub use brain::{Kitsune, Settings};
+pub use brain::{Capture, Kitsune, Retried, Settings};
 pub use crypto::{AudioVault, Key};
+pub use embed::EmbedConfig;
+pub use geocode::GeocoderConfig;
 pub use mcp::Memory;
 pub use migrate::{migrate_to, version, LATEST};
 pub use search::{cosine, haversine_m, Filters, Geo, Hit, Mode, SearchOptions};
 pub use store::{AudioRef, NewNote, Note, Reminder, Store, DIM};
 pub use tts::TtsConfig;
+pub use understand::SlmConfig;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -32,6 +38,9 @@ pub enum Error {
     Json(#[from] serde_json::Error),
     #[error("{0}")]
     Invalid(String),
+    /// The capture could not be heard well enough to be trusted; nothing was kept.
+    #[error("{0}")]
+    Inaudible(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

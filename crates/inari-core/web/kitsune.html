@@ -72,8 +72,21 @@
           <input class="kfield" id="kSetTtsUrl" type="text" placeholder="http://127.0.0.1:8880/v1" autocomplete="off">
           <label class="klab" for="kSetTtsVoice">Its voice</label>
           <input class="kfield" id="kSetTtsVoice" type="text" placeholder="fr_FR-siwis-medium" autocomplete="off">
-          <label class="klab" for="kSetEmbed">Embedding model</label>
-          <input class="kfield" id="kSetEmbed" type="text" placeholder="bge-m3" autocomplete="off">
+          <label class="klab" for="kSetSlmUrl">Understanding (small language model)</label>
+          <input class="kfield" id="kSetSlmUrl" type="text" placeholder="http://127.0.0.1:8081/v1" autocomplete="off">
+          <label class="klab" for="kSetSlmModel">Its model</label>
+          <input class="kfield" id="kSetSlmModel" type="text" placeholder="qwen2.5-3b-instruct" autocomplete="off">
+          <label class="klab" for="kSetEmbedUrl">Meaning (384-wide embeddings)</label>
+          <input class="kfield" id="kSetEmbedUrl" type="text" placeholder="http://127.0.0.1:8082/v1" autocomplete="off">
+          <label class="klab" for="kSetEmbed">Its model</label>
+          <input class="kfield" id="kSetEmbed" type="text" placeholder="multilingual-e5-small" autocomplete="off">
+          <label class="klab" for="kSetGeoUrl">Places (your own Nominatim or Photon)</label>
+          <input class="kfield" id="kSetGeoUrl" type="text" placeholder="http://127.0.0.1:8088" autocomplete="off">
+          <label class="klab" for="kSetGeoKind">Its kind</label>
+          <select class="kfield" id="kSetGeoKind">
+            <option value="nominatim">Nominatim</option>
+            <option value="photon">Photon</option>
+          </select>
           <button class="btn small go" id="kSetGo" type="submit">Save</button>
           <p class="kmeta" id="kSetState" aria-live="polite"></p>
         </form>

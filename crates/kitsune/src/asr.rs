@@ -11,7 +11,7 @@ use serde_json::Value;
 use std::time::Duration;
 
 /// How Kitsune reaches the transcription server.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AsrConfig {
     /// The server's base address, e.g. http://127.0.0.1:8080/v1 (empty: no transcription set up).
     #[serde(default)]
@@ -25,6 +25,66 @@ pub struct AsrConfig {
     /// How long a transcription may take, in seconds (0: three minutes).
     #[serde(default)]
     pub timeout: u64,
+    /// A capture whose mean segment `avg_logprob` is below this is refused as inaudible.
+    #[serde(default = "min_avg_logprob")]
+    pub min_avg_logprob: f64,
+    /// A capture whose mean `no_speech_prob` is above this is refused as inaudible.
+    #[serde(default = "max_no_speech_prob")]
+    pub max_no_speech_prob: f64,
+}
+
+fn min_avg_logprob() -> f64 {
+    -1.0
+}
+
+fn max_no_speech_prob() -> f64 {
+    0.6
+}
+
+impl Default for AsrConfig {
+    fn default() -> Self {
+        Self {
+            url: String::new(),
+            model: String::new(),
+            language: String::new(),
+            timeout: 0,
+            min_avg_logprob: min_avg_logprob(),
+            max_no_speech_prob: max_no_speech_prob(),
+        }
+    }
+}
+
+/// What the server heard, and how sure it was.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Transcript {
+    pub text: String,
+    /// The language the server detected (or was told), when it says.
+    pub language: String,
+    /// The mean of the segments' `avg_logprob`, when the server gives segments.
+    pub avg_logprob: Option<f64>,
+    /// The mean of the segments' `no_speech_prob`, when the server gives segments.
+    pub no_speech_prob: Option<f64>,
+}
+
+#[derive(Deserialize)]
+struct Verbose {
+    #[serde(default)]
+    text: String,
+    #[serde(default)]
+    language: String,
+    #[serde(default)]
+    segments: Vec<Segment>,
+}
+
+#[derive(Deserialize)]
+struct Segment {
+    avg_logprob: Option<f64>,
+    no_speech_prob: Option<f64>,
+}
+
+fn mean(xs: impl Iterator<Item = f64>) -> Option<f64> {
+    let (sum, n) = xs.fold((0.0, 0usize), |(s, n), x| (s + x, n + 1));
+    (n > 0).then(|| sum / n as f64)
 }
 
 impl AsrConfig {
@@ -41,8 +101,10 @@ impl AsrConfig {
     }
 }
 
-/// Transcribe a WAV/PCM capture; the recognised text (trimmed), or why it failed.
-pub fn transcribe(cfg: &AsrConfig, wav: &[u8]) -> Result<String> {
+/// Transcribe a WAV/PCM capture (asking for `verbose_json`, so the server says how sure it is).
+/// A capture heard too poorly is refused with [`Error::Inaudible`]; a server that cannot be
+/// reached or answers wrong is an ordinary error, and the caller keeps the audio for later.
+pub fn transcribe(cfg: &AsrConfig, wav: &[u8]) -> Result<Transcript> {
     if !cfg.ready() {
         return Err(Error::Invalid(
             "no transcription server set up: Settings → Kitsune → Voice-to-text".into(),
@@ -55,7 +117,7 @@ pub fn transcribe(cfg: &AsrConfig, wav: &[u8]) -> Result<String> {
             mime: "audio/wav",
             bytes: wav,
         },
-        Part::Field("response_format", "json"),
+        Part::Field("response_format", "verbose_json"),
     ];
     if !cfg.model.trim().is_empty() {
         parts.push(Part::Field("model", cfg.model.trim()));
@@ -71,19 +133,44 @@ pub fn transcribe(cfg: &AsrConfig, wav: &[u8]) -> Result<String> {
             r.text().chars().take(300).collect::<String>()
         )));
     }
-    // the OpenAI shape is {"text": "..."}; some servers answer plain text
+    // verbose_json is {"text", "language", "segments": [{avg_logprob, no_speech_prob, …}]};
+    // a server without it answers {"text"} or plain text, and is then taken at its word
     let body = r.text();
-    let text = match serde_json::from_str::<Value>(&body) {
-        Ok(v) => v
-            .get("text")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string(),
-        Err(_) => body,
+    let heard = match serde_json::from_str::<Value>(&body) {
+        Ok(v) => {
+            let v: Verbose = serde_json::from_value(v)?;
+            Transcript {
+                text: v.text.trim().to_string(),
+                language: v.language,
+                avg_logprob: mean(v.segments.iter().filter_map(|s| s.avg_logprob)),
+                no_speech_prob: mean(v.segments.iter().filter_map(|s| s.no_speech_prob)),
+            }
+        }
+        Err(_) => Transcript {
+            text: body.trim().to_string(),
+            language: String::new(),
+            avg_logprob: None,
+            no_speech_prob: None,
+        },
     };
-    let text = text.trim().to_string();
-    if text.is_empty() {
-        return Err(Error::Invalid("the transcription came back empty".into()));
+    if let Some(lp) = heard.avg_logprob.filter(|lp| *lp < cfg.min_avg_logprob) {
+        return Err(Error::Inaudible(format!(
+            "I could not hear that clearly (confidence {lp:.2}); nothing was kept, say it again"
+        )));
     }
-    Ok(text)
+    if let Some(ns) = heard
+        .no_speech_prob
+        .filter(|ns| *ns > cfg.max_no_speech_prob)
+    {
+        return Err(Error::Inaudible(format!(
+            "that sounded like no speech ({:.0} %); nothing was kept, say it again",
+            ns * 100.0
+        )));
+    }
+    if heard.text.is_empty() {
+        return Err(Error::Inaudible(
+            "nothing was said in that capture; nothing was kept".into(),
+        ));
+    }
+    Ok(heard)
 }

@@ -79,6 +79,26 @@ async fn the_owner_keeps_finds_and_recalls_a_note_and_reaches_the_brain_over_mcp
     .await;
     let note = a["id"].as_i64().unwrap();
 
+    // the phone's passive position is taken, and a retry with nothing waiting does nothing
+    let (st, seen) = call(
+        port,
+        owner,
+        "POST",
+        "/api/kitsune",
+        Some(json!({"action": "seen_at", "lat": 48.85, "lon": 2.35})),
+    )
+    .await;
+    assert_eq!((st, seen["ok"].as_bool()), (200, Some(true)));
+    let (st, retried) = call(
+        port,
+        owner,
+        "POST",
+        "/api/kitsune",
+        Some(json!({"action": "retry"})),
+    )
+    .await;
+    assert_eq!((st, retried["retried"]["placed"].as_i64()), (200, Some(0)));
+
     // find by word, accents folded
     let (_, found) = call(
         port,
@@ -142,9 +162,10 @@ async fn the_owner_keeps_finds_and_recalls_a_note_and_reaches_the_brain_over_mcp
         .contains("Acheter du pain"));
 
     // settings persist (set the embedding model), and are read back
-    call(port, owner, "POST", "/api/kitsune", Some(json!({"action": "set_settings", "settings": {"embed_model": "minilm", "mcp": {"token": "net-token"}}}))).await;
+    call(port, owner, "POST", "/api/kitsune", Some(json!({"action": "set_settings", "settings": {"embed": {"url": "http://127.0.0.1:8082/v1", "model": "minilm"}, "mcp": {"token": "net-token"}}}))).await;
     let (_, after) = call(port, owner, "GET", "/api/kitsune", None).await;
-    assert_eq!(after["settings"]["embed_model"], "minilm");
+    assert_eq!(after["settings"]["embed"]["model"], "minilm");
+    assert_eq!(after["embed_ready"], true);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -533,15 +554,19 @@ async fn the_owner_points_the_core_at_its_own_servers_and_the_page_reads_them_ba
         (status["asr_ready"].as_bool(), status["tts_ready"].as_bool()),
         (Some(false), Some(false))
     );
-    assert_eq!(status["settings"]["embed_model"], "");
+    assert_eq!(status["settings"]["embed"]["url"], "");
+    assert_eq!(status["slm_ready"], false);
+    assert_eq!(status["settings"]["slm"]["day_parts"]["morning"], "09:00");
 
     // the page sends the whole settings back, so what it does not know survives
     let settings = json!({
         "asr": {"url": "http://127.0.0.1:8080/v1", "model": "whisper-1", "language": "fr", "timeout": 60},
         "tts": {"url": "http://127.0.0.1:8880/v1", "model": "kokoro", "voice": "fr_FR-siwis-medium",
                 "format": "wav", "timeout": 60},
-        "embed_model": "bge-m3",
-        "mcp": {"token": "brain", "tools": ["keep"], "embed_model": "bge-m3"}
+        "slm": {"url": "http://127.0.0.1:8081/v1", "model": "qwen2.5-3b-instruct"},
+        "embed": {"url": "http://127.0.0.1:8082/v1", "model": "multilingual-e5-small"},
+        "geocoder": {"url": "http://127.0.0.1:8088", "kind": "photon"},
+        "mcp": {"token": "brain", "tools": ["search_notes"]}
     });
     let (st, saved) = call(
         port,
@@ -562,7 +587,21 @@ async fn the_owner_points_the_core_at_its_own_servers_and_the_page_reads_them_ba
     assert_eq!(status["settings"]["asr"]["model"], "whisper-1");
     assert_eq!(status["settings"]["asr"]["language"], "fr");
     assert_eq!(status["settings"]["tts"]["voice"], "fr_FR-siwis-medium");
-    assert_eq!(status["settings"]["embed_model"], "bge-m3");
+    assert_eq!(
+        status["settings"]["embed"]["model"],
+        "multilingual-e5-small"
+    );
+    assert_eq!(status["settings"]["slm"]["model"], "qwen2.5-3b-instruct");
+    assert_eq!(status["settings"]["geocoder"]["kind"], "photon");
+    assert_eq!(status["settings"]["geocoder"]["radius_meters"], 100);
+    assert_eq!(
+        (
+            status["slm_ready"].as_bool(),
+            status["embed_ready"].as_bool(),
+            status["geocoder_ready"].as_bool()
+        ),
+        (Some(true), Some(true), Some(true))
+    );
     assert_eq!(status["settings"]["mcp"]["token"], "brain");
 
     // kept on disk, so a restart finds the same servers
@@ -582,4 +621,77 @@ async fn the_owner_points_the_core_at_its_own_servers_and_the_page_reads_them_ba
     .await;
     assert_eq!(st, 400);
     assert!(bad["error"].as_str().unwrap_or("").contains("bad settings"));
+}
+
+/// A stand-in Whisper server that hears only noise (verbose_json, high no_speech_prob).
+fn noisy_whisper() -> String {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for mut stream in listener.incoming().flatten() {
+            let mut req = Vec::new();
+            let mut buf = [0u8; 8192];
+            loop {
+                if let Some(h) = req.windows(4).position(|w| w == b"\r\n\r\n") {
+                    let head = String::from_utf8_lossy(&req[..h]).to_ascii_lowercase();
+                    let len: usize = head
+                        .lines()
+                        .find_map(|l| {
+                            l.strip_prefix("content-length:")
+                                .map(|v| v.trim().parse().unwrap_or(0))
+                        })
+                        .unwrap_or(0);
+                    if req.len() >= h + 4 + len {
+                        break;
+                    }
+                }
+                match stream.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => req.extend_from_slice(&buf[..n]),
+                }
+            }
+            let body = r#"{"text":"...","segments":[{"avg_logprob":-1.3,"no_speech_prob":0.9}]}"#;
+            let _ = stream.write_all(
+                format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes(),
+            );
+        }
+    });
+    format!("http://127.0.0.1:{port}/v1")
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_capture_heard_too_poorly_is_refused_and_nothing_is_kept() {
+    use base64::Engine;
+    let dir = tempfile::tempdir().unwrap();
+    let home = node(dir.path()).await;
+    let port = home.gateway_port;
+    let owner = "token=owner";
+    let asr = noisy_whisper();
+    call(
+        port,
+        owner,
+        "POST",
+        "/api/kitsune",
+        Some(json!({"action": "set_settings", "settings": {"asr": {"url": asr, "timeout": 10}}})),
+    )
+    .await;
+
+    let audio = base64::engine::general_purpose::STANDARD.encode(vec![7u8; 3200]);
+    let (st, refused) = call(
+        port,
+        owner,
+        "POST",
+        "/api/kitsune",
+        Some(json!({"action": "ingest_voice", "audio": audio})),
+    )
+    .await;
+    assert_eq!(st, 422, "{refused}");
+    assert_eq!(refused["inaudible"], true);
+    assert!(refused["error"]
+        .as_str()
+        .unwrap()
+        .contains("nothing was kept"));
+    let (_, status) = call(port, owner, "GET", "/api/kitsune", None).await;
+    assert_eq!(status["notes"], 0);
 }

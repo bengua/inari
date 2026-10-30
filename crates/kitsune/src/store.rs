@@ -440,6 +440,40 @@ impl Store {
         Ok(true)
     }
 
+    /// Give a waiting note the words its audio held (a transcription that came later).
+    pub fn set_transcript(&self, id: i64, raw: &str, lang: &str) -> Result<bool> {
+        if raw.trim().is_empty() {
+            return Err(Error::Invalid("a transcript has words".into()));
+        }
+        Ok(self.conn.execute(
+            "UPDATE notes SET raw_transcript = ?2, lang = ?3,
+                    clean_summary = CASE clean_summary WHEN '' THEN ?2 ELSE clean_summary END,
+                    status = CASE status WHEN 'pending_transcription' THEN 'active' ELSE status END
+             WHERE id = ?1",
+            params![id, raw.trim(), lang],
+        )? == 1)
+    }
+
+    /// The notes whose audio still waits for its words, oldest first.
+    pub fn pending_transcriptions(&self) -> Result<Vec<Note>> {
+        let mut st = self.conn.prepare(&format!(
+            "SELECT {NOTE_COLUMNS} FROM notes WHERE status = 'pending_transcription' ORDER BY id"
+        ))?;
+        let rows = st.query_map([], note_of)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Notes with words but no meaning vector yet (the embedding server was away), oldest first.
+    pub fn notes_without_vector(&self, limit: usize) -> Result<Vec<Note>> {
+        let mut st = self.conn.prepare(&format!(
+            "SELECT {NOTE_COLUMNS} FROM notes
+             WHERE clean_summary != '' AND id NOT IN (SELECT note_id FROM notes_vec)
+             ORDER BY id LIMIT ?1"
+        ))?;
+        let rows = st.query_map([limit as i64], note_of)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
     pub fn set_status(&self, id: i64, status: &str) -> Result<bool> {
         if !STATUSES.contains(&status) {
             return Err(Error::Invalid(format!("unknown status {status:?}")));

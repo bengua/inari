@@ -2133,6 +2133,8 @@ impl Gateway {
                 .with_kitsune(move |k| {
                     let s = k.settings();
                     json!({"settings": s, "asr_ready": s.asr.ready(), "tts_ready": s.tts.ready(),
+                           "slm_ready": s.slm.ready(), "embed_ready": s.embed.ready(),
+                           "geocoder_ready": s.geocoder.ready(),
                            "notes": k.store().count_notes().unwrap_or(0),
                            "reminders": k.store().active_reminders(None).map(|r| r.len()).unwrap_or(0),
                            "mascot": mascot})
@@ -2163,6 +2165,13 @@ impl Gateway {
             }
             "capture_text" => {
                 let text = s(&d, "text");
+                let near = match (
+                    d.get("lat").and_then(Value::as_f64),
+                    d.get("lon").and_then(Value::as_f64),
+                ) {
+                    (Some(la), Some(lo)) => Some((la, lo)),
+                    _ => None,
+                };
                 let tags: Vec<String> = d
                     .get("tags")
                     .and_then(Value::as_array)
@@ -2172,9 +2181,15 @@ impl Gateway {
                     .map(String::from)
                     .collect();
                 self.with_kitsune(move |k| {
-                    k.capture_text(&text, tags)
-                        .map(|id| json!({"id": id}))
-                        .map_err(|e| e.to_string())
+                    k.keep(&kitsune::Capture {
+                        raw: text,
+                        source: "text".into(),
+                        tags,
+                        near,
+                        ..Default::default()
+                    })
+                    .map(|n| json!({"id": n.id}))
+                    .map_err(|e| e.to_string())
                 })
                 .await
             }
@@ -2191,10 +2206,13 @@ impl Gateway {
                 if audio.is_empty() {
                     Some(Err("no audio (base64 in the audio field)".into()))
                 } else {
-                    self.with_kitsune(move |k| {
-                        k.ingest_voice(&audio, &place, at)
-                            .map(|id| json!({"id": id}))
-                            .map_err(|e| e.to_string())
+                    // a capture heard too poorly is refused (nothing kept): 422, said plainly
+                    self.with_kitsune(move |k| match k.ingest_voice(&audio, &place, at) {
+                        Ok(id) => Ok(json!({"id": id})),
+                        Err(kitsune::Error::Inaudible(why)) => {
+                            Ok(json!({"inaudible": true, "error": why}))
+                        }
+                        Err(e) => Err(e.to_string()),
                     })
                     .await
                 }
@@ -2245,6 +2263,30 @@ impl Gateway {
                 self.with_kitsune(move |k| {
                     k.speak(&text, note_id)
                         .map(|(audio, mime, path)| json!({"path": path, "mime": mime, "audio": base64::engine::general_purpose::STANDARD.encode(audio)}))
+                        .map_err(|e| e.to_string())
+                })
+                .await
+            }
+            "seen_at" => {
+                // the phone's passive position (never polled): picks between places of one name
+                match (
+                    d.get("lat").and_then(Value::as_f64),
+                    d.get("lon").and_then(Value::as_f64),
+                ) {
+                    (Some(la), Some(lo)) => {
+                        self.with_kitsune(move |k| {
+                            k.seen_at(la, lo);
+                            Ok(json!({"ok": true}))
+                        })
+                        .await
+                    }
+                    _ => Some(Err("lat and lon are numbers".into())),
+                }
+            }
+            "retry" => {
+                self.with_kitsune(|k| {
+                    k.retry()
+                        .map(|done| json!({"retried": done}))
                         .map_err(|e| e.to_string())
                 })
                 .await
@@ -2313,8 +2355,7 @@ impl Gateway {
                 let id = d.get("id").and_then(Value::as_i64).unwrap_or(-1);
                 let text = s(&d, "text");
                 self.with_kitsune(move |k| {
-                    k.store()
-                        .correct_note(id, &text)
+                    k.correct_note(id, &text)
                         .map(|ok| json!({"ok": ok}))
                         .map_err(|e| e.to_string())
                 })
@@ -2333,6 +2374,7 @@ impl Gateway {
             other => Some(Err(format!("unknown Kitsune action {other:?}"))),
         };
         match result {
+            Some(Ok(v)) if v["inaudible"] == true => send_json(w, 422, &v).await,
             Some(Ok(v)) => send_json(w, 200, &v).await,
             Some(Err(e)) => send_json(w, 400, &json!({"error": e})).await,
             None => send_json(w, 503, &json!({"error": "this core holds no Kitsune"})).await,
