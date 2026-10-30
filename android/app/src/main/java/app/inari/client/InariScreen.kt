@@ -4,6 +4,13 @@ import android.annotation.SuppressLint
 import android.net.http.SslError
 import android.view.ViewGroup
 import android.webkit.HttpAuthHandler
+import android.webkit.PermissionRequest
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import android.widget.Toast
+import androidx.core.content.ContextCompat
+import java.util.concurrent.atomic.AtomicReference
 import android.webkit.SslErrorHandler
 import android.webkit.WebChromeClient
 import android.app.Activity
@@ -106,14 +113,60 @@ object InariHost {
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun InariScreen(onMenu: () -> Unit, shared: Handoff? = null, sharedTaken: () -> Unit = {}) {
+fun InariScreen(onMenu: () -> Unit, shared: Handoff? = null, sharedTaken: () -> Unit = {}, talk: Int = 0) {
     val context = LocalContext.current
     val settings = remember { Settings(context) }
     val base = settings.inariUrl
+    // The address shown now: Kitsune's bridge answers only while it is the configured Inari origin.
+    val shown = remember { AtomicReference("") }
+    fun granted(p: String) = ContextCompat.checkSelfPermission(context, p) == PackageManager.PERMISSION_GRANTED
+    // The page's microphone (Kitsune's voice capture): Android's permission first, then the page's.
+    var pendingMic by remember { mutableStateOf<PermissionRequest?>(null) }
+    val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        pendingMic?.let { if (ok) it.grant(arrayOf(PermissionRequest.RESOURCE_AUDIO_CAPTURE)) else it.deny() }
+        pendingMic = null
+    }
+    // Reminders ring as notifications: asked once, when the page is first shown.
+    val notifyPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    // Place reminders: the location, then the location in the background (Android asks for them apart).
+    var askedPlaces by remember { mutableStateOf(false) }
+    val backgroundPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        if (ok) KitsuneRings.schedule(context, KitsuneStore(context).reminders)
+        else Toast.makeText(context, R.string.kitsune_places_denied, Toast.LENGTH_LONG).show()
+    }
+    val placePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { got ->
+        if (got[Manifest.permission.ACCESS_FINE_LOCATION] == true) backgroundPermission.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+        else Toast.makeText(context, R.string.kitsune_places_denied, Toast.LENGTH_LONG).show()
+    }
+    val askPlaces: () -> Unit = {
+        if (!askedPlaces) {
+            askedPlaces = true
+            if (granted(Manifest.permission.ACCESS_FINE_LOCATION)) backgroundPermission.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+            else placePermission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+        }
+    }
     var webView by remember { mutableStateOf<WebView?>(null) }
     var canGoBack by remember { mutableStateOf(false) }
     var failure by remember { mutableStateOf<String?>(null) }
     var pageReady by remember { mutableStateOf(false) }
+    var askedNotify by remember { mutableStateOf(false) }
+    LaunchedEffect(pageReady) {
+        if (pageReady && !askedNotify && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            !granted(Manifest.permission.POST_NOTIFICATIONS)) {
+            askedNotify = true
+            notifyPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+    // The widget asked to talk: Kitsune starts listening as soon as its page is there, once per tap
+    // (a page reloaded later does not start listening again).
+    var talked by remember { mutableStateOf(0) }
+    LaunchedEffect(talk, pageReady, webView) {
+        val view = webView
+        if (talk > talked && pageReady && view != null) {
+            talked = talk
+            view.evaluateJavascript("window.inariTalk && window.inariTalk()", null)
+        }
+    }
     // Something shared to the app: handed to the page's composer once the page is there.
     LaunchedEffect(shared, pageReady, webView) {
         val view = webView
@@ -186,7 +239,27 @@ fun InariScreen(onMenu: () -> Unit, shared: Handoff? = null, sharedTaken: () -> 
                     this.settings.allowFileAccess = false
                     this.settings.allowContentAccess = false
                     this.settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                    addJavascriptInterface(
+                        KitsuneBridge(ctx.applicationContext, trusted = { InariHost.sameOrigin(settings.inariUrl, shown.get()) }, needsPlaces = askPlaces),
+                        "InariPhone",
+                    )
                     webChromeClient = object : WebChromeClient() {
+                        // Only the microphone, only for the configured Inari origin.
+                        override fun onPermissionRequest(request: PermissionRequest) {
+                            val wanted = PermissionRequest.RESOURCE_AUDIO_CAPTURE
+                            if (!InariHost.sameOrigin(settings.inariUrl, request.origin.toString()) || wanted !in request.resources) {
+                                request.deny()
+                                return
+                            }
+                            if (granted(Manifest.permission.RECORD_AUDIO)) {
+                                request.grant(arrayOf(wanted))
+                            } else {
+                                pendingMic?.deny()
+                                pendingMic = request
+                                micPermission.launch(Manifest.permission.RECORD_AUDIO)
+                            }
+                        }
+
                         override fun onShowFileChooser(
                             view: WebView,
                             callback: ValueCallback<Array<Uri>>,
@@ -239,10 +312,12 @@ fun InariScreen(onMenu: () -> Unit, shared: Handoff? = null, sharedTaken: () -> 
                         }
 
                         override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
+                            shown.set(url ?: "")
                             pageReady = false // a reloaded page is asked again whether it follows the keyboard
                         }
 
                         override fun onPageFinished(view: WebView, url: String?) {
+                            shown.set(url ?: "")
                             canGoBack = view.canGoBack()
                             pageReady = true
                         }

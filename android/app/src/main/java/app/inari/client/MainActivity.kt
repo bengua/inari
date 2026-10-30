@@ -52,17 +52,21 @@ import kotlinx.coroutines.withContext
 class MainActivity : FragmentActivity() {
     /** Something another app shared, waiting for the page. */
     private val shared = mutableStateOf<Handoff?>(null)
+    /** How many times the widget asked Kitsune to listen (each new one starts it once). */
+    private val talk = mutableStateOf(0)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Crashes.install(this)
         shared.value = Handoff.from(intent)
+        if (intent?.action == TalkWidget.ACTION_TALK) talk.value++
         setContent {
             FoxTheme {
                 InariApp(
                     unlock = { ok -> Lock.unlock(this, onOk = ok, onFail = { /* the lock stays */ }) },
                     shared = shared.value,
                     sharedTaken = { shared.value = null },
+                    talk = talk.value,
                 )
             }
         }
@@ -71,11 +75,12 @@ class MainActivity : FragmentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         Handoff.from(intent)?.let { shared.value = it }
+        if (intent.action == TalkWidget.ACTION_TALK) talk.value++
     }
 }
 
 @Composable
-fun InariApp(unlock: (onOk: () -> Unit) -> Unit, shared: Handoff?, sharedTaken: () -> Unit) {
+fun InariApp(unlock: (onOk: () -> Unit) -> Unit, shared: Handoff?, sharedTaken: () -> Unit, talk: Int = 0) {
     val context = LocalContext.current
     val settings = remember { Settings(context) }
     var unlocked by rememberSaveable { mutableStateOf(false) }
@@ -129,7 +134,7 @@ fun InariApp(unlock: (onOk: () -> Unit) -> Unit, shared: Handoff?, sharedTaken: 
             if (showSettings) {
                 InariSettings(settings, onDone = { showSettings = false })
             } else {
-                InariScreen(onMenu = { scope.launch { drawer.open() } }, shared = shared, sharedTaken = sharedTaken)
+                InariScreen(onMenu = { scope.launch { drawer.open() } }, shared = shared, sharedTaken = sharedTaken, talk = talk)
             }
             update?.let { info ->
                 Row(

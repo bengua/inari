@@ -15,8 +15,8 @@ android {
         applicationId = System.getenv("INARI_APPLICATION_ID") ?: "app.inari.client"
         minSdk = 29
         targetSdk = 35
-        versionCode = 77
-        versionName = "0.39.0"
+        versionCode = 78
+        versionName = "0.40.0"
         // Where Inari is and where newer APKs are published: set by the machine that builds
         // (android/build.sh reads ~/.config/inari-android/build.env), empty in the repository.
         buildConfigField("String", "INARI_DEFAULT_URL", "\"${System.getenv("INARI_DEFAULT_URL") ?: ""}\"")
@@ -83,6 +83,8 @@ dependencies {
     // The fingerprint that unlocks the gate's password.
     implementation(libs.androidx.biometric)
     implementation(libs.androidx.fragment)
+    // Kitsune's place reminders ring through the system's geofencing.
+    implementation(libs.play.services.location)
     testImplementation(libs.junit)
     testImplementation("org.json:json:20240303")
 }

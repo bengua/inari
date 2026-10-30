@@ -113,6 +113,31 @@ signale une entrée (action `entered {lat, lon}`). Les rappels de la zone sonnen
 taisent pendant `geofence_quiet_minutes` (30 par défaut), pour ne pas sonner à chaque passage
 devant la porte. Tous ces réglages sont dans `rings`.
 
+## Sur le téléphone (l'app Inari)
+
+L'app Android ouvre Kitsune derrière l'empreinte, comme tout Inari. Elle ajoute ce qu'une page web
+ne peut pas faire seule :
+
+- **Le widget « Parler à Kitsune »** : un tap sur l'écran d'accueil, l'empreinte, et Kitsune écoute
+  déjà. Un tap n'importe où garde la note. C'est zéro friction pour une pensée qui disparaît en dix
+  secondes.
+- **Le micro dans la page** : l'app accorde le micro à la seule origine Inari configurée.
+- **Les rappels sonnent même hors réseau.** À chaque ouverture, la page confie ses rappels au
+  téléphone (`window.InariPhone`). Les rappels d'heure passent par l'alarme d'Android, exacte si
+  c'est permis. Les rappels de lieu passent par le **géorepérage du système** (`GeofencingClient`,
+  entrée seulement), et Kitsune ne demande jamais de position. Les notifications sont locales, avec
+  « Fait » et « Dans 1 h », et restent affichées jusqu'à ce que la personne agisse. Alarmes et
+  zones sont reposées après un redémarrage ou une mise à jour.
+- **L'app n'appelle jamais le cœur en arrière-plan**, parce que le mot de passe du gate reste
+  derrière l'empreinte. Ce qui est fait depuis une notification est mis en file. La page l'envoie
+  au cœur, avec sa propre session, à la prochaine ouverture.
+
+Permissions demandées au moment où elles servent : le micro (à la première capture), les
+notifications, et la position « toujours » (seulement quand un rappel de lieu existe).
+
+La CI compile et teste l'APK à chaque push (job `android`). L'APK de debug est gardé 14 jours comme
+artefact.
+
 ## Le chiffrement au repos (incrément 4)
 
 Les fichiers audio — captures vocales brutes et voix synthétisée, le gros de ce qui est

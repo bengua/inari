@@ -639,6 +639,7 @@ async function remLoad() {
   list.textContent = "";
   if (d.error) return remState("");
   const all = d.reminders || [];
+  phoneSync(all);
   for (const n of all) list.appendChild(remLi(n));
   remState(!all.length ? "Nothing set to come back." : all.length + " still to come.");
 }
@@ -697,6 +698,42 @@ $("kTalk").addEventListener("keyup", (ev) => {
 $("kTalk").addEventListener("blur", stopTalk);
 $("kTextGo").addEventListener("click", keepTyped);
 $("kReviewSave").addEventListener("click", saveReview);
+
+/* The Inari app on the phone (window.InariPhone): it keeps the reminders so they ring with no network,
+   on its own alarm and the system's geofencing, and hands back what was done from a notification. */
+function phone() {
+  try { return window.InariPhone && window.InariPhone.version() >= 1 ? window.InariPhone : null; } catch (e) { return null; }
+}
+
+function phoneSync(reminders) {
+  const p = phone();
+  if (!p) return;
+  try {
+    p.syncReminders(JSON.stringify(reminders));
+    const rings = (state.settings && state.settings.rings) || {};
+    if (rings.geofence_quiet_minutes != null) p.setQuietMinutes(Number(rings.geofence_quiet_minutes) || 0);
+  } catch (e) {}
+}
+
+// "Done" and "In 1 h" pressed on the phone's notifications while the page was closed
+async function phoneActions() {
+  const p = phone();
+  if (!p) return;
+  let acts = [];
+  try { acts = JSON.parse(p.takeActions() || "[]"); } catch (e) { acts = []; }
+  for (const a of acts) {
+    if (a.action === "dismiss") await api("/api/kitsune", { action: "dismiss", id: a.id });
+    else if (a.action === "snooze") await api("/api/kitsune", { action: "snooze", id: a.id, due_date: a.due_date });
+    else if (a.action === "entered") await api("/api/kitsune", { action: "entered", lat: a.lat, lon: a.lon });
+  }
+  if (acts.length) await load();
+}
+
+// the widget's one tap (and #talk): Kitsune listens now, a tap anywhere keeps the note
+window.inariTalk = async function () {
+  await startTalk();
+  if (rec.media) $("kTalkLabel").textContent = "Listening — tap anywhere to keep";
+};
 
 /* Rings: a reminder that comes back stays on screen until it is done or put off. */
 const ring = { queue: [], es: null };
@@ -764,6 +801,8 @@ async function connect() {
   await load();
   mountFox();
   ringListen();
+  await phoneActions();
+  if (hash.has("talk")) window.inariTalk();
 }
 
 $("tokenGo").addEventListener("click", async () => {

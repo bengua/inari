@@ -32,4 +32,13 @@
     <string name="inari_hint_core">The address answers but the core does not: check that the core is running on that machine.</string>
     <string name="inari_hint_certificate">The address presents a certificate the phone does not trust: check the address in the settings.</string>
     <string name="inari_hint_other">Check the address in the settings and the network, then retry.</string>
+    <!-- Kitsune on the phone: the widget, the reminders that ring. -->
+    <string name="kitsune_widget_label">Talk to Kitsune</string>
+    <string name="kitsune_widget_about">One tap, and Kitsune listens.</string>
+    <string name="kitsune_channel">Kitsune reminders</string>
+    <string name="kitsune_channel_about">The notes that come back at a time or at a place.</string>
+    <string name="kitsune_reminder">Kitsune reminder</string>
+    <string name="kitsune_done">Done</string>
+    <string name="kitsune_later">In 1 h</string>
+    <string name="kitsune_places_denied">Place reminders need the location, all the time: allow it in the settings so they ring.</string>
 </resources>
