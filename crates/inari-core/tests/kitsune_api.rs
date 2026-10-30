@@ -101,27 +101,36 @@ async fn the_owner_keeps_finds_and_recalls_a_note_and_reaches_the_brain_over_mcp
     // words-only search needs a query; a tag-only filter returns nothing here, so just assert it is well-formed
     assert!(tagged["hits"].is_array());
 
-    // set a reminder, see it, remove it
-    let (_, t) = call(port, owner, "POST", "/api/kitsune", Some(json!({"action": "create_trigger", "kind": "time", "note_id": note, "spec": {"at": 1000.0}, "next_at": 1000.0}))).await;
-    let tid = t["id"].as_i64().unwrap();
+    // set a reminder, see it, dismiss it
+    let reminder = json!({"trigger_type": "time", "due_date": "2026-10-31T09:00:00Z"});
+    let (_, set) = call(
+        port,
+        owner,
+        "POST",
+        "/api/kitsune",
+        Some(json!({"action": "set_reminder", "id": note, "reminder": reminder})),
+    )
+    .await;
+    assert_eq!(set["ok"], true, "{set}");
     let (_, list) = call(
         port,
         owner,
         "POST",
         "/api/kitsune",
-        Some(json!({"action": "list_triggers"})),
+        Some(json!({"action": "reminders"})),
     )
     .await;
-    assert_eq!(list["triggers"][0]["kind"], "time");
+    assert_eq!(list["reminders"][0]["id"], note);
+    assert_eq!(list["reminders"][0]["trigger_type"], "time");
     let (_, gone) = call(
         port,
         owner,
         "POST",
         "/api/kitsune",
-        Some(json!({"action": "delete_trigger", "id": tid})),
+        Some(json!({"action": "dismiss", "id": note})),
     )
     .await;
-    assert_eq!(gone["removed"], true);
+    assert_eq!(gone["ok"], true);
 
     // the owner reaches the brain over MCP
     let (st, reply) = call(port, owner, "POST", "/api/kitsune/mcp",
@@ -238,8 +247,8 @@ async fn a_voice_capture_bigger_than_the_usual_body_cap_waits_for_a_review_then_
         Some(json!({"action": "get_note", "id": id})),
     )
     .await;
-    assert_eq!(note["note"]["status"], "needs_review");
-    assert_eq!(note["note"]["text"], "");
+    assert_eq!(note["note"]["status"], "pending_transcription");
+    assert_eq!(note["note"]["raw_transcript"], "");
 
     // the owner writes what was said; the note stops asking
     let (st, fixed) = call(
@@ -259,8 +268,8 @@ async fn a_voice_capture_bigger_than_the_usual_body_cap_waits_for_a_review_then_
         Some(json!({"action": "get_note", "id": id})),
     )
     .await;
-    assert_eq!(note["note"]["status"], "ok");
-    assert_eq!(note["note"]["text"], "Rappeler le dentiste");
+    assert_eq!(note["note"]["status"], "active");
+    assert_eq!(note["note"]["clean_summary"], "Rappeler le dentiste");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -307,10 +316,10 @@ async fn the_memory_lists_the_newest_first_reads_a_note_aloud_and_forgets_a_dele
     let notes = list["notes"].as_array().unwrap();
     assert_eq!(notes.len(), 2, "{list}");
     assert_eq!(notes[0]["id"], typed);
-    assert_eq!(notes[0]["text"], "Acheter du pain");
+    assert_eq!(notes[0]["clean_summary"], "Acheter du pain");
     assert_eq!(notes[1]["id"], voice);
-    assert_eq!(notes[1]["place"], "kitchen");
-    assert!(notes[0]["created_at"].as_f64().unwrap() > 0.0);
+    assert_eq!(notes[1]["location_raw"], "kitchen");
+    assert!(notes[0]["created_at"].as_str().unwrap().ends_with('Z'));
 
     // the memory can be shortened, for a page that only wants the last few
     let (_, one) = call(
@@ -369,7 +378,7 @@ async fn the_memory_lists_the_newest_first_reads_a_note_aloud_and_forgets_a_dele
         Some(json!({"action": "list_notes"})),
     )
     .await;
-    assert_eq!(list["notes"][0]["text"], "Acheter du bon pain");
+    assert_eq!(list["notes"][0]["clean_summary"], "Acheter du bon pain");
 
     // a note deleted from the memory leaves it, and the voice note stays
     let (_, gone) = call(
@@ -395,7 +404,7 @@ async fn the_memory_lists_the_newest_first_reads_a_note_aloud_and_forgets_a_dele
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_reminder_is_a_note_plus_a_rule_the_page_can_read_back() {
+async fn a_reminder_lives_on_its_note_and_the_page_reads_it_back() {
     let dir = tempfile::tempdir().unwrap();
     let home = node(dir.path()).await;
     let port = home.gateway_port;
@@ -406,61 +415,108 @@ async fn a_reminder_is_a_note_plus_a_rule_the_page_can_read_back() {
         owner,
         "POST",
         "/api/kitsune",
-        Some(
-            json!({"action": "capture_text", "text": "Sortir les poubelles", "tags": ["reminder"]}),
-        ),
+        Some(json!({"action": "capture_text", "text": "Code de Julie", "tags": ["perso"]})),
     )
     .await;
     let note = kept["id"].as_i64().unwrap();
-    let at = 1_800_000_000.0;
-    let (_, made) = call(port, owner, "POST", "/api/kitsune",
-        Some(json!({"action": "create_trigger", "kind": "time", "spec": {"at": at, "every": 604800.0}, "next_at": at, "note_id": note}))).await;
-    let tid = made["id"].as_i64().unwrap();
+    let place = json!({"trigger_type": "geofence", "latitude": 48.8566, "longitude": 2.3522, "radius_meters": 150});
+    let (_, made) = call(
+        port,
+        owner,
+        "POST",
+        "/api/kitsune",
+        Some(json!({"action": "set_reminder", "id": note, "reminder": place})),
+    )
+    .await;
+    assert_eq!(made["ok"], true, "{made}");
 
     let (_, list) = call(
         port,
         owner,
         "POST",
         "/api/kitsune",
-        Some(json!({"action": "list_triggers"})),
+        Some(json!({"action": "reminders", "trigger_type": "geofence"})),
     )
     .await;
-    let t = list["triggers"][0].clone();
-    assert_eq!(t["id"], tid);
-    assert_eq!(t["note_id"], note);
-    assert_eq!(t["kind"], "time");
-    assert_eq!(t["spec"]["every"], 604800.0);
-    assert_eq!(t["next_at"], at);
-    assert_eq!(t["active"], true);
-    let (_, seen) = call(
+    let r = list["reminders"][0].clone();
+    assert_eq!(r["id"], note);
+    assert_eq!(r["latitude"], 48.8566);
+    assert_eq!(r["radius_meters"], 150);
+    assert_eq!(r["tags"][0], "perso");
+    let (_, none) = call(
         port,
         owner,
         "POST",
         "/api/kitsune",
-        Some(json!({"action": "get_note", "id": note})),
+        Some(json!({"action": "reminders", "trigger_type": "time"})),
     )
     .await;
-    assert_eq!(seen["note"]["text"], "Sortir les poubelles");
-    assert_eq!(seen["note"]["tags"][0], "reminder");
+    assert_eq!(none["reminders"].as_array().unwrap().len(), 0);
 
+    // a bad reminder is refused plainly
+    let (st, bad) = call(port, owner, "POST", "/api/kitsune",
+        Some(json!({"action": "set_reminder", "id": note, "reminder": {"trigger_type": "geofence", "latitude": 99.0, "longitude": 0.0}}))).await;
+    assert_eq!(st, 400, "{bad}");
+
+    // a place reminder is not snoozed by the clock; a time one is
+    let (_, snoozed) = call(
+        port,
+        owner,
+        "POST",
+        "/api/kitsune",
+        Some(json!({"action": "snooze", "id": note, "due_date": "2026-11-02T09:00:00Z"})),
+    )
+    .await;
+    assert_eq!(snoozed["ok"], false, "{snoozed}");
+    call(
+        port,
+        owner,
+        "POST",
+        "/api/kitsune",
+        Some(json!({"action": "set_reminder", "id": note,
+        "reminder": {"trigger_type": "time", "due_date": "2026-11-01T09:00:00Z"}})),
+    )
+    .await;
+    let (_, snoozed) = call(
+        port,
+        owner,
+        "POST",
+        "/api/kitsune",
+        Some(json!({"action": "snooze", "id": note, "due_date": "2026-11-02T09:00:00Z"})),
+    )
+    .await;
+    assert_eq!(snoozed["ok"], true, "{snoozed}");
+    let (_, list) = call(
+        port,
+        owner,
+        "POST",
+        "/api/kitsune",
+        Some(json!({"action": "reminders"})),
+    )
+    .await;
+    assert_eq!(list["reminders"][0]["due_date"], "2026-11-02T09:00:00Z");
+
+    // then dismissed: it leaves the list
     let (_, gone) = call(
         port,
         owner,
         "POST",
         "/api/kitsune",
-        Some(json!({"action": "delete_trigger", "id": tid})),
+        Some(json!({"action": "dismiss", "id": note})),
     )
     .await;
-    assert_eq!(gone["removed"], true);
+    assert_eq!(gone["ok"], true);
     let (_, empty) = call(
         port,
         owner,
         "POST",
         "/api/kitsune",
-        Some(json!({"action": "list_triggers"})),
+        Some(json!({"action": "reminders"})),
     )
     .await;
-    assert_eq!(empty["triggers"].as_array().unwrap().len(), 0);
+    assert_eq!(empty["reminders"].as_array().unwrap().len(), 0);
+    let (st, status) = call(port, owner, "GET", "/api/kitsune", None).await;
+    assert_eq!((st, status["reminders"].as_i64()), (200, Some(0)));
 }
 
 #[tokio::test(flavor = "multi_thread")]

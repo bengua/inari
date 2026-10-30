@@ -7,7 +7,7 @@ const MOOD = {
   listening: { pulse_hz: 0.9, turbulence: 0.8, glow: 0.45 },
   working: { pulse_hz: 1.6, turbulence: 1.4, glow: 0.6 },
 };
-const state = { settings: null, asrReady: false, ttsReady: false, notes: 0, triggers: 0, mascot: false };
+const state = { settings: null, asrReady: false, ttsReady: false, notes: 0, reminders: 0, mascot: false };
 let foxFrame = null, pendingSay = "", orbCtx = null, sayTimer = 0;
 const P = { colour: COPPER, pulse_hz: 0.25, turbulence: 0.3, glow: 0.2 };
 const cur = Object.assign({}, P);
@@ -150,7 +150,7 @@ function render() {
   chip($("kAsr"), state.asrReady, "ASR");
   chip($("kTts"), state.ttsReady, "TTS");
   $("kNotes").textContent = String(state.notes);
-  $("kTriggers").textContent = String(state.triggers);
+  $("kTriggers").textContent = String(state.reminders);
 }
 
 /* Settings: the servers this core talks to. Filled from the core, never overwritten under the
@@ -209,7 +209,7 @@ async function load() {
   state.asrReady = !!d.asr_ready;
   state.ttsReady = !!d.tts_ready;
   state.notes = Number(d.notes) || 0;
-  state.triggers = Number(d.triggers) || 0;
+  state.reminders = Number(d.reminders) || 0;
   state.mascot = !!d.mascot;
   render();
   setFill();
@@ -361,15 +361,15 @@ async function keep(id) {
   if (d.error) return;
   const n = d.note || {};
   await load();
-  if (n.status === "needs_review") return showReview(n);
+  if (n.status === "pending_transcription") return showReview(n);
   hideReview();
-  say(n.text ? "Kept: " + n.text : "Kept, with the audio.");
+  say(words(n) ? "Kept: " + words(n) : "Kept, with the audio.");
 }
 
 function showReview(n) {
   rec.reviewId = n.id;
   $("kReview").hidden = false;
-  $("kReviewText").value = n.text || "";
+  $("kReviewText").value = words(n);
   $("kReviewText").focus();
   say("I kept the audio but could not write it out. Type what you said.");
 }
@@ -408,8 +408,14 @@ async function keepTyped() {
 /* Memory: find what was said, read it back, correct it, forget it. */
 const mem = { query: "", url: "" };
 
+// what a note says: its clean summary, else the words as they were said
+function words(n) {
+  return n.clean_summary || n.raw_transcript || "";
+}
+
+// an ISO 8601 UTC time (or seconds) as the person's local time
 function stamp(t) {
-  const at = Number(t) || 0;
+  const at = typeof t === "string" ? Date.parse(t) / 1000 : Number(t) || 0;
   if (!at) return "";
   return new Date(at * 1000).toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 }
@@ -427,13 +433,13 @@ function noteLi(n) {
   const li = document.createElement("li");
   li.className = "knote";
   li.dataset.id = String(n.id);
-  const words = document.createElement("p");
-  words.className = "knote-text" + (n.text ? "" : " waiting");
-  words.textContent = n.text || (n.status === "needs_review" ? "Audio kept, words missing." : "Nothing written in this note.");
-  li.appendChild(words);
+  const said = document.createElement("p");
+  said.className = "knote-text" + (words(n) ? "" : " waiting");
+  said.textContent = words(n) || (n.status === "pending_transcription" ? "Audio kept, words missing." : "Nothing written in this note.");
+  li.appendChild(said);
   const meta = document.createElement("p");
   meta.className = "kmeta";
-  const bits = [stamp(n.created_at), n.place, n.source];
+  const bits = [stamp(n.created_at), n.category !== "memo" ? n.category : "", n.location_raw, n.source];
   for (const t of n.tags || []) bits.push("#" + t);
   meta.textContent = bits.filter(Boolean).join(" \u00b7 ");
   li.appendChild(meta);
@@ -446,7 +452,7 @@ function noteLi(n) {
   fix.hidden = true;
   const ta = document.createElement("textarea");
   ta.className = "kfield";
-  ta.value = n.text || "";
+  ta.value = words(n);
   ta.setAttribute("aria-label", "Correct the note");
   fix.appendChild(ta);
   fix.append(actButton("save", "Save", "btn small go"), actButton("cancel", "Cancel"));
@@ -467,7 +473,7 @@ function renderNotes(notes) {
 async function memLoad() {
   const q = mem.query.trim();
   const d = q
-    ? await api("/api/kitsune", { action: "search", query: q, k: 20 })
+    ? await api("/api/kitsune", { action: "search", query: q, limit: 20 })
     : await api("/api/kitsune", { action: "list_notes", limit: 20 });
   if (d.error) return memState("");
   const notes = q ? (d.hits || []).map((h) => h.note) : (d.notes || []);
@@ -498,9 +504,9 @@ async function readNote(id) {
     playAudio(URL.createObjectURL(await r.blob()), true);
     return say("Here is what you said.");
   }
-  if (!n.text) { toast("There are no words to read back yet."); return; }
+  if (!words(n)) { toast("There are no words to read back yet."); return; }
   activity("working");
-  const s = await api("/api/kitsune", { action: "speak", text: n.text, note_id: n.id });
+  const s = await api("/api/kitsune", { action: "speak", text: words(n), note_id: n.id });
   activity("idle");
   if (s.error) return;
   if (!s.audio) { toast("The core answered without audio."); return; }
@@ -544,19 +550,12 @@ $("kNotesList").addEventListener("click", (ev) => {
 $("kFind").addEventListener("submit", (ev) => { ev.preventDefault(); mem.query = $("kQuery").value; memLoad(); });
 $("kFindClear").addEventListener("click", () => { $("kQuery").value = ""; mem.query = ""; memLoad(); });
 
-/* Reminders: a time kept as a note, and the rule that brings it back. */
+/* Reminders: a note that comes back at a time or at a place, until it is done. */
 
 function whenText(secs) {
   return new Date(secs * 1000).toLocaleString(undefined, {
     year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
   });
-}
-
-function repText(every) {
-  if (!every || every <= 0) return "once";
-  if (every === 86400) return "every day";
-  if (every === 604800) return "every week";
-  return "every " + Math.round(every / 3600) + " h";
 }
 
 function whenField(secs) {
@@ -565,37 +564,40 @@ function whenField(secs) {
   return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + "T" + p(d.getHours()) + ":" + p(d.getMinutes());
 }
 
+// seconds since the epoch to the brain's ISO 8601 UTC form
+function isoUtc(secs) {
+  return new Date(secs * 1000).toISOString().slice(0, 19) + "Z";
+}
+
 function remFillWhen() {
   const f = $("kRemWhen");
   if (f.value) return;
   f.value = whenField(Math.ceil(Date.now() / 1000 / 60) * 60 + 3600);
 }
 
-function trigLi(t, byId) {
+function remLi(n) {
   const li = document.createElement("li");
-  li.className = "ktri" + (t.active ? "" : " off");
-  li.dataset.id = String(t.id);
+  li.className = "ktri";
+  li.dataset.id = String(n.id);
   const body = document.createElement("div");
   body.className = "ktri-body";
   const p = document.createElement("p");
   p.className = "ktri-text";
-  const note = t.note_id != null ? byId.get(Number(t.note_id)) : null;
-  p.textContent = note && note.text ? note.text : t.kind === "time" ? "Reminder #" + t.id : t.kind + " #" + t.id;
+  p.textContent = words(n) || "Reminder #" + n.id;
   const meta = document.createElement("p");
   meta.className = "kmeta";
   const bits = [];
-  if (t.kind === "time") {
-    const at = t.next_at != null ? t.next_at : (t.spec || {}).at;
-    if (at != null) bits.push(whenText(Number(at)));
-    bits.push(repText(Number((t.spec || {}).every) || 0));
+  if (n.trigger_type === "time") {
+    bits.push(stamp(n.due_date));
+    if (n.notified_at) bits.push("rang");
   } else {
-    bits.push(t.kind);
+    bits.push((n.location_raw || "a place") + ", within " + n.radius_meters + " m");
   }
-  if (!t.active) bits.push(t.fired_at != null ? "done" : "off");
-  meta.textContent = bits.join(" \u00b7 ");
+  meta.textContent = bits.filter(Boolean).join(" \u00b7 ");
   body.append(p, meta);
-  const drop = actButton("drop", "Forget", "btn small");
-  li.append(body, drop);
+  li.append(body);
+  if (n.trigger_type === "time") li.append(actButton("later", "In 1 h", "btn small"));
+  li.append(actButton("done", "Done", "btn small go"));
   return li;
 }
 
@@ -604,21 +606,13 @@ function remState(line) {
 }
 
 async function remLoad() {
-  const [d, n] = await Promise.all([
-    api("/api/kitsune", { action: "list_triggers" }),
-    api("/api/kitsune", { action: "list_notes", limit: 200 }),
-  ]);
+  const d = await api("/api/kitsune", { action: "reminders" });
   const list = $("kTrigList");
   list.textContent = "";
   if (d.error) return remState("");
-  const byId = new Map((n.notes || []).map((x) => [Number(x.id), x]));
-  const all = (d.triggers || []).slice().sort((a, b) => {
-    if (!!a.active !== !!b.active) return a.active ? -1 : 1;
-    return (a.next_at || 0) - (b.next_at || 0);
-  });
-  for (const t of all) list.appendChild(trigLi(t, byId));
-  const live = all.filter((t) => t.active).length;
-  remState(!all.length ? "Nothing set to come back." : live + " of " + all.length + " still to come.");
+  const all = d.reminders || [];
+  for (const n of all) list.appendChild(remLi(n));
+  remState(!all.length ? "Nothing set to come back." : all.length + " still to come.");
 }
 
 async function keepReminder(ev) {
@@ -629,15 +623,13 @@ async function keepReminder(ev) {
   if (!when) { toast("Pick a time first."); return; }
   const at = Math.round(new Date(when).getTime() / 1000);
   if (!Number.isFinite(at)) { toast("That time cannot be read."); return; }
-  const every = Number($("kRemEvery").value) || 0;
   activity("working");
   const kept = await api("/api/kitsune", { action: "capture_text", text: what, tags: ["reminder"] });
   if (kept.error) { activity("idle"); return; }
-  const spec = { at };
-  if (every > 0) spec.every = every;
-  const made = await api("/api/kitsune", { action: "create_trigger", kind: "time", spec, next_at: at, note_id: kept.id });
+  const made = await api("/api/kitsune", { action: "set_reminder", id: kept.id,
+    reminder: { trigger_type: "time", due_date: isoUtc(at) } });
   activity("idle");
-  if (made.error) { toast("The reminder was not kept."); return; }
+  if (made.error || !made.ok) { toast("The reminder was not kept."); return; }
   $("kRemWhat").value = "";
   $("kRemWhen").value = "";
   remFillWhen();
@@ -645,20 +637,22 @@ async function keepReminder(ev) {
   say("It comes back on " + whenText(at) + ".");
 }
 
-async function dropTrigger(li) {
-  if (!confirm("Forget this reminder?")) return;
+async function remAct(li, act) {
+  const id = Number(li.dataset.id);
   activity("working");
-  const d = await api("/api/kitsune", { action: "delete_trigger", id: Number(li.dataset.id) });
+  const d = act === "later"
+    ? await api("/api/kitsune", { action: "snooze", id, due_date: isoUtc(Math.round(Date.now() / 1000) + 3600) })
+    : await api("/api/kitsune", { action: "dismiss", id });
   activity("idle");
   if (d.error) return;
   await load();
-  say("Reminder forgotten.");
+  say(act === "later" ? "It comes back in an hour." : "Done.");
 }
 
 $("kTrigList").addEventListener("click", (ev) => {
   const b = ev.target.closest("button[data-act]");
   const li = b && b.closest(".ktri");
-  if (li && b.dataset.act === "drop") dropTrigger(li);
+  if (li) remAct(li, b.dataset.act);
 });
 $("kRemForm").addEventListener("submit", keepReminder);
 $("kRemWhen").addEventListener("focus", remFillWhen);
