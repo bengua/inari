@@ -14,7 +14,7 @@ const OUTPUT_CHARS: usize = 30_000;
 const READ_LINES: usize = 2000;
 
 /// The tools the engine has (MCP servers' come on top, named `<server>_<tool>`).
-pub const BUILT_IN: [&str; 14] = [
+pub const BUILT_IN: [&str; 17] = [
     "read_file",
     "write_file",
     "edit_file",
@@ -29,6 +29,9 @@ pub const BUILT_IN: [&str; 14] = [
     "dev_server",
     "project_tasks",
     "kitsune",
+    "web_search",
+    "web_fetch",
+    "delegate",
 ];
 
 /// The tools' definitions, for the agent's allowed ones; `subagents` are the ids
@@ -117,6 +120,7 @@ pub fn definitions(allowed: &[String], subagents: &[String]) -> Vec<Value> {
         super::brain::definition(),
     ];
     all.into_iter()
+        .chain(super::reach::definitions())
         .filter(|d| {
             d.pointer("/function/name")
                 .and_then(Value::as_str)

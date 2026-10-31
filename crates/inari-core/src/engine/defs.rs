@@ -45,7 +45,7 @@ pub struct CommandDef {
     pub scope: String,
 }
 
-const BUILTIN_AGENTS: [&str; 13] = [
+const BUILTIN_AGENTS: [&str; 15] = [
     include_str!("defaults/builder.agent.md"),
     include_str!("defaults/planner.agent.md"),
     include_str!("defaults/explorer.agent.md"),
@@ -60,6 +60,8 @@ const BUILTIN_AGENTS: [&str; 13] = [
     include_str!("defaults/librarian.agent.md"),
     include_str!("defaults/summarizer.agent.md"),
     include_str!("defaults/home.agent.md"),
+    include_str!("defaults/researcher.agent.md"),
+    include_str!("defaults/developer.agent.md"),
 ];
 
 const BUILTIN_COMMANDS: [&str; 3] = [
@@ -68,7 +70,7 @@ const BUILTIN_COMMANDS: [&str; 3] = [
     include_str!("defaults/commit-push.command.md"),
 ];
 
-pub const BUILTIN_WORKFLOWS: [&str; 6] = [
+pub const BUILTIN_WORKFLOWS: [&str; 8] = [
     include_str!("defaults/default.workflow.json"),
     // the assistant's everyday workflows
     include_str!("defaults/kitsune-inbox.workflow.json"),
@@ -76,6 +78,8 @@ pub const BUILTIN_WORKFLOWS: [&str; 6] = [
     include_str!("defaults/weekly-review.workflow.json"),
     include_str!("defaults/groceries.workflow.json"),
     include_str!("defaults/doc-sort.workflow.json"),
+    include_str!("defaults/research-brief.workflow.json"),
+    include_str!("defaults/dev-handoff.workflow.json"),
 ];
 
 /// A Markdown file's front matter (simple `key: value` lines and `- item` lists) and its body.
@@ -391,7 +395,9 @@ mod tests {
                 "tracker",
                 "librarian",
                 "summarizer",
-                "home"
+                "home",
+                "researcher",
+                "developer"
             ]
         );
         // the assistant's specialists work on the tier their job needs
@@ -424,6 +430,6 @@ mod tests {
         assert!(c
             .iter()
             .any(|c| c.id == "init" && c.agent_mode == "builder"));
-        assert_eq!(workflows(Path::new("/nonexistent"), None).len(), 6);
+        assert_eq!(workflows(Path::new("/nonexistent"), None).len(), 8);
     }
 }

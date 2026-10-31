@@ -1365,6 +1365,54 @@ impl Runner {
             .unwrap_or_default()
     }
 
+    /// Hand a job to a new thread on this node (a "room"): made on `harness`, labelled with the
+    /// thread that asked, announced to the pages, and started with `text` (through the node, so
+    /// its run is journaled and shown like any other). Its id.
+    pub fn delegate(
+        self: &Arc<Self>,
+        from: &str,
+        harness: &str,
+        title: &str,
+        text: &str,
+    ) -> Result<String, String> {
+        if text.trim().is_empty() {
+            return Err("a delegated job says what to do".into());
+        }
+        let slug: String = title
+            .to_lowercase()
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect::<String>()
+            .split('-')
+            .filter(|w| !w.is_empty())
+            .take(5)
+            .collect::<Vec<_>>()
+            .join("-");
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() % 1_000_000)
+            .unwrap_or(0);
+        let thread = format!("{}-{stamp}", if slug.is_empty() { "job" } else { &slug });
+        let agent = self.create(&thread, harness, title)?;
+        let _ = self.label(&agent, "delegated_by", from);
+        match &self.publish {
+            Some(p) => {
+                p(
+                    "agent.created",
+                    json!({"agent": agent, "node": self.host.node_id, "ok": true, "error": ""}),
+                );
+                p(&format!("agent.{agent}.run"), json!({"text": text}));
+            }
+            None => {
+                let (me, a, t) = (Arc::clone(self), agent.clone(), text.to_string());
+                tokio::spawn(async move {
+                    me.run(&a, &t, vec![]).await;
+                });
+            }
+        }
+        Ok(agent)
+    }
+
     /// A new agent held by this node, with its harness; returns its id (the thread id).
     pub fn create(&self, thread: &str, harness: &str, title: &str) -> Result<String, String> {
         let system = DEFAULT_SYSTEM;
