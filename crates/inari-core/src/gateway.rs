@@ -1888,15 +1888,34 @@ impl Gateway {
                 ok
             }
             "/api/agent" => {
+                let thread = s(d, "thread_id");
                 let mut p = Map::new();
-                for k in ["thread_id", "node", "harness", "model", "pass"] {
+                for k in ["node", "harness", "model", "pass"] {
                     if let Some(v) = d.get(k) {
                         p.insert(k.into(), v.clone());
                     }
                 }
+                p.insert("thread_id".into(), json!(thread));
                 p.insert("title".into(), json!(s(d, "title")));
+                let mut created = self.bus.subscribe("agent.created");
                 self.bus.publish("agent.create", Value::Object(p));
-                Some((200, json!({"ok": true, "thread_id": s(d, "thread_id")})))
+                let made = tokio::time::timeout(Duration::from_secs(30), async {
+                    while let Some(m) = created.recv().await {
+                        if m.payload["agent"] == thread.as_str() {
+                            return (m.payload["ok"] == true, s(&m.payload, "error"));
+                        }
+                    }
+                    (
+                        false,
+                        "the mesh closed before the thread was created".into(),
+                    )
+                })
+                .await;
+                match made {
+                    Ok((true, _)) => Some((200, json!({"ok": true, "thread_id": thread}))),
+                    Ok((false, error)) => Some((502, json!({"error": error}))),
+                    Err(_) => Some((504, json!({"error": "thread creation timed out"}))),
+                }
             }
             "/api/message" => {
                 if !need(&["agent", "text"]) {

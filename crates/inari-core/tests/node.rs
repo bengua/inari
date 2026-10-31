@@ -61,6 +61,49 @@ async fn done(rx: &mut tokio::sync::mpsc::UnboundedReceiver<inari_core::bus::Mes
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn creating_a_thread_on_another_core_acks_before_the_next_message() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("acp.log");
+    let hub = Node::start(config(dir.path(), "hub", "", &log))
+        .await
+        .unwrap();
+    let peer = Node::start(config(
+        dir.path(),
+        "peer",
+        &format!("127.0.0.1:{}", hub.bus_port),
+        &log,
+    ))
+    .await
+    .unwrap();
+    let g = Arc::clone(hub.gateway.as_ref().unwrap());
+    let port = hub.gateway_port;
+    until("both nodes", || {
+        g.snapshot()["nodes"].as_array().map(Vec::len) == Some(2)
+    })
+    .await;
+    let mut finished = hub.bus.subscribe("agent.remote-race.done");
+    let (status, created) = call(
+        port,
+        "/api/agent",
+        Some(json!({"thread_id": "remote-race", "node": "peer", "title": "remote"})),
+    )
+    .await;
+    assert_eq!(status, 200, "{created}");
+    assert_eq!(created["ok"], true);
+    call(
+        port,
+        "/api/message",
+        Some(json!({"agent": "remote-race", "text": "hello"})),
+    )
+    .await;
+    let outcome = done(&mut finished).await;
+    assert_eq!(outcome["stopped"], "done", "{outcome}");
+    assert_eq!(outcome["error"], "", "{outcome}");
+    assert_eq!(outcome["text"], "fake reply to: hello");
+    assert_eq!(peer.host.status("remote-race"), "running");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_person_drives_two_rust_cores_through_the_gateway() {
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("acp.log");
