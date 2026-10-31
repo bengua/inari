@@ -762,6 +762,22 @@ impl Node {
                     if let Some(k) = p.get("keep_folder").and_then(Value::as_bool) {
                         next.keep_folder = k;
                     }
+                    if let Some(a) = p.get("cloud_kitsune").and_then(Value::as_array) {
+                        next.cloud_kitsune = a
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .map(String::from)
+                            .collect();
+                    }
+                    if let Some(f) = p.get("cloud_files").and_then(Value::as_bool) {
+                        next.cloud_files = f;
+                    }
+                    if let Some(u) = text("search_url") {
+                        next.search_url = u.trim().trim_end_matches('/').to_string();
+                    }
+                    if let Some(a) = p.get("delegate_asks").and_then(Value::as_bool) {
+                        next.delegate_asks = a;
+                    }
                     // the model of each tier: a tier given empty is taken away
                     if let Some(tiers) = p.get("tiers").and_then(Value::as_object) {
                         for (tier, model) in tiers {

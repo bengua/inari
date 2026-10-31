@@ -583,6 +583,11 @@ impl LocalEngine {
                 if path_arg.is_empty() {
                     return Err(format!("{name} needs a path"));
                 }
+                if llm::is_cloud(&run.server.url) && !self.settings().cloud_files {
+                    return Err(format!(
+                        "{name} is not allowed to an agent on a cloud model: the person's files stay on their own models (Settings → Local engine → what the cloud may touch)"
+                    ));
+                }
                 let (path, inside) = tools::resolve(&t.workdir, &path_arg);
                 let writes = name != "read_file";
                 let bold = ThreadState::load(&t.path()).danger == "dangerous" && !under_pass;
@@ -755,7 +760,19 @@ impl LocalEngine {
             "background_process" | "dev_server" | "project_tasks" => {
                 self.project_tool(t, name, args).await
             }
-            "kitsune" => self.kitsune_tool(t, args).await,
+            "web_search" => self.web_search(args).await,
+            "web_fetch" => self.web_fetch(args).await,
+            "delegate" => self.delegate_tool(t, args).await,
+            "kitsune" => {
+                let action = text("action");
+                let s = self.settings();
+                if llm::is_cloud(&run.server.url) && !s.cloud_kitsune.contains(&action) {
+                    return Err(format!(
+                        "kitsune {action} is not allowed to an agent on a cloud model: the person keeps it on their own models (Settings → Local engine → what the cloud may touch)"
+                    ));
+                }
+                self.kitsune_tool(t, args).await
+            }
             mcp => self.mcp_call(mcp, args).await,
         }
     }
