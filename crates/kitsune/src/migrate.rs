@@ -42,10 +42,16 @@ const MIGRATIONS: &[Migration] = &[
         up: include_str!("../migrations/0005_brain.up.sql"),
         down: include_str!("../migrations/0005_brain.down.sql"),
     },
+    Migration {
+        version: 6,
+        name: "lists",
+        up: include_str!("../migrations/0006_lists.up.sql"),
+        down: include_str!("../migrations/0006_lists.down.sql"),
+    },
 ];
 
 /// The newest schema this build knows.
-pub const LATEST: u32 = 5;
+pub const LATEST: u32 = 6;
 
 fn ledger(conn: &Connection) -> Result<()> {
     conn.execute_batch(

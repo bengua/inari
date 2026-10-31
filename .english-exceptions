@@ -13,3 +13,6 @@ crates/kitsune/src/mcp.rs # French note fixtures in tests: what the owner says, 
 crates/kitsune/src/search.rs # French note fixtures in tests: the search is checked on accented French notes, which is the point
 crates/kitsune/src/store.rs # French note fixtures in tests: what the owner says, never the code
 docs/ai-memory-integration-fr.md # plan to integrate akitaonrails/ai-memory, written in French for the owner
+docs/tdah-recherche-fr.md # what ADHD research and clinical guidelines say, and the design principles Kitsune takes from them, in French for the owner
+crates/kitsune/src/understand.rs # the small model's instructions and test answers are French: the owner speaks French to it
+crates/kitsune/src/lists.rs # French list fixtures in tests (courses, garde-manger): what the owner keeps, never the code

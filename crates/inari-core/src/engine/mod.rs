@@ -6,6 +6,7 @@
 //! `<data_dir>/engine/<harness>/`; a provider's key is kept apart (`keys.json`, mode 600) and
 //! never shown.
 
+mod brain;
 pub mod defs;
 pub mod forge;
 mod library;
@@ -46,6 +47,11 @@ pub struct Settings {
     /// The model a thread uses when it chose none: "<provider>/<model>".
     #[serde(default)]
     pub model: String,
+    /// The model of each tier an agent or a workflow step names (fast, standard, expert, or any
+    /// name the person gives): "<provider>/<model>". A tier not set works on the thread's model,
+    /// so the small jobs can run on a small model and the hard ones on a large one.
+    #[serde(default)]
+    pub tiers: BTreeMap<String, String>,
     /// The agent a thread works as when it chose none (builder, planner).
     #[serde(default = "builder")]
     pub mode: String,
@@ -120,6 +126,18 @@ impl Settings {
         if !id_like(&self.mode) {
             return Some(format!("unknown agent {:?}", self.mode));
         }
+        for (tier, model) in &self.tiers {
+            if !id_like(tier) {
+                return Some(format!(
+                    "a tier's name is letters, digits, - _ and . only: {tier:?}"
+                ));
+            }
+            if !model.is_empty() && !model.contains('/') {
+                return Some(format!(
+                    "the {tier} tier names \"<provider>/<model>\", not {model:?}"
+                ));
+            }
+        }
         if !(2048..=2_000_000).contains(&self.context_window) {
             return Some("a context window is between 2,048 and 2,000,000 tokens".into());
         }
@@ -161,6 +179,8 @@ pub struct LocalEngine {
     mcp: mcp::Hub,
     /// The processes the threads' projects run on this core.
     works: project::Works,
+    /// The core's Kitsune brain, for the agents' `kitsune` tool (None: the tool says so).
+    pub kitsune_dir: Option<PathBuf>,
 }
 
 impl LocalEngine {
@@ -184,6 +204,7 @@ impl LocalEngine {
             compact_next: Mutex::default(),
             mcp: mcp::Hub::default(),
             works: project::Works::default(),
+            kitsune_dir: None,
         }
     }
 
@@ -283,6 +304,7 @@ impl LocalEngine {
         json!({"providers": providers, "model": s.model, "mode": s.mode, "context_window": s.context_window,
                "max_steps": s.max_steps, "turn_timeout": s.turn_timeout, "temperature": s.temperature,
                "instructions": s.instructions, "modes": self.modes(None), "keep_folder": s.keep_folder,
+               "tiers": s.tiers,
                "forges": self.forges_view()})
     }
 

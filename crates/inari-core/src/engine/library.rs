@@ -359,7 +359,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(e.workflow_list(None).len(), 2);
+        assert_eq!(e.workflow_list(None).len(), 7);
         assert!(e
             .change(
                 "item_save",

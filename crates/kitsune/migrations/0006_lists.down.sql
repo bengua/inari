@@ -1,0 +1,3 @@
+DROP INDEX IF EXISTS list_items_open;
+DROP TABLE IF EXISTS list_items;
+DROP TABLE IF EXISTS lists;

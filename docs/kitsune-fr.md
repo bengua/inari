@@ -138,6 +138,38 @@ notifications, et la position « toujours » (seulement quand un rappel de lieu 
 La CI compile et teste l'APK à chaque push (job `android`). L'APK de debug est gardé 14 jours comme
 artefact.
 
+## Les assistants (moteur local)
+
+Le moteur local d'Inari porte l'assistant de Kitsune et ses spécialistes, un par métier. Ils
+suivent les principes de `docs/tdah-recherche-fr.md`.
+
+| Agent | Niveau | Ce qu'il fait |
+|---|---|---|
+| `assistant` | standard | l'assistant du quotidien ; il confie chaque travail au bon spécialiste |
+| `triage` | rapide | lit une note, dit ce qu'elle est et où elle va (liste, rappel, métier) |
+| `organizer` | standard | organise une journée ou un projet : 3 priorités au plus, avec premier pas, durée et déclencheur « si… alors… » |
+| `shopper` | rapide | courses par rayon, garde-manger, ce qui périme, idées repas |
+| `tracker` | rapide | suivi perso (sommeil, humeur…) en notes `suivi:…`, bilan de la semaine |
+| `librarian` | standard | propose un nom et une place à chaque document ; ne déplace rien lui-même |
+| `summarizer` | rapide | résume un texte, un fichier ou des notes, avec leurs actions |
+| `home` | standard | maison et connectivité via les serveurs MCP réglés (Home Assistant, n8n) |
+
+**Les niveaux de modèle** (rapide, standard, expert) se règlent dans la GUI : Réglages → Agents
+et abonnements → Moteur local. Chaque niveau désigne un modèle d'un serveur. Le petit travail
+tourne sur un petit modèle, le travail difficile sur un gros. Un niveau non réglé utilise le
+modèle par défaut. Un agent déclare son niveau dans son en-tête (`model: fast`), et une étape de
+workflow peut le remplacer.
+
+**L'outil `kitsune`** donne aux agents l'accès au même cerveau que les pages et le téléphone :
+chercher, garder une note, étiqueter, poser ou retirer un rappel, et gérer les listes (tâches,
+courses, garde-manger : ajouter, cocher, retirer, ce qui périme). Quand l'agent travaille pour
+quelqu'un d'autre (un pass), chaque écriture doit être autorisée par le propriétaire.
+
+**Les workflows** : `kitsune-inbox` (trie les notes du jour), `daily-plan` (plan du jour, que tu
+valides avant qu'il soit écrit), `weekly-review` (bilan de la semaine, privé), `groceries`
+(garde-manger et liste de courses), `doc-sort` (rangement de documents, que tu valides avant
+tout déplacement).
+
 ## Le chiffrement au repos (incrément 4)
 
 Les fichiers audio — captures vocales brutes et voix synthétisée, le gros de ce qui est

@@ -14,7 +14,7 @@ const OUTPUT_CHARS: usize = 30_000;
 const READ_LINES: usize = 2000;
 
 /// The tools the engine has (MCP servers' come on top, named `<server>_<tool>`).
-pub const BUILT_IN: [&str; 13] = [
+pub const BUILT_IN: [&str; 14] = [
     "read_file",
     "write_file",
     "edit_file",
@@ -28,6 +28,7 @@ pub const BUILT_IN: [&str; 13] = [
     "background_process",
     "dev_server",
     "project_tasks",
+    "kitsune",
 ];
 
 /// The tools' definitions, for the agent's allowed ones; `subagents` are the ids
@@ -113,6 +114,7 @@ pub fn definitions(allowed: &[String], subagents: &[String]) -> Vec<Value> {
                 "to": {"type": "string", "enum": ["todo", "in_progress", "done"], "description": "Where it goes (for: move)"},
                 "status": {"type": "string", "description": "Only the tasks in this column (for: list)"}},
                 "required": ["action"]}}}),
+        super::brain::definition(),
     ];
     all.into_iter()
         .filter(|d| {

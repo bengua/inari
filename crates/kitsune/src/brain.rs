@@ -118,6 +118,26 @@ impl Kitsune {
         })
     }
 
+    /// The one brain of a folder, shared by everyone in this process who opens it (the gateway's
+    /// pages, the local engine's agents): one store, one set of settings, kept while anyone holds it.
+    pub fn shared(dir: &Path) -> Result<std::sync::Arc<Mutex<Kitsune>>> {
+        use std::collections::HashMap;
+        use std::sync::{Arc, OnceLock, Weak};
+        static OPEN: OnceLock<Mutex<HashMap<PathBuf, Weak<Mutex<Kitsune>>>>> = OnceLock::new();
+        std::fs::create_dir_all(dir).map_err(|e| Error::Invalid(e.to_string()))?;
+        let key = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+        let mut open = OPEN
+            .get_or_init(Mutex::default)
+            .lock()
+            .expect("not poisoned");
+        if let Some(k) = open.get(&key).and_then(Weak::upgrade) {
+            return Ok(k);
+        }
+        let k = Arc::new(Mutex::new(Self::open(&key)?));
+        open.insert(key, Arc::downgrade(&k));
+        Ok(k)
+    }
+
     pub fn settings(&self) -> &Settings {
         &self.settings
     }
@@ -631,6 +651,16 @@ mod tests {
         // a correction later makes it active
         k.store().correct_note(id, "Rappeler le médecin").unwrap();
         assert_eq!(k.store().get_note(id).unwrap().unwrap().status, "active");
+    }
+
+    #[test]
+    fn a_folder_has_one_brain_in_a_process() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = Kitsune::shared(dir.path()).unwrap();
+        let b = Kitsune::shared(dir.path()).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&a, &b));
+        let id = a.lock().unwrap().capture_text("partagé", vec![]).unwrap();
+        assert!(b.lock().unwrap().store().get_note(id).unwrap().is_some());
     }
 
     #[test]

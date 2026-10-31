@@ -78,6 +78,9 @@ pub(crate) struct Step {
     pub nudge_prompt: Option<String>,
     #[serde(default)]
     pub sub_agent_type: Option<String>,
+    /// The model this step works on (a tier or "<provider>/<model>"), over its agent's.
+    #[serde(default)]
+    pub model: Option<String>,
     #[serde(default)]
     pub command: Option<String>,
     #[serde(default)]
@@ -492,9 +495,11 @@ impl LocalEngine {
                             format!("{}\n\n{said}", prompts::reminder(&agent, &tools))}));
                     }
                     self.edit_panel(&t.agent, |p| p.agent = agent.id.clone());
+                    let want = step.model.clone().unwrap_or_else(|| agent.model.clone());
+                    let (server, model) = self.model_named(&want, (&server, &model));
                     let mut run = Run {
-                        server: server.clone(),
-                        model: model.clone(),
+                        server,
+                        model,
                         agent,
                         tools,
                         messages: std::mem::take(&mut messages),
@@ -714,7 +719,10 @@ impl LocalEngine {
                     sub: None,
                     max_steps: 0,
                 };
-                match self.sub_agent(t, &parent, &kind, &prompt).await {
+                match self
+                    .sub_agent(t, &parent, &kind, &prompt, step.model.as_deref())
+                    .await
+                {
                     Ok((content, result)) => {
                         let mut o = BTreeMap::from([("content".to_string(), content)]);
                         if let Some(r) = &result {

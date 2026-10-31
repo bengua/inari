@@ -209,6 +209,8 @@ fn build_harness(cfg: &NodeConfig, name: &str, spec: &HarnessSpec) -> Harness {
     if spec.kind == "local" {
         // Inari's own engine: its settings are the interface's, in the data folder
         let mut h = crate::engine::LocalEngine::new(cfg.data_dir.join("engine").join(name));
+        // the agents' kitsune tool works on the same brain as the core's pages
+        h.kitsune_dir = Some(cfg.data_dir.join("kitsune"));
         h.extra_env = spec.env.clone();
         h.prepare = spec.prepare.clone();
         h.prepare_timeout = Duration::from_secs_f64(spec.prepare_timeout.max(1.0));
@@ -759,6 +761,19 @@ impl Node {
                     }
                     if let Some(k) = p.get("keep_folder").and_then(Value::as_bool) {
                         next.keep_folder = k;
+                    }
+                    // the model of each tier: a tier given empty is taken away
+                    if let Some(tiers) = p.get("tiers").and_then(Value::as_object) {
+                        for (tier, model) in tiers {
+                            match model.as_str().map(str::trim) {
+                                Some(m) if !m.is_empty() => {
+                                    next.tiers.insert(tier.clone(), m.to_string());
+                                }
+                                _ => {
+                                    next.tiers.remove(tier);
+                                }
+                            }
+                        }
                     }
                     e.set_settings(next)
                 }

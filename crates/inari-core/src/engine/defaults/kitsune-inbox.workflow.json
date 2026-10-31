@@ -1,0 +1,50 @@
+{
+  "metadata": {
+    "id": "kitsune-inbox",
+    "name": "Kitsune inbox",
+    "description": "Sorts the notes kept since the last pass: each goes to its list, its reminder or its specialist, then a short summary.",
+    "version": "1.0.0",
+    "color": "#E48A46"
+  },
+  "entryStep": "sort",
+  "settings": {
+    "maxIterations": 12
+  },
+  "steps": [
+    {
+      "id": "sort",
+      "name": "Sort the notes",
+      "type": "agent",
+      "agentId": "assistant",
+      "model": "fast",
+      "prompt": "Read the recent notes with kitsune (action recent, limit 30) and take those without the tag \"trié\". For each one, call the triage sub-agent with its text, then act on its answer: add its items to their lists (kitsune add_items), set a reminder when one was said, and tag the note \"trié\" (kitsune tag). Do not delete anything.",
+      "transitions": [
+        {
+          "when": {
+            "type": "always"
+          },
+          "goto": "summarize"
+        }
+      ]
+    },
+    {
+      "id": "summarize",
+      "name": "Say what changed",
+      "type": "agent",
+      "agentId": "assistant",
+      "model": "fast",
+      "prompt": "In three short lines, in the person's language, say what was sorted: how many notes, what went to which list, which reminders were set. Nothing to fix, no guilt.",
+      "transitions": [
+        {
+          "when": {
+            "type": "always"
+          },
+          "goto": "$done"
+        }
+      ]
+    }
+  ],
+  "startCondition": {
+    "type": "always"
+  }
+}
