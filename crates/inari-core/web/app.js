@@ -122,6 +122,7 @@ function layout() {
   const app = $("app"); app.classList.toggle("noside", !!store.get("noside", false)); app.classList.toggle("nobench", !!store.get("nobench", false)); app.classList.toggle("wbmax", !!store.get("wbmax", false));
   app.style.setProperty("--benchw", store.get("benchw", "42vw")); $("benchBtn").classList.toggle("on", !app.classList.contains("nobench")); requestAnimationFrame(drawTethers);
   $("sideToggle").classList.toggle("on", !app.classList.contains("noside")); placeFox();
+  $("sideToggle").setAttribute("aria-expanded", String(!app.classList.contains("noside"))); $("benchBtn").setAttribute("aria-expanded", String(!app.classList.contains("nobench")));
 }
 function setView(view) {
   currentView = view === "network" ? "network" : "work"; store.set("view", currentView);
@@ -1025,7 +1026,10 @@ function terminalLines() { const out = []; for (let i = 0; i < events.length; i+
   out.push({ cmd, by, out: r ? r.text : "…", bad: r && /^(denied|\w+Error)/.test(r.text) }); } return out; }
 function terminal(body) {
   const a = snap.agents[selected], node = a ? a.node : "";
-  body.style.padding = "10px"; body.innerHTML = `<div id="term"><div class="termhost">${icon("terminal")}<span>${esc(t("Terminal on {node}", { node }))}</span></div><div id="termout"></div><form id="termform"><span>$</span><input id="terminput" autocomplete="off" spellcheck="false" placeholder="${esc(t("Run a command in this agent's workspace"))}" aria-label="${esc(t("Terminal command"))}"></form></div>`;
+  const nodes = snap.nodes.filter((n) => Object.entries(snap.agents).some(([, a]) => a.node === n.node_id && !a.archived));
+  const options = nodes.map((n) => `<option value="${esc(n.node_id)}"${n.node_id === node ? " selected" : ""}>${esc(n.node_id)}</option>`).join("");
+  body.style.padding = "10px"; body.innerHTML = `<div id="term"><div class="termhost">${icon("terminal")}<span>${esc(t("Terminal on {node}", { node }))}</span><select id="termhostpick" aria-label="${esc(t("Choose a core to debug"))}" title="${esc(t("Choose a core to debug"))}">${options}</select></div><div id="termout"></div><form id="termform"><span>$</span><input id="terminput" autocomplete="off" spellcheck="false" placeholder="${esc(t("Run a command in this agent's workspace"))}" aria-label="${esc(t("Terminal command"))}"></form></div>`;
+  $("termhostpick").onchange = (e) => debugHost(e.target.value);
   const o = $("termout"); o.innerHTML = terminalLines().map((l) => `<div class="cmd ${l.by === "agent" ? "ai" : l.by === "act" ? "act" : ""}">${l.by === "you" ? "$" : l.by === "agent" ? "agent $" : "agent ›"} ${esc(l.cmd)}</div><div class="out${l.bad ? " bad" : ""}">${esc(l.out)}</div>`).join("") || `<div class="out">${esc(t("Commands the agent runs appear here. Type one below to run it yourself — the agent will know what you did."))}</div>`; o.scrollTop = o.scrollHeight; const inp = $("terminput");
   $("termform").onsubmit = async (e) => { e.preventDefault(); const cmd = inp.value.trim(); if (!cmd) return; termHist.push(cmd); termPos = termHist.length; inp.value = ""; inp.disabled = true; await api("/api/exec", { agent: selected, cmd }); inp.disabled = false; tlStamp = 0; files = null; await refreshDetail(); drawBench(); const again = $("terminput"); if (again) again.focus(); };
   inp.onkeydown = (e) => { if (e.key === "ArrowUp" && termPos > 0) { inp.value = termHist[--termPos]; e.preventDefault(); } else if (e.key === "ArrowDown") inp.value = termHist[++termPos] || ""; };
