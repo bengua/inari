@@ -15,8 +15,8 @@ android {
         applicationId = System.getenv("INARI_APPLICATION_ID") ?: "app.inari.client"
         minSdk = 29
         targetSdk = 35
-        versionCode = 78
-        versionName = "0.40.0"
+        versionCode = 79
+        versionName = "0.40.1"
         // Where Inari is and where newer APKs are published: set by the machine that builds
         // (android/build.sh reads ~/.config/inari-android/build.env), empty in the repository.
         buildConfigField("String", "INARI_DEFAULT_URL", "\"${System.getenv("INARI_DEFAULT_URL") ?: ""}\"")
