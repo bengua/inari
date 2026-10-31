@@ -300,7 +300,26 @@ $("gear").onclick = () => openPop($("gear"), (pop) => { pop.insertAdjacentHTML("
   const foxes = (snap ? snap.nodes : []).flatMap((n) => Object.keys((n.capabilities || {}).openfox || {}).map((h) => [n.node_id, h]));
   if (foxes.length) { pop.insertAdjacentHTML("beforeend", `<h3 style="margin-top:12px">OpenFox</h3>`); const box = document.createElement("div"); box.className = "seg";
     for (const [node, h] of foxes) { const b = document.createElement("button"); b.className = "btn small"; b.textContent = foxes.length > 1 ? `${node} · ${h}` : t("Settings of {name}", { name: node }); b.onclick = () => { pop.classList.remove("open"); openfoxSheet(node, h); }; box.append(b); } pop.append(box); }
+  // the agents' shared memory (AI-Memory), a service this core starts and wires
+  pop.insertAdjacentHTML("beforeend", `<h3 style="margin-top:12px">${esc(t("Shared memory"))}</h3>`); const mem = document.createElement("button"); mem.className = "btn small"; mem.textContent = "AI-Memory"; mem.onclick = () => { pop.classList.remove("open"); memorySheet(); }; pop.append(mem);
   pop.insertAdjacentHTML("beforeend", `<h3 style="margin-top:12px">${esc(t("Session"))}</h3>`); const out = document.createElement("button"); out.className = "btn small"; out.textContent = t("Sign out"); out.onclick = signOut; pop.append(out); });
+
+/* AI-Memory: the agents' shared long-term memory, started by this core, wired to the agents. */
+async function memorySheet() { const st = await api("/api/aimemory"); if (st.error) return; const c = st.config || {}, form = foxForm();
+  const say = (r) => { if (r.error) return; toast(r.said || t("Done.")); setTimeout(memorySheet, 800); };
+  foxRow(form, [st.running ? t("running") : t("stopped"), c.url].filter(Boolean).join(" · "), [foxBtn(st.running ? t("Stop") : t("Start"), async () => say(await api("/api/aimemory", { action: st.running ? "stop" : "start" }))), foxBtn(t("Check"), async () => say(await api("/api/aimemory", { action: "check" })))]);
+  const on = Object.assign(document.createElement("input"), { type: "checkbox", checked: !!c.enabled }), onLab = document.createElement("label"); onLab.className = "check"; onLab.append(on, " " + t("Start it with the core")); form.append(onLab);
+  const bin = foxField(form, t("Its command"), Object.assign(document.createElement("input"), { type: "text", value: c.binary || "ai-memory", spellcheck: false }));
+  const args = foxField(form, t("Started with"), Object.assign(document.createElement("input"), { type: "text", value: c.args || "", spellcheck: false }));
+  const url = foxField(form, t("Where it answers"), Object.assign(document.createElement("input"), { type: "url", value: c.url || "", spellcheck: false }));
+  const data = foxField(form, t("Its data folder (empty: in the core's)"), Object.assign(document.createElement("input"), { type: "text", value: c.data_dir || "", spellcheck: false }));
+  const emb = foxField(form, t("Embedding provider (empty: its default)"), Object.assign(document.createElement("input"), { type: "text", value: c.embedding_provider || "", spellcheck: false }));
+  form.append(foxBtn(t("Save"), async () => say(await api("/api/aimemory", { action: "set", config: { enabled: on.checked, binary: bin.value.trim(), args: args.value.trim(), url: url.value.trim(), data_dir: data.value.trim(), embedding_provider: emb.value.trim() } })), "go"));
+  form.append(Object.assign(document.createElement("h3"), { textContent: t("Wire an agent to it") }));
+  const pick = foxField(form, t("Agent"), document.createElement("select")); for (const x of st.clients || []) pick.append(new Option(x, x));
+  form.append(foxBtn(t("Wire it"), async () => say(await api("/api/aimemory", { action: "wire", client: pick.value })), "go"));
+  if (st.log) { const pre = document.createElement("pre"); pre.className = "empty"; pre.textContent = st.log; form.append(pre); }
+  sheet("AI-Memory", [], t("The agents' shared memory: what one agent learnt, the next one finds, across Claude Code, Codex, Gemini and the local engine. Its token stays on this core."), form); }
 
 /* ---------- OpenFox: the panel of a thread it runs, live from the core ("panel" events) ---------- */
 const panels = {}; let critDraft = null, foxThinkOpen = false;
@@ -653,6 +672,7 @@ function engineSheet(node, harness) { const n = snap.nodes.find((x) => x.node_id
   // the agents' reach: the person's own search engine, and threads they open on other harnesses
   const searx = foxField(form, t("Web search (your SearXNG)"), Object.assign(document.createElement("input"), { type: "url", placeholder: "http://127.0.0.1:8888", value: st.search_url || "" }));
   const asks = Object.assign(document.createElement("input"), { type: "checkbox", checked: st.delegate_asks !== false }), asksLab = document.createElement("label"); asksLab.className = "check"; asksLab.append(asks, " " + t("Ask me before an agent opens a thread on another harness")); form.append(asksLab);
+  const brief = Object.assign(document.createElement("input"), { type: "checkbox", checked: !!st.memory_briefing }), briefLab = document.createElement("label"); briefLab.className = "check"; briefLab.append(brief, " " + t("A new thread starts from the shared memory's briefing (AI-Memory)")); form.append(briefLab);
   // what an agent on a cloud model (an https server) may touch: the rest stays on the person's own models
   form.append(Object.assign(document.createElement("h3"), { textContent: t("What the cloud may touch") }));
   const allowed = new Set(st.cloud_kitsune || []), cloudBoxes = [];
@@ -660,7 +680,7 @@ function engineSheet(node, harness) { const n = snap.nodes.find((x) => x.node_id
     const box = Object.assign(document.createElement("input"), { type: "checkbox", checked: allowed.has(action) }); box.dataset.action = action;
     const lab = document.createElement("label"); lab.className = "check"; lab.append(box, " " + label); form.append(lab); cloudBoxes.push(box); }
   const files = Object.assign(document.createElement("input"), { type: "checkbox", checked: !!st.cloud_files }), filesLab = document.createElement("label"); filesLab.className = "check"; filesLab.append(files, " " + t("Read my files")); form.append(filesLab);
-  const save = foxBtn(t("Save"), () => engineAct(node, harness, "set", { model: model.value, mode: mode.value, context_window: Number(win.value), max_steps: Number(steps.value), turn_timeout: Number(limit.value), keep_folder: !!keep.value, tiers: Object.fromEntries(Object.entries(tiers).map(([k, s]) => [k, s.value])), cloud_kitsune: cloudBoxes.filter((b) => b.checked).map((b) => b.dataset.action), cloud_files: files.checked, search_url: searx.value.trim(), delegate_asks: asks.checked }), "go"); form.append(save);
+  const save = foxBtn(t("Save"), () => engineAct(node, harness, "set", { model: model.value, mode: mode.value, context_window: Number(win.value), max_steps: Number(steps.value), turn_timeout: Number(limit.value), keep_folder: !!keep.value, tiers: Object.fromEntries(Object.entries(tiers).map(([k, s]) => [k, s.value])), cloud_kitsune: cloudBoxes.filter((b) => b.checked).map((b) => b.dataset.action), cloud_files: files.checked, search_url: searx.value.trim(), delegate_asks: asks.checked, memory_briefing: brief.checked }), "go"); form.append(save);
   foxRow(form, t("Instructions for every thread") + (st.instructions ? " · " + (st.instructions.length > 60 ? st.instructions.slice(0, 60) + "…" : st.instructions) : ""), [foxBtn(t("Edit"), () => textSheet(t("Instructions for every thread"), st.instructions || "", t("Added to the system prompt of every thread of this engine."), (v) => engineAct(node, harness, "set", { instructions: v })))]);
   form.append(Object.assign(document.createElement("h3"), { textContent: t("Model servers") }));
   for (const p of providers) { const del = foxBtn(t("Remove"), null); del.onclick = twice(del, t("Remove {name}?", { name: p.name || p.id }), () => engineAct(node, harness, "provider_remove", { id: p.id }));

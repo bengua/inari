@@ -21,3 +21,4 @@ services/kitsune-voice/kitsune_voice/agent.py # the voice's instructions are Fre
 services/kitsune-voice/tests/test_tools.py # French list fixtures: what the owner says, never the code
 crates/inari-core/web/kitsune.js # the French table of the Kitsune page (FR): a locale, not prose; the page itself is English
 services/kitsune-voice/tests/test_e2e.py # French words the owner says to the voice in the end-to-end test
+docs/ai-memory-fr.md # AI-Memory in Inari (the agents shared memory), written in French for the owner

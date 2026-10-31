@@ -303,6 +303,13 @@ Ouvrir la webapp, puis :
     serveur de dev ; « Forge Git » : « Le cloner ici » (dossier pas encore Git), puis, sur une branche à soi,
     « Pousser et ouvrir une pull request ». Le lien de la pull request s'affiche ensuite.
 
+17. Kitsune (la page d'accueil) : la barre « Parler · Assistants · Listes · En cours · Ma semaine » ; en
+    français si le téléphone ou le navigateur est en français. « Listes » : ajouter un article, le cocher.
+    « Assistants » → « Plan du jour » : un fil « Kitsune · Plan du jour » apparaît dans « En cours » et
+    s'arrête sur « Ça te va ? » avec ses choix.
+18. Réglages → Mémoire partagée → AI-Memory (si AI-Memory est installé sur le cœur) : « Démarrer »,
+    « Vérifier » répond « It answers at … » ; « Y brancher un agent » → « codex » → « Brancher ».
+
 ## Étape 11 — Le compte rendu à envoyer à Ben
 
 Envoie un message court avec :

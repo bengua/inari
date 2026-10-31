@@ -1166,3 +1166,83 @@ async fn a_development_job_is_planned_approved_and_handed_to_a_new_thread() {
         "{threads:?}"
     );
 }
+
+/// AI-Memory as a managed service, against a stand-in `ai-memory` (a script): started with its
+/// token, checked, an agent wired, stopped; the token is mode 600 and never shown.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_shared_memory_is_started_checked_wired_and_stopped() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let home = node(dir.path()).await;
+    let port = home.gateway_port;
+    let owner = "token=owner";
+    let mem_port = {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        l.local_addr().unwrap().port()
+    };
+    let bin = dir.path().join("ai-memory");
+    std::fs::write(&bin, r#"#!/bin/sh
+case "$1" in
+  serve) exec python3 -c '
+import os, sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
+class H(BaseHTTPRequestHandler):
+    def do_GET(self):
+        ok = self.headers.get("Authorization") == "Bearer " + os.environ["AI_MEMORY_AUTH_TOKEN"]
+        self.send_response(200 if ok else 401); self.send_header("Content-Length", "0"); self.end_headers()
+    def log_message(self, *a): pass
+HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
+' "$2" ;;
+  install-mcp) echo "mcp server added for $3" ;;
+  install-hooks) echo "hooks added for $3" ;;
+  *) exit 2 ;;
+esac
+"#).unwrap();
+    std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let m = |body: Value| call(port, owner, "POST", "/api/aimemory", Some(body));
+
+    let (st, set) = m(json!({"action": "set", "config": {"binary": bin.display().to_string(), "args": format!("serve {mem_port}"),
+        "url": format!("http://127.0.0.1:{mem_port}")}})).await;
+    assert_eq!(st, 200, "{set}");
+    let (st, started) = m(json!({"action": "start"})).await;
+    assert_eq!(st, 200, "{started}");
+    let mut ok = false;
+    for _ in 0..40 {
+        let (st, _) = m(json!({"action": "check"})).await;
+        if st == 200 {
+            ok = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(150)).await;
+    }
+    assert!(ok, "it never answered with its token");
+    let (st, wired) = m(json!({"action": "wire", "client": "codex"})).await;
+    assert_eq!(st, 200, "{wired}");
+    assert!(wired["said"]
+        .as_str()
+        .unwrap()
+        .contains("mcp server added for codex"));
+    assert!(wired["said"]
+        .as_str()
+        .unwrap()
+        .contains("hooks added for codex"));
+    let (st, _) = m(json!({"action": "wire", "client": "rm -rf /"})).await;
+    assert_eq!(st, 400, "only known agents");
+    let (_, status) = call(port, owner, "GET", "/api/aimemory", None).await;
+    assert_eq!(status["running"], true);
+    let token = std::fs::read_to_string(dir.path().join("home").join("ai-memory.token")).unwrap();
+    assert!(
+        !status.to_string().contains(token.trim()),
+        "the token is never shown"
+    );
+    let mode = std::fs::metadata(dir.path().join("home").join("ai-memory.token"))
+        .unwrap()
+        .permissions()
+        .mode();
+    assert_eq!(mode & 0o777, 0o600);
+    let (_, stopped) = m(json!({"action": "stop"})).await;
+    assert_eq!(stopped["running"], false);
+    // a guest sees nothing of it
+    let (st, _) = call(port, "token=nope", "GET", "/api/aimemory", None).await;
+    assert_eq!(st, 401);
+}

@@ -1076,3 +1076,108 @@ async fn the_assistant_searches_the_web_and_hands_a_job_to_a_new_thread() {
     }
     panic!("the delegated thread never started on its job");
 }
+
+/// AI-Memory as an MCP server, as far as the briefing goes.
+async fn memory_server(seen: Arc<Mutex<Vec<String>>>) -> u16 {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        while let Ok((mut s, _)) = listener.accept().await {
+            let seen = Arc::clone(&seen);
+            tokio::spawn(async move {
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 8192];
+                let (head, body) = loop {
+                    let n = s.read(&mut chunk).await.unwrap_or(0);
+                    if n == 0 {
+                        return;
+                    }
+                    buf.extend_from_slice(&chunk[..n]);
+                    if let Some(i) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                        let head = String::from_utf8_lossy(&buf[..i]).to_string();
+                        let len: usize = head
+                            .lines()
+                            .find_map(|l| {
+                                l.to_lowercase()
+                                    .strip_prefix("content-length:")
+                                    .map(|v| v.trim().parse().unwrap_or(0))
+                            })
+                            .unwrap_or(0);
+                        while buf.len() < i + 4 + len {
+                            let n = s.read(&mut chunk).await.unwrap_or(0);
+                            if n == 0 {
+                                break;
+                            }
+                            buf.extend_from_slice(&chunk[..n]);
+                        }
+                        break (head, buf[i + 4..].to_vec());
+                    }
+                };
+                seen.lock().unwrap().push(head);
+                let req: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+                let result = match req["method"].as_str().unwrap_or("") {
+                    "initialize" => {
+                        json!({"protocolVersion": "2025-03-26", "capabilities": {"tools": {}}, "serverInfo": {"name": "fake"}})
+                    }
+                    "tools/list" => {
+                        json!({"tools": [{"name": "memory_briefing", "description": "What happened lately", "inputSchema": {"type": "object", "properties": {}}}]})
+                    }
+                    "tools/call" => {
+                        json!({"content": [{"type": "text", "text": "Last session (Claude Code): the parser was split into lexer.rs and parse.rs."}]})
+                    }
+                    _ => {
+                        let _ = s
+                            .write_all(b"HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n\r\n")
+                            .await;
+                        return;
+                    }
+                };
+                let b = json!({"jsonrpc": "2.0", "id": req["id"], "result": result}).to_string();
+                let _ = s.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nMcp-Session-Id: sess-1\r\nContent-Length: {}\r\n\r\n{b}", b.len()).as_bytes()).await;
+            });
+        }
+    });
+    port
+}
+
+/// A new thread starts from AI-Memory's briefing when the person asked for it: the briefing is in
+/// the first system prompt, not in later turns, and not at all when the setting is off.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_new_thread_starts_from_the_shared_memorys_briefing() {
+    let l = lab(32_768).await;
+    let port = memory_server(Arc::default()).await;
+    let h = engine_of(&l);
+    let engine = h.local().unwrap();
+    engine
+        .change("mcp_add", &json!({"name": "ai-memory", "transport": "http", "url": format!("http://127.0.0.1:{port}/mcp")}))
+        .await
+        .unwrap();
+    let mut s = engine.settings();
+    s.memory_briefing = true;
+    engine.set_settings(s).unwrap();
+    {
+        let mut m = l.model.lock().unwrap();
+        m.script.push_back(answer(&["Hello."]));
+        m.script.push_back(answer(&["Again."]));
+    }
+    l.runner.run(&l.agent, "where were we?", vec![]).await;
+    l.runner.run(&l.agent, "and then?", vec![]).await;
+    let asked = l.model.lock().unwrap().asked.clone();
+    let first = asked[0]["messages"][0]["content"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        first.contains("Shared memory (AI-Memory briefing)")
+            && first.contains("the parser was split"),
+        "{first}"
+    );
+    let second = asked[1]["messages"][0]["content"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        !second.contains("AI-Memory briefing"),
+        "only a new thread starts from it"
+    );
+}
