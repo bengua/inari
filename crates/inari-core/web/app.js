@@ -640,7 +640,7 @@ const AGENT_PRESETS = [
   { id: "claude", label: "Claude (Claude Code)", name: "claude", command: "claude-agent-acp", npm: "@zed-industries/claude-agent-acp", hint: "Sign in once on this core: run claude, then /login." },
   { id: "codex", label: "ChatGPT (Codex)", name: "codex", command: "codex-acp", npm: "@zed-industries/codex-acp", hint: "Sign in once on this core: run codex login." },
   { id: "gemini", label: "Gemini (Gemini CLI)", name: "gemini", command: "gemini --acp", npm: "@google/gemini-cli", hint: "Sign in once on this core: run gemini and choose Login with Google." },
-  { id: "kimi", label: "Kimi (Kimi CLI)", name: "kimi", command: "kimi --acp", npm: "", hint: "Install Kimi CLI on this core, then sign in once: run kimi and /login." },
+  { id: "kimi", label: "Kimi (Kimi CLI)", name: "kimi", command: "kimi acp", npm: "@moonshot-ai/kimi-code", hint: "Install Kimi CLI on this core, then sign in once: run kimi and /login." },
   { id: "local", label: "Local engine (Inari)", name: "inari", kind: "local", hint: "Inari's own agent for your local models: its model servers are set in its Settings, once added." },
   { id: "openfox", label: "OpenFox, a separate process (legacy)", name: "openfox", kind: "openfox", hint: "For an OpenFox you already run. The local engine does the same inside Inari, with no other process." },
   { id: "acp", label: "Another ACP agent", name: "", command: "", npm: "", hint: "Any agent that speaks the Agent Client Protocol: the command that starts it." },

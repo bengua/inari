@@ -44,6 +44,9 @@ Newest first. An entry says what changed for someone using the thing.
   as OpenFox's executor walks them (agent, sub-agent, shell, person and parallel steps), and the
   tools of MCP servers (a command on the core, or a plain-http address), their secrets kept on the
   core. Its library (agents, skills, commands, workflows, MCP servers) is set from its sheet.
+- **Kimi Code ACP.** The Kimi preset now uses `kimi acp` instead of the retired `kimi --acp`
+  command, with the npm package `@moonshot-ai/kimi-code`; newly enrolled cores detect the local
+  binary and register its update metadata automatically.
 - **A thread's project on the local engine.** Its folder stays on disk between turns (a setting of
   the engine); the Plan tab has its task board, its dev server (run by the core), the processes its
   agent started, its branches and its instructions, all kept in the folder so they travel with it.

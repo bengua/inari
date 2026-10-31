@@ -178,9 +178,14 @@ A harness may say where it comes from:
 ```json
 "claude": {"command": ["<path to claude-agent-acp>"],
            "update": {"npm": "@zed-industries/claude-agent-acp", "prefix": "<npm global prefix>"}},
+"kimi": {"command": ["<path to kimi>", "acp"], "timeout": 900,
+         "update": {"npm": "@moonshot-ai/kimi-code"}},
 "openfox": {"kind": "openfox",
             "update": {"npm": "openfox", "restart": ["systemctl", "--user", "restart", "openfox.service"]}}
 ```
+
+Run `kimi login` once on each core before using its Kimi harness. OAuth credentials stay in
+that machine's `~/.kimi-code` and are not copied between cores.
 
 The node reads the installed version from `<prefix>/lib/node_modules/<package>/package.json`,
 asks `npm view` for the latest at start and every six hours, and announces both in its

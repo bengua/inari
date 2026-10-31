@@ -84,12 +84,12 @@ async fn agents_are_added_tried_used_kept_and_taken_away_from_the_interface() {
     let (status, _) = call(
         port,
         "/api/harnesses",
-        json!({"node": "home", "action": "add", "name": "kimi", "preset": "kimi", "command": command, "npm": "kimi-acp"}),
+        json!({"node": "home", "action": "add", "name": "kimi", "preset": "kimi", "command": command, "npm": "@moonshot-ai/kimi-code"}),
     )
     .await;
     assert_eq!(status, 200);
     until("kimi listed", || specs(&g)["kimi"]["source"] == "interface").await;
-    assert_eq!(specs(&g)["kimi"]["npm"], "kimi-acp");
+    assert_eq!(specs(&g)["kimi"]["npm"], "@moonshot-ai/kimi-code");
     assert_eq!(specs(&g)["local"]["default"], true);
     let runner = home.runner.clone().unwrap();
     let agent = runner.create("t1", "kimi", "a thread").unwrap();
