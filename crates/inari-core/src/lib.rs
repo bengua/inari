@@ -6,6 +6,7 @@
 //! hash for hash.
 
 pub mod agent;
+pub mod aimemory;
 pub mod approvals;
 pub mod bus;
 pub mod buslink;

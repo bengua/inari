@@ -9,6 +9,30 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Added
 
+- **Kitsune becomes an assistant for people with ADHD**, grounded in the research
+  (docs/tdah-recherche-fr.md): one brain (`brain.db`) with notes, reminders and lists (todo,
+  shopping by aisle, pantry with what expires); screens for Talk, Assistants, Lists, Running and My
+  week; reminders that stay until done, with time made visible and nothing ever "late"; the page
+  in French when the phone speaks French.
+- **Assistants and workflows on the local engine**: a specialist per job (triage, organizer,
+  shopper, tracker, librarian, summarizer, home, researcher, developer), each on the model tier its
+  job needs (fast, standard, expert, set in the engine's sheet); everyday workflows (inbox, plan of
+  the day, weekly review, groceries, documents, research, development hand-off); the agents reach
+  the brain through one `kitsune` tool, search the web through the person's SearXNG, and hand
+  development to a new thread on a coder harness.
+- **Cloud providers with a guard**: an https model server (Gemini's OpenAI-compatible endpoint, say)
+  can take a tier; what an agent on it may touch (the brain's actions, the files) is a setting, off
+  by default for searching everything and reading files.
+- **The live voice**: talk with Kitsune in real time through the person's own LiveKit server, on
+  Gemini Live (cloud, the person's choice) or entirely on their own servers
+  (services/kitsune-voice).
+- **The phone**: a "Talk to Kitsune" widget, the microphone in the app, reminders that ring with no
+  network (the alarm and the system's geofencing), "Done" and "In 1 h" from the notification.
+- **Skills from GitHub** (MIT or Apache only) and a graphify MCP preset.
+- **AI-Memory, the agents' shared memory**, started and checked by the core, wired to Claude Code,
+  Codex, gemini-cli and others in one tap, and a thread's optional briefing from it
+  (docs/ai-memory-fr.md).
+
 - **The local engine does what OpenFox does, inside the core.** A thread on the local engine has
   OpenFox's Plan tab (criteria, todos, review findings, thinking, questions, the queue of messages,
   its context), sub-agents with a context of their own, skills and slash commands, workflows walked
