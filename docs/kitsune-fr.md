@@ -208,7 +208,8 @@ Agents, Python) répond dans cette salle. Deux modes, au choix dans les réglage
 - **Gemini Live** (cloud) : un modèle temps réel qui comprend la voix et répond à voix haute, sans
   charger ton GPU. Ta voix, et ce que l'agent lit, partent chez Google. Sur l'offre gratuite,
   Google peut s'en servir pour améliorer ses produits. Le nom du modèle est un réglage, parce que
-  Google change ses noms. La clé `GOOGLE_API_KEY` reste dans l'environnement du service, jamais
+  Google change ses noms. Par défaut : `gemini-3.1-flash-live-preview` (le modèle Live gratuit de
+  l'API Gemini, connu du plugin LiveKit 1.8.10). Laissé vide, le plugin prendrait Gemini 2.5. La clé `GOOGLE_API_KEY` reste dans l'environnement du service, jamais
   dans les réglages du cœur.
 - **Privé** : tout reste chez toi. Ton Whisper transcrit, ton petit modèle répond, ta voix locale
   (Kokoro-82M, Apache-2.0, par exemple) parle.

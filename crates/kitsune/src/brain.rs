@@ -69,7 +69,7 @@ pub struct VoiceConfig {
     pub api_secret: String,
     /// gemini (realtime, in the cloud) or private (everything on the person's own servers).
     pub mode: String,
-    /// The Gemini Live model, as Google names it (a setting: names change).
+    /// The Gemini Live model, as Google names it (a setting: names change; empty: the plugin's default).
     pub model: String,
     /// The voice the model speaks with.
     pub voice: String,
@@ -86,7 +86,8 @@ impl Default for VoiceConfig {
             api_key: String::new(),
             api_secret: String::new(),
             mode: "private".into(),
-            model: String::new(),
+            // the free Live model on the Gemini API (empty would fall back to the plugin's 2.5)
+            model: "gemini-3.1-flash-live-preview".into(),
             voice: String::new(),
             language: "fr-FR".into(),
             tools: ["note", "reminders", "lists", "items", "add_items", "check"]
@@ -831,6 +832,13 @@ mod tests {
             .mcp(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}))
             .unwrap();
         assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 4);
+    }
+
+    #[test]
+    fn the_live_voice_defaults_to_the_free_gemini_live_model() {
+        let v = VoiceConfig::default();
+        assert_eq!(v.model, "gemini-3.1-flash-live-preview");
+        assert_eq!(v.mode, "private", "the cloud stays an opt-in");
     }
 
     #[test]
