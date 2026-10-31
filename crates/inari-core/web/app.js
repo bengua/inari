@@ -33,6 +33,8 @@ let snap = null, selected = null, tab = "artifacts", events = [], files = null, 
 /* the Swarm pane: a common room to message every thread at once. The log is client-side for now;
    replies are detected from the snapshot's per-agent "last" line, so no new endpoint is needed. */
 let swarmTarget = "all", swarmLog = [], swarmSeen = {}, swarmLastSent = {}, swarmTouched = new Set();
+/* the mascot's last sent state, per channel, and the multi-thread selection */
+let foxSent = {}, foxWorkHold = 0, selOn = false, selSet = new Set();
 let currentView = store.get("view", "work");
 // messages sent while the agent works, per thread: shown at once, "waiting", until the agent reads them (drawChat)
 const queued = {};
@@ -146,9 +148,10 @@ function foxTarget() { const home = foxHome(); if (!(drag && drag.active)) retur
   const seen = home.y + home.size * 0.6 > 56 && home.y + home.size * 0.4 < innerHeight; if (seen) return home;
   const size = Math.min(140, innerWidth * 0.36); return { x: innerWidth / 2 - size / 2, y: 60, size }; }
 function foxHome() { const app = $("app"), mobile = matchMedia("(max-width:760px)").matches, open = document.body.classList.contains("open");
-  if (mobile && open) { const st = $("stage").getBoundingClientRect(), back = $("back").getBoundingClientRect();
-    if (st.height >= 72) { const size = st.height; return { x: innerWidth / 2 - size / 2, y: st.top, size }; } // its stage, big enough to see its face
-    const size = 56; return { x: innerWidth / 2 - size / 2, y: Math.max(0, back.top + back.height / 2 - size / 2), size }; }
+  if (mobile && open) { const back = $("back").getBoundingClientRect();
+    // a small companion beside the Back button, where the thread's bar is empty: it watches
+    // without covering the journal nor the chips on the right
+    const size = 56; return { x: back.right + 10, y: Math.max(4, back.top + (back.height - size) / 2), size }; }
   // a thread open without the sidebar: the mascot floats at the top centre of the conversation, as large as in the
   // sidebar, just under the thread's bar, in a band the thread leaves it (body.open #app.noside #thread)
   if (!mobile && app.classList.contains("noside")) { const m = $("main").getBoundingClientRect(), th = $("thread").getBoundingClientRect();
@@ -204,14 +207,14 @@ function render() {
 }
 const inFlight = (mv) => mv && !["committed", "rolled_back"].includes(mv.state);
 function row(id, a, mv) {
-  const el = document.createElement("div"); el.className = "row" + (selected === id ? " selected" : "") + (inFlight(mv) ? " moving" : ""); el.dataset.agent = id; el.dataset.phase = a.phase; el.dataset.node = a.node; el.tabIndex = 0;
+  const el = document.createElement("div"); el.className = "row" + (selected === id ? " selected" : "") + (inFlight(mv) ? " moving" : "") + (selOn ? " sel" : "") + (selSet.has(id) ? " picked" : "") + ((snap.approvals || []).some((r) => r.agent_id === id) ? " need" : ""); el.dataset.agent = id; el.dataset.phase = a.phase; el.dataset.node = a.node; el.tabIndex = 0;
   el.setAttribute("aria-label", t("{title}, {phase}, on {node}", { title: a.title || id, phase: LABEL[a.phase], node: a.node })); el.innerHTML = `<span class="pdot"></span><span class="t"></span>`; el.querySelector(".t").textContent = a.title || id; if (a.pinned) el.querySelector(".t").insertAdjacentHTML("beforebegin", `<span class="pin" title="${esc(t("Pinned"))}" style="color:var(--copper);margin-right:4px">★</span>`);
   const pp = a.pass && (snap.passes || []).find((x) => x.id === a.pass); if (pp) el.insertAdjacentHTML("beforeend", `<span class="ptag" title="${esc(t(pp.role + " pass"))}">${esc(pp.name)}</span>`); el.title = (a.last || "") + "\n" + t("{events} events · {files} files", { events: a.events ?? 0, files: a.files ?? 0 });
   if (inFlight(mv)) el.insertAdjacentHTML("beforeend", `<span class="prog">→ ${esc(mv.target)} ${Math.round(Math.max(0, STEPS.indexOf(mv.state)) / 7 * 100)}%</span>`); else el.append(badge(a.model || ""), ...(ring(a.model || "") ? [ring(a.model || "")] : []));
   if (!inFlight(mv) && !(snap.ui && snap.ui.pass) && snap.nodes.filter((n) => n.node_id !== a.node && n.role === "heavy").length) {
     const mvb = document.createElement("button"); mvb.className = "rmove"; mvb.type = "button"; mvb.innerHTML = icon("move"); mvb.title = t("Move to another core (T)"); mvb.setAttribute("aria-label", t("Move {title} to another core", { title: a.title || id }));
     mvb.onpointerdown = (e) => e.stopPropagation(); mvb.onclick = (e) => { e.stopPropagation(); openMove(id, a.node); }; el.append(mvb); }
-  el.onpointerdown = (e) => startDrag(e, el, id, a.node); el.onkeydown = (e) => { if (e.key === "t" || e.key === "T") openMove(id, a.node); if (e.key === "Enter") select(id); }; return el;
+  el.onpointerdown = (e) => { if (selOn) { e.preventDefault(); e.stopPropagation(); toggleSel(id); return; } startDrag(e, el, id, a.node); }; el.onkeydown = (e) => { if (e.key === "t" || e.key === "T") openMove(id, a.node); if (e.key === "Enter") selOn ? toggleSel(id) : select(id); }; return el;
 }
 function renderCores(agents) {
   const box = $("cores"); box.textContent = ""; const asleep = agents.filter(([, a]) => a.archived); agents = agents.filter(([, a]) => !a.archived);
@@ -241,8 +244,12 @@ function renderRooms(agents) {
   for (const n of snap.nodes) {
     const load = (snap.load[n.node_id] || {}).gpu || 0, mine = agents.filter(([, a]) => a.node === n.node_id), c = document.createElement("article");
     c.className = "core room"; c.dataset.node = n.node_id;
-    c.innerHTML = `<div class="chead"><span class="dot"></span><b></b><span class="pct">${Math.round(load * 100)}% · ${mine.length}</span><button type="button" class="cterm" title="${esc(t("Debug on {node}", { node: n.node_id }))}">${icon("terminal")}</button><button type="button" class="cnew" title="${esc(t("New thread on this core"))}">${icon("plus")}</button></div><div class="bar"><i style="width:${Math.round(load * 100)}%"></i></div><div class="rows"></div>`;
+    c.innerHTML = `<div class="chead"><span class="dot"></span><b></b><span class="pct">${Math.round(load * 100)}% · ${mine.length}</span><span class="ldbars" title="${esc(t("GPU load"))}"></span><span class="askn" hidden></span><button type="button" class="cterm" title="${esc(t("Debug on {node}", { node: n.node_id }))}">${icon("terminal")}</button><button type="button" class="cnew" title="${esc(t("New thread on this core"))}">${icon("plus")}</button></div><div class="bar"><i style="width:${Math.round(load * 100)}%"></i></div><div class="rows"></div>`;
     c.querySelector("b").textContent = n.node_id;
+    const hist = (loadHist[n.node_id] || []).slice(-28);
+    c.querySelector(".ldbars").innerHTML = hist.map((v) => `<i style="height:${Math.max(1, Math.round(v * 100))}%"></i>`).join("");
+    const waiting = (snap.approvals || []).filter((r) => { const ag = snap.agents[r.agent_id]; return ag && ag.node === n.node_id; }).length;
+    const an = c.querySelector(".askn"); an.hidden = !waiting; an.textContent = "⚠ " + waiting; an.title = t("{n} waiting for your approval", { n: waiting });
     const ct = c.querySelector(".cterm"); ct.setAttribute("aria-label", t("Debug on {node}", { node: n.node_id })); ct.disabled = !mine.length; ct.onpointerdown = (e) => e.stopPropagation(); ct.onclick = (e) => { e.stopPropagation(); debugHost(n.node_id); };
     const cn = c.querySelector(".cnew"); cn.setAttribute("aria-label", t("New thread on {node}", { node: n.node_id })); cn.onpointerdown = (e) => e.stopPropagation(); cn.onclick = (e) => { e.stopPropagation(); newThreadOn(n.node_id); };
     const rows = c.querySelector(".rows"); for (const [id, a] of [...mine].sort((x, y) => (y[1].pinned ? 1 : 0) - (x[1].pinned ? 1 : 0))) rows.append(row(id, a, snap.moves[id]));
@@ -334,6 +341,32 @@ $("gear").onclick = () => openPop($("gear"), (pop) => { pop.insertAdjacentHTML("
     for (const [node, h] of foxes) { const b = document.createElement("button"); b.className = "btn small"; b.textContent = foxes.length > 1 ? `${node} · ${h}` : t("Settings of {name}", { name: node }); b.onclick = () => { pop.classList.remove("open"); openfoxSheet(node, h); }; box.append(b); } pop.append(box); }
   // the agents' shared memory (AI-Memory), a service this core starts and wires
   pop.insertAdjacentHTML("beforeend", `<h3 style="margin-top:12px">${esc(t("Shared memory"))}</h3>`); const mem = document.createElement("button"); mem.className = "btn small"; mem.textContent = "AI-Memory"; mem.onclick = () => { pop.classList.remove("open"); memorySheet(); }; pop.append(mem);
+  const kit = document.createElement("button"); kit.className = "btn small"; kit.textContent = t("Voice notebook"); kit.onclick = () => { pop.classList.remove("open"); kitsuneSheet(); }; pop.append(kit);
+/* The voice notebook's servers (Kitsune): the same settings the Kitsune page holds, reachable from
+   Inari so one settings place serves every device. Each service is a closed group; a group that
+   holds a value opens by itself — the eye goes only where something is configured. */
+async function kitsuneSheet() {
+  const d = await api("/api/kitsune"), wrap = document.createElement("div"); wrap.className = "passform";
+  if (d.error) { wrap.innerHTML = `<p class="empty">${esc(t("This core holds no Kitsune yet."))}</p>`; sheet(t("Voice notebook servers"), [], "", wrap); return; }
+  const s = JSON.parse(JSON.stringify(d.settings || {}));
+  const field = (svc, key, label, ph, type) => `<label for="ks_${svc}_${key}">${esc(label)}</label><input id="ks_${svc}_${key}" data-svc="${svc}" data-key="${key}" type="${type || "text"}" value="${esc(((s[svc] || {})[key]) || "")}" placeholder="${esc(ph)}" autocomplete="off">`;
+  const groups = [
+    ["asr", t("Speech to text"), field("asr", "url", t("Address"), "http://127.0.0.1:8080/v1") + field("asr", "model", t("Its model"), "whisper-1") + field("asr", "language", t("Spoken language"), "fr")],
+    ["tts", t("Text to speech"), field("tts", "url", t("Address"), "http://127.0.0.1:8880/v1") + field("tts", "voice", t("Its voice"), "fr_FR-siwis-medium")],
+    ["slm", t("Understanding (small language model)"), field("slm", "url", t("Address"), "http://127.0.0.1:8081/v1") + field("slm", "model", t("Its model"), "qwen2.5-3b-instruct")],
+    ["embed", t("Meaning (384-wide embeddings)"), field("embed", "url", t("Address"), "http://127.0.0.1:8082/v1") + field("embed", "model", t("Its model"), "multilingual-e5-small")],
+    ["geocoder", t("Places (your own Nominatim or Photon)"), field("geocoder", "url", t("Address"), "http://127.0.0.1:8088") + `<label for="ks_geocoder_kind">${esc(t("Its kind"))}</label><select id="ks_geocoder_kind" data-svc="geocoder" data-key="kind"><option value="nominatim">Nominatim</option><option value="photon">Photon</option></select>`],
+    ["voice", t("Live voice (your LiveKit server)"), field("voice", "url", t("Address"), "ws://127.0.0.1:7880") + field("voice", "api_key", t("Its API key"), "") + field("voice", "api_secret", t("Its API secret"), "", "password") + `<label for="ks_voice_mode">${esc(t("The live voice runs on"))}</label><select id="ks_voice_mode" data-svc="voice" data-key="mode"><option value="private">${esc(t("Your own servers (nothing leaves the house)"))}</option><option value="gemini">${esc(t("Gemini Live (cloud: your voice goes to Google)"))}</option></select>` + field("voice", "model", t("Gemini Live model"), "gemini-3.1-flash-live-preview")],
+  ];
+  wrap.innerHTML = groups.map(([id, name, fields]) => `<details class="ksvc"${((s[id] || {}).url) ? " open" : ""}><summary>${esc(name)}</summary>${fields}</details>`).join("");
+  const kindSel = wrap.querySelector("#ks_geocoder_kind"), modeSel = wrap.querySelector("#ks_voice_mode");
+  if (kindSel) kindSel.value = (s.geocoder || {}).kind || "nominatim";
+  if (modeSel) modeSel.value = (s.voice || {}).mode || "private";
+  const save = async () => { for (const inp of wrap.querySelectorAll("[data-svc]")) { s[inp.dataset.svc] = s[inp.dataset.svc] || {}; s[inp.dataset.svc][inp.dataset.key] = inp.value.trim(); }
+    const r = await api("/api/kitsune", { action: "set_settings", settings: s });
+    toast(r && r.error ? t("The core refused it") : t("Settings saved.")); };
+  sheet(t("Voice notebook servers"), [[t("Save"), save]], t("Same settings as the Kitsune page; one place serves every device."), wrap);
+}
   pop.insertAdjacentHTML("beforeend", `<h3 style="margin-top:12px">${esc(t("Session"))}</h3>`); const out = document.createElement("button"); out.className = "btn small"; out.textContent = t("Sign out"); out.onclick = signOut; pop.append(out); });
 
 /* AI-Memory: the agents' shared long-term memory, started by this core, wired to the agents. */
@@ -750,15 +783,26 @@ function engineSheet(node, harness) { const n = snap.nodes.find((x) => x.node_id
   sheet(t("Local engine of {name}", { name: node }), [], t("Inari's own agent: the model runs on your server, its tools in this core. Nothing else to start."), form); }
 /* ---------- the mascot: FoxBot when its folder is served, else the orb ---------- */
 let foxFrame = null, foxReady = false, foxLast = "";
-function fox(method, a) { try { const f = foxFrame && foxFrame.contentWindow && foxFrame.contentWindow.fox; if (!f) return false; if (method === "event") f.setEvent && f.setEvent(a); else if (method === "persona") { if (!f.setPersona) return false; f.setPersona(a); } else if (method === "state") { f.setHarness && f.setHarness(a.harness); f.setHealth && f.setHealth(a.health); f.setActivity && f.setActivity(a.activity); } return true; } catch (e) { return false; } }
+function fox(method, a) { try { const f = foxFrame && foxFrame.contentWindow && foxFrame.contentWindow.fox; if (!f) return false; if (method === "event") f.setEvent && f.setEvent(a); else if (method === "persona") { if (!f.setPersona) return false; f.setPersona(a); } else if (method === "state") {
+    /* One channel per value, each sent only when it changed: a repeated setHealth makes the bot
+       reconcileState() away from a running mimic, and activity flapping every heartbeat used to
+       cut every sequence before it finished. */
+    if (a.harness !== foxSent.harness) { f.setHarness && f.setHarness(a.harness); foxSent.harness = a.harness; }
+    if (a.health !== foxSent.health) { f.setHealth && f.setHealth(a.health); foxSent.health = a.health; }
+    if (a.activity !== foxSent.activity) { f.setActivity && f.setActivity(a.activity); foxSent.activity = a.activity; }
+  } return true; } catch (e) { return false; } }
 function mountFox() {
   const box = $("fox"); if (!(snap && snap.ui && snap.ui.mascot)) { if (!box.firstChild) { const c = document.createElement("canvas"); c.id = "orb"; c.width = c.height = 300; c.setAttribute("role", "img"); c.setAttribute("aria-label", t("Network activity indicator")); box.append(c); orbInit(c); } return; }
-  if (foxFrame) return; foxFrame = document.createElement("iframe"); foxFrame.title = t("Mascot"); foxFrame.src = "/fox/index.html"; foxFrame.onload = () => { foxReady = true; foxLast = ""; try { foxFrame.contentWindow.fox.setReducedMotion(matchMedia("(prefers-reduced-motion: reduce)").matches); } catch (e) {} mascot(); }; box.textContent = ""; box.append(foxFrame);
+  if (foxFrame) return; foxFrame = document.createElement("iframe"); foxFrame.title = t("Mascot"); foxFrame.src = "/fox/index.html"; foxFrame.onload = () => { foxReady = true; foxLast = ""; foxSent = {}; personaShown = null; try { foxFrame.contentWindow.fox.setReducedMotion(matchMedia("(prefers-reduced-motion: reduce)").matches); } catch (e) {} mascot(); }; box.textContent = ""; box.append(foxFrame);
 }
 function mascot() {
   mountFox(); if (!foxReady) return; const phases = Object.values(snap.agents).map((a) => a.phase), sel = selected && snap.agents[selected], errors = phases.filter((p) => p === "error").length;
-  const activity = snap.approvals.length ? "waiting" : phases.some((p) => p === "inference" || p === "loading" || p === "listening") ? "working" : "idle"; const f = family((sel && sel.model) || "").id;
-  const harness = f === "claude" ? "claude" : f === "kimi" ? "kimi" : "local"; const st = { activity, harness, health: Math.max(20, 100 - errors * 20) }, key = JSON.stringify(st); if (key !== foxLast) { fox("state", st); foxLast = key; personaShown = null; /* an older FoxBot lets the harness pick its persona: say ours again */ }
+  // "working" is latched: one busy agent keeps the fox attentive for a while, so the activity
+  // channel stops flapping every heartbeat and never cuts a mimic mid-sequence.
+  const busy = snap.approvals.length ? "waiting" : phases.some((p) => p === "inference" || p === "loading" || p === "listening") ? "working" : "idle";
+  if (busy === "working") foxWorkHold = Date.now() + 8000;
+  const activity = busy === "working" || Date.now() < foxWorkHold ? "working" : "idle"; const f = family((sel && sel.model) || "").id;
+  const harness = f === "claude" ? "claude" : f === "kimi" ? "kimi" : "local"; fox("state", { activity, harness, health: Math.max(20, 100 - errors * 20) });
   applyPersona();
 }
 /* The avatar is the person's own choice (not the model's): the arrows beside the mascot go through the personas
@@ -960,11 +1004,17 @@ function drawChat() {
   if (!selected) { shown.textContent = ""; shown.innerHTML = `<div class="hero"><h2>${esc(t("What should we build?"))}</h2><p>${esc(t("Pick a thread on the left, or describe a task below. It runs on the core you choose and can move to another one at any time."))}</p></div>`; $("jump").hidden = true; return; }
   const a = snap.agents[selected] || {};
   if (!events.filter((e) => e.kind !== "system" && e.kind !== "provider_switch").length) { box.innerHTML = `<div class="hero"><h2>${esc(t("What should this agent do?"))}</h2><p>${esc(t("It works in its own sandboxed workspace. Anything it creates appears under Artifacts."))}</p></div>`; }
+  // runs of auto-approval checkpoints collapse into one line: twenty "Allowed automatically" notes
+  // in a row hid the conversation; the count says the same in one breath
+  const collapsed = []; let autoN = 0;
+  for (const e of events) { if (e.kind === "checkpoint" && e.text.startsWith("auto_approved")) { autoN++; continue; } if (autoN) { collapsed.push({ kind: "auto_group", n: autoN }); autoN = 0; } collapsed.push(e); }
+  if (autoN) collapsed.push({ kind: "auto_group", n: autoN });
   let lastNote = "";
   const note = (html) => { if (html === lastNote) return; lastNote = html; box.insertAdjacentHTML("beforeend", `<div class="note">${html}</div>`); };
-  for (let i = 0; i < events.length; i++) { const e = events[i];
+  for (let i = 0; i < collapsed.length; i++) { const e = collapsed[i];
     if (e.kind === "user_message" || e.kind === "assistant_message") { lastNote = ""; const d = document.createElement("div"); d.className = "msg " + (e.kind === "user_message" ? "user" : "assistant"); d.dataset.event = d.dataset.k = e.id; d.innerHTML = msgTools() + md(e.text) + msgBar(e.kind); box.append(d); }
-    else if (e.kind === "tool_call") { lastNote = ""; const r = events[i + 1] && events[i + 1].kind === "tool_result" ? events[++i] : null, err = r && /^(denied|\w+Error)/.test(r.text);
+    else if (e.kind === "auto_group") note(esc(t("{n} actions allowed automatically", { n: e.n })));
+    else if (e.kind === "tool_call") { lastNote = ""; const r = collapsed[i + 1] && collapsed[i + 1].kind === "tool_result" ? collapsed[++i] : null, err = r && /^(denied|\w+Error)/.test(r.text);
       const d = document.createElement("details"); d.className = "tool" + (err ? " err" : ""); d.dataset.k = e.id; d.dataset.s = r ? r.id : ""; const shell = /^(\$ |bash|execute|shell|run)/.test(e.text);
       d.innerHTML = `<summary>${icon(shell ? "terminal" : "tool")}<span class="tn"></span><span class="ts">${esc(t(r ? (err ? "failed" : "done") : "running…"))}</span><span class="cv">${icon("chevron")}</span></summary><pre></pre>`;
       d.querySelector(".tn").textContent = e.text; toolOutput(d.querySelector("pre"), r ? r.text : t("running…"));
@@ -1220,8 +1270,27 @@ function drawStop() { const a = selected && snap && snap.agents[selected], busy 
   if (a) $("msg").placeholder = busy ? t("Add a message: the agent reads it when it is ready…") : t("Message the agent…"); }
 $("stopBtn").onclick = () => { if (selected) { api("/api/cancel", { agent: selected }); toast(t("Stopping…")); } };
 $("msg").addEventListener("input", drawStop); $("msg").addEventListener("input", () => requestAnimationFrame(placeFox));
+/* ---------- multi-select: pick several threads, delete them in one click ---------- */
+function selBar() { let bar = $("selbar"); if (bar) return bar;
+  bar = document.createElement("div"); bar.id = "selbar"; bar.setAttribute("role", "toolbar"); bar.hidden = true;
+  bar.innerHTML = `<span id="selcount" aria-live="polite"></span><button type="button" class="btn small" id="selall"></button><button type="button" class="btn small danger" id="seldel"></button><button type="button" class="btn small" id="seloff"></button>`;
+  document.body.append(bar);
+  $("selall").onclick = () => { const all = Object.entries(snap.agents).filter(([, a]) => !a.archived).map(([id]) => id); const full = all.length && all.every((id) => selSet.has(id)); selSet = full ? new Set() : new Set(all); updateSelBar(); if (snap) renderCores(Object.entries(snap.agents)); };
+  $("seldel").onclick = askDeleteSel;
+  $("seloff").onclick = exitSelMode;
+  return bar; }
+function updateSelBar() { $("selcount").textContent = t("{n} selected", { n: selSet.size }); $("seldel").disabled = !selSet.size; $("selall").textContent = t("Select all"); $("seloff").textContent = t("Cancel"); $("seldel").textContent = t("Delete"); }
+function enterSelMode() { selOn = true; selSet = new Set(); const bar = selBar(); bar.hidden = false; updateSelBar(); if (snap) renderCores(Object.entries(snap.agents)); }
+function exitSelMode() { if (!selOn) return; selOn = false; selSet.clear(); $("selbar").hidden = true; if (snap) renderCores(Object.entries(snap.agents)); }
+function toggleSel(id) { selSet.has(id) ? selSet.delete(id) : selSet.add(id); updateSelBar(); document.querySelectorAll(`.row[data-agent="${CSS.escape(id)}"]`).forEach((r) => r.classList.toggle("picked", selSet.has(id))); }
+function askDeleteSel() { const n = selSet.size; if (!n) return;
+  sheet(t("Delete {n} threads?", { n }), [[t("Delete them"), async () => { let done = 0; for (const id of selSet) { const r = await api("/api/delete", { agent: id }); if (!r.error) done++; }
+    if (selected && selSet.has(selected)) { selected = null; render(); } exitSelMode(); toast(t("Deleted {n} threads — kept in the cores' trash", { n: done })); }]],
+    t("They leave Inari. Each core keeps them in its trash folder, so they can still be restored by hand."));
+  const yes = [...$("sheetOpts").querySelectorAll("button")].find((b) => b.textContent === t("Delete them")); if (yes) yes.classList.add("danger"); }
 function actionSheet(id) { const a = snap.agents[id]; if (!a) return; const node = snap.nodes.find((n) => n.node_id === a.node) || {};
   const opts = [[t("Open it, with its artifacts"), () => select(id).then(() => { store.set("nobench", false); document.body.classList.add("bench-open"); layout(); })]];
+  if (!(snap.ui && snap.ui.pass)) opts.push([t("Select several…"), enterSelMode]);
   const has = (n, h) => !!(((n.capabilities || {}).harnesses || {})[h]);
   for (const h of [...new Set(snap.nodes.flatMap((n) => Object.keys((n.capabilities || {}).harnesses || {})))].filter((h) => h !== a.harness)) {
     const where = has(node, h) ? "" : (snap.nodes.find((n) => has(n, h)) || {}).node_id; opts.push([t(where ? "Clone to {harness} (on {node})" : "Clone to {harness}", { harness: harnessName(h), node: where }), () => cloneTo(id, h)]); }
@@ -1325,7 +1394,7 @@ $("msgs").addEventListener("click", async (e) => { const b = e.target.closest(".
 addEventListener("resize", () => snap && drawTethers());
 /* Keyboard: Escape closes what is open, / searches, ? lists the shortcuts (outside text fields). */
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") { if ($("sheet").classList.contains("open")) { $("sheet").classList.remove("open"); e.preventDefault(); } if ($("pop").classList.contains("open")) $("pop").classList.remove("open"); $("hits").style.display = "none"; return; }
+  if (e.key === "Escape") { if ($("sheet").classList.contains("open")) { $("sheet").classList.remove("open"); e.preventDefault(); } else if (selOn) exitSelMode(); if ($("pop").classList.contains("open")) $("pop").classList.remove("open"); $("hits").style.display = "none"; return; }
   const typing = e.target.closest && e.target.closest("input, textarea, select, [contenteditable=true]"); if (typing || e.ctrlKey || e.metaKey || e.altKey || $("app").hidden) return;
   if (e.key === "/") { e.preventDefault(); $("search").classList.add("on"); $("search").focus(); }
   else if (e.key === "?") { e.preventDefault(); const list = document.createElement("dl"); list.className = "keys";
