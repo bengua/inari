@@ -178,7 +178,7 @@ pre.code span.l::before { counter-increment:l; content:counter(l); position:abso
 #swarm { display:grid; grid-template-rows:auto auto 1fr auto; height:100%; min-height:0; gap:8px; }
 #swarmlive { width:8px; height:8px; border-radius:50%; background:var(--bad); flex:none; } #swarmlive.on { background:#7fd18b; }
 .swarmdist { margin-left:auto; display:flex; gap:6px; flex-wrap:wrap; align-items:center; } .swarmchip { font-size:11px; padding:2px 8px; border:1px solid var(--hair); border-radius:999px; color:var(--dim); } .swarmchip.over { color:var(--bad); border-color:var(--bad); }
-.swarmroster { display:flex; flex-direction:column; gap:2px; max-height:34%; overflow:auto; border:1px solid var(--hair); border-radius:11px; padding:4px; flex:none; }
+.swarmroster { display:flex; flex-direction:column; gap:2px; max-height:min(280px,32vh); overflow:auto; border:1px solid var(--hair); border-radius:11px; padding:4px; flex:none; }
 .swarmrow { display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:8px; cursor:pointer; border:1px solid transparent; text-align:left; background:none; color:var(--ink); font-size:12.5px; width:100%; }
 .swarmrow:hover { background:var(--copper-soft); } .swarmrow.on { border-color:var(--copper); }
 .swarmrow > span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
