@@ -55,81 +55,32 @@
         <div id="kOverdue"></div>
       </section>
       <section class="glass kcard" id="kcap">
-        <h2>Talk</h2>
         <button class="ktalk" id="kTalk" type="button" aria-describedby="kTime">
           <span class="kdot" aria-hidden="true"></span><span id="kTalkLabel">Hold to talk</span>
         </button>
         <p class="kmeta" id="kTime" aria-live="off"></p>
-        <label class="klab" for="kPlace">Place</label>
-        <input class="kfield" id="kPlace" type="text" placeholder="kitchen, car, office" autocomplete="off">
         <details class="kmore">
           <summary>Type it instead</summary>
           <textarea class="kfield" id="kText" rows="2" placeholder="What should I remember?"></textarea>
           <button class="btn small" id="kTextGo" type="button">Keep it</button>
         </details>
-        <button class="btn small" id="kLive" type="button" hidden>Talk live</button>
-        <p class="kmeta" id="kLiveState" aria-live="polite"></p>
-        <div id="kReview" hidden>
-          <label class="klab" for="kReviewText">What did you say?</label>
-          <textarea class="kfield" id="kReviewText" rows="3"></textarea>
-          <button class="btn small go" id="kReviewSave" type="button">Save the words</button>
-        </div>
-      </section>
-      <section class="glass kcard">
-        <h2>Memory</h2>
-        <dl class="kgrid">
-          <dt>Notes</dt><dd id="kNotes">—</dd>
-          <dt>Reminders</dt><dd id="kTriggers">—</dd>
-        </dl>
-      </section>
-      <section class="glass kcard" aria-label="Servers">
-        <h2>Local servers</h2>
-        <form id="kSet">
-          <label class="klab" for="kSetAsrUrl">Speech to text</label>
-          <input class="kfield" id="kSetAsrUrl" type="text" placeholder="http://127.0.0.1:8080/v1" autocomplete="off">
-          <label class="klab" for="kSetAsrModel">Its model</label>
-          <input class="kfield" id="kSetAsrModel" type="text" placeholder="whisper-1" autocomplete="off">
-          <label class="klab" for="kSetAsrLang">Spoken language</label>
-          <input class="kfield" id="kSetAsrLang" type="text" placeholder="fr" autocomplete="off">
-          <label class="klab" for="kSetTtsUrl">Text to speech</label>
-          <input class="kfield" id="kSetTtsUrl" type="text" placeholder="http://127.0.0.1:8880/v1" autocomplete="off">
-          <label class="klab" for="kSetTtsVoice">Its voice</label>
-          <input class="kfield" id="kSetTtsVoice" type="text" placeholder="fr_FR-siwis-medium" autocomplete="off">
-          <label class="klab" for="kSetSlmUrl">Understanding (small language model)</label>
-          <input class="kfield" id="kSetSlmUrl" type="text" placeholder="http://127.0.0.1:8081/v1" autocomplete="off">
-          <label class="klab" for="kSetSlmModel">Its model</label>
-          <input class="kfield" id="kSetSlmModel" type="text" placeholder="qwen2.5-3b-instruct" autocomplete="off">
-          <label class="klab" for="kSetEmbedUrl">Meaning (384-wide embeddings)</label>
-          <input class="kfield" id="kSetEmbedUrl" type="text" placeholder="http://127.0.0.1:8082/v1" autocomplete="off">
-          <label class="klab" for="kSetEmbed">Its model</label>
-          <input class="kfield" id="kSetEmbed" type="text" placeholder="multilingual-e5-small" autocomplete="off">
-          <label class="klab" for="kSetGeoUrl">Places (your own Nominatim or Photon)</label>
-          <input class="kfield" id="kSetGeoUrl" type="text" placeholder="http://127.0.0.1:8088" autocomplete="off">
-          <label class="klab" for="kSetGeoKind">Its kind</label>
-          <select class="kfield" id="kSetGeoKind">
-            <option value="nominatim">Nominatim</option>
-            <option value="photon">Photon</option>
-          </select>
-          <label class="klab" for="kSetLiveUrl">Live voice (your LiveKit server)</label>
-          <input class="kfield" id="kSetLiveUrl" type="text" placeholder="ws://127.0.0.1:7880" autocomplete="off">
-          <label class="klab" for="kSetLiveKey">Its API key</label>
-          <input class="kfield" id="kSetLiveKey" type="text" autocomplete="off">
-          <label class="klab" for="kSetLiveSecret">Its API secret</label>
-          <input class="kfield" id="kSetLiveSecret" type="password" autocomplete="off">
-          <label class="klab" for="kSetLiveMode">The live voice runs on</label>
-          <select class="kfield" id="kSetLiveMode">
-            <option value="private">Your own servers (nothing leaves the house)</option>
-            <option value="gemini">Gemini Live (cloud: your voice goes to Google)</option>
-          </select>
-          <label class="klab" for="kSetLiveModel">Gemini Live model</label>
-          <input class="kfield" id="kSetLiveModel" type="text" placeholder="gemini-3.1-flash-live-preview" autocomplete="off">
-          <button class="btn small go" id="kSetGo" type="submit">Save</button>
-          <p class="kmeta" id="kSetState" aria-live="polite"></p>
-        </form>
+        <details class="kmore">
+          <summary>More ways</summary>
+          <label class="klab" for="kPlace">Place</label>
+          <input class="kfield" id="kPlace" type="text" placeholder="kitchen, car, office" autocomplete="off">
+          <button class="btn small" id="kLive" type="button" hidden>Talk live</button>
+          <p class="kmeta" id="kLiveState" aria-live="polite"></p>
+          <div id="kReview" hidden>
+            <label class="klab" for="kReviewText">What did you say?</label>
+            <textarea class="kfield" id="kReviewText" rows="3"></textarea>
+            <button class="btn small go" id="kReviewSave" type="button">Save the words</button>
+          </div>
+        </details>
+        <p class="kmeta"><a href="/app">The servers live in Inari → Settings</a></p>
       </section>
     </aside>
     <section class="glass kcard" id="kmem" aria-label="Memory">
-      <h2>Memory</h2>
+      <h2>Memory <small class="kcount">notes <b id="kNotes">—</b> · reminders <b id="kTriggers">—</b></small></h2>
       <form class="kfind" id="kFind">
         <input class="kfield" id="kQuery" type="search" placeholder="Search what you said" autocomplete="off" aria-label="Search the notes">
         <button class="btn small" id="kFindGo" type="submit">Find</button>

@@ -450,10 +450,7 @@ async function setSave() {
   say(T("Settings kept."));
 }
 
-$("kSet").addEventListener("submit", (ev) => {
-  ev.preventDefault();
-  setSave();
-});
+/* The servers form moved to Inari (Settings → Voice notebook); nothing to wire here anymore. */
 
 async function load() {
   const d = await api("/api/kitsune");
