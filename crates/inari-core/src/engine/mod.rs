@@ -67,6 +67,10 @@ pub struct Settings {
     /// Ask the person before an agent opens a thread on another harness (on by default).
     #[serde(default = "yes")]
     pub delegate_asks: bool,
+    /// A new thread starts from the shared memory's briefing (AI-Memory's memory_briefing, when
+    /// an MCP server offers it).
+    #[serde(default)]
+    pub memory_briefing: bool,
     /// The agent a thread works as when it chose none (builder, planner).
     #[serde(default = "builder")]
     pub mode: String,
@@ -326,7 +330,7 @@ impl LocalEngine {
                "max_steps": s.max_steps, "turn_timeout": s.turn_timeout, "temperature": s.temperature,
                "instructions": s.instructions, "modes": self.modes(None), "keep_folder": s.keep_folder,
                "tiers": s.tiers, "cloud_kitsune": s.cloud_kitsune, "cloud_files": s.cloud_files,
-               "search_url": s.search_url, "delegate_asks": s.delegate_asks,
+               "search_url": s.search_url, "delegate_asks": s.delegate_asks, "memory_briefing": s.memory_briefing,
                "forges": self.forges_view()})
     }
 

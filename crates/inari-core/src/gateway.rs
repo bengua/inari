@@ -259,6 +259,8 @@ pub struct Gateway {
     kitsune: Option<Arc<std::sync::Mutex<kitsune::Kitsune>>>,
     /// Reminders as they ring (a note), streamed to the owner's Kitsune pages.
     rings: broadcast::Sender<Value>,
+    /// The agents' shared memory (AI-Memory), a service this core starts and wires.
+    aimemory: Arc<crate::aimemory::AiMemory>,
 }
 
 /// An OpenFox thread's panel, as an SSE event of its own (`panel`).
@@ -497,6 +499,7 @@ impl Gateway {
                 }
             },
             rings,
+            aimemory: Arc::new(crate::aimemory::AiMemory::new(data_dir)),
         });
         g.subscribe();
         g
@@ -919,6 +922,20 @@ impl Gateway {
             let me = Arc::clone(self);
             tokio::spawn(async move { me.ring_reminders().await });
         }
+        // the shared memory, when the person turned it on: started now, and again if it stops
+        let mem = Arc::clone(&self.aimemory);
+        tokio::spawn(async move {
+            let mut tries = 0u32;
+            loop {
+                if mem.config().enabled && mem.status()["running"] == false && tries < 5 {
+                    tries += 1;
+                    if let Err(e) = mem.start() {
+                        eprintln!("ai-memory: {e}");
+                    }
+                }
+                tokio::time::sleep(Duration::from_secs(15)).await;
+            }
+        });
         Ok(bound)
     }
 
@@ -1054,6 +1071,51 @@ impl Gateway {
             .collect();
         runs.sort_by(|a, b| b["id"].as_str().cmp(&a["id"].as_str()));
         json!({"runs": runs})
+    }
+
+    /// The shared memory's sheet: GET its status; POST {action: set {config} | start | stop |
+    /// check | wire {client}}.
+    async fn aimemory_api(&self, r: &Request, w: &mut TcpStream) -> std::io::Result<()> {
+        let mem = Arc::clone(&self.aimemory);
+        if r.method == "GET" {
+            return send_json(w, 200, &mem.status()).await;
+        }
+        let d: Value = serde_json::from_slice(if r.body.is_empty() { b"{}" } else { &r.body })
+            .unwrap_or(Value::Null);
+        let out: std::result::Result<Value, String> = match s(&d, "action").as_str() {
+            "set" => match serde_json::from_value::<crate::aimemory::Config>(
+                d.get("config").cloned().unwrap_or(json!({})),
+            ) {
+                Ok(c) => mem.set_config(&c).map(|()| {
+                    if !c.enabled {
+                        mem.stop();
+                    }
+                    mem.status()
+                }),
+                Err(e) => Err(format!("bad settings: {e}")),
+            },
+            "start" => {
+                let m = Arc::clone(&mem);
+                tokio::task::spawn_blocking(move || m.start())
+                    .await
+                    .unwrap_or_else(|e| Err(e.to_string()))
+                    .map(|pid| json!({"pid": pid}))
+            }
+            "stop" => {
+                mem.stop();
+                Ok(mem.status())
+            }
+            "check" => mem.check().await.map(|said| json!({"said": said})),
+            "wire" => mem
+                .wire(&s(&d, "client"))
+                .await
+                .map(|said| json!({"said": said})),
+            other => Err(format!("unknown action {other:?}")),
+        };
+        match out {
+            Ok(v) => send_json(w, 200, &v).await,
+            Err(e) => send_json(w, 400, &json!({"error": e})).await,
+        }
     }
 
     /// GET /api/kitsune/events: the reminders as they ring (`event: ring`), for the owner's page.
@@ -1438,6 +1500,12 @@ impl Gateway {
         }
         if get && r.path.starts_with("/api/logo/") {
             return self.logo(w, r.path.rsplit('/').next().unwrap_or("")).await;
+        }
+        if r.path == "/api/aimemory" {
+            if !matches!(access, Access::Owner) {
+                return send_json(w, 403, &json!({"error": "the core's owner sees this"})).await;
+            }
+            return self.aimemory_api(&r, w).await;
         }
         if r.path.starts_with("/api/kitsune") {
             // the brain's own data: the core's owner only

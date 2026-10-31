@@ -778,6 +778,9 @@ impl Node {
                     if let Some(a) = p.get("delegate_asks").and_then(Value::as_bool) {
                         next.delegate_asks = a;
                     }
+                    if let Some(b) = p.get("memory_briefing").and_then(Value::as_bool) {
+                        next.memory_briefing = b;
+                    }
                     // the model of each tier: a tier given empty is taken away
                     if let Some(tiers) = p.get("tiers").and_then(Value::as_object) {
                         for (tier, model) in tiers {

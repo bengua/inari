@@ -147,6 +147,25 @@ impl LocalEngine {
         Ok((self.server(provider), model.to_string(), chosen.clone()))
     }
 
+    /// The shared memory's briefing (AI-Memory's `memory_briefing`, from an MCP server whose name
+    /// says ai-memory), bounded; None when there is none or it does not answer within 15 s.
+    pub(crate) async fn briefing(&self) -> Option<String> {
+        self.mcp_ready().await;
+        let tool = self
+            .mcp_tool_names()
+            .into_iter()
+            .find(|n| n.contains("memory") && n.ends_with("_memory_briefing"))?;
+        let got = tokio::time::timeout(Duration::from_secs(15), self.mcp_call(&tool, &json!({})))
+            .await
+            .ok()?
+            .ok()?;
+        let mut b: String = got.chars().take(4000).collect();
+        if got.chars().count() > 4000 {
+            b.push_str("\n[…]");
+        }
+        Some(b)
+    }
+
     /// The model an agent or a step names (a tier, or "<provider>/<model>"), else `fallback`
     /// (the thread's model, or the caller's): a tier that is not set, or a provider that is
     /// gone, works on the fallback rather than failing the turn.
@@ -264,6 +283,15 @@ impl LocalEngine {
             }
         }
         let past = self.past(t, &server, &model, &system, &current, &s).await?;
+        // a new thread starts from the shared memory's briefing, when the person asked for it
+        let system = if past.is_empty() && s.memory_briefing {
+            match self.briefing().await {
+                Some(b) => format!("{system}\n\n## Shared memory (AI-Memory briefing)\n{b}"),
+                None => system,
+            }
+        } else {
+            system
+        };
         let mut messages = vec![json!({"role": "system", "content": system})];
         messages.extend(past);
         messages.push(json!({"role": "user", "content": current}));
