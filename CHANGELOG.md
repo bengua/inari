@@ -331,6 +331,9 @@ Newest first. An entry says what changed for someone using the thing.
 
 ### Fixed
 
+- **Android release builds forward identity overrides.** The container now receives the optional
+  application id, preferences name, gate alias and signing-key alias when they are set, so an
+  existing installation can be updated with its original signing key and saved settings.
 - **A revoked pass's open page goes dark at once.** The page's event stream checked the pass when
   it opened only: a pass revoked or expired meanwhile kept receiving its own threads' updates until
   the page was closed. The stream now ends as soon as the pass no longer holds.
