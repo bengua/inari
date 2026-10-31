@@ -35,7 +35,7 @@ let snap = null, selected = null, tab = "artifacts", events = [], files = null, 
 let swarmTarget = "all", swarmLog = [], swarmSeen = {}, swarmLastSent = {}, swarmTouched = new Set();
 /* the mascot's last sent state, per channel, and the multi-thread selection */
 let foxSent = {}, foxWorkHold = 0, selOn = false, selSet = new Set();
-let currentView = store.get("view", "work");
+let sideMode = store.get("sideMode", "threads");
 // messages sent while the agent works, per thread: shown at once, "waiting", until the agent reads them (drawChat)
 const queued = {};
 // each thread's answer so far, while its model writes it (the core's "draft" events); done: it is journaled now
@@ -129,13 +129,14 @@ function layout() {
   $("sideToggle").classList.toggle("on", !app.classList.contains("noside")); placeFox();
   $("sideToggle").setAttribute("aria-expanded", String(!app.classList.contains("noside"))); $("benchBtn").setAttribute("aria-expanded", String(!app.classList.contains("nobench")));
 }
-function setView(view) {
-  currentView = view === "network" ? "network" : "work"; store.set("view", currentView);
-  document.body.classList.toggle("network", currentView === "network");
-  for (const [id, name] of [["workView", "work"], ["networkView", "network"]]) { const on = currentView === name; $(id).classList.toggle("on", on); $(id).setAttribute("aria-pressed", String(on)); }
-  if (snap) { if (currentView === "network") renderRooms(Object.entries(snap.agents)); renderTop(); placeFox(); }
+function setSideMode(mode) {
+  sideMode = mode === "docs" ? "docs" : "threads"; store.set("sideMode", sideMode);
+  document.body.classList.toggle("docs", sideMode === "docs");
+  for (const [id, name] of [["sideThreads", "threads"], ["sideDocs", "docs"]]) { const on = sideMode === name; $(id).classList.toggle("on", on); $(id).setAttribute("aria-pressed", String(on)); }
+  if (selOn) { selOn = false; selSet.clear(); const bar = $("selbar"); if (bar) bar.hidden = true; }
+  renderSide();
 }
-$("workView").onclick = () => setView("work"); $("networkView").onclick = () => setView("network"); setView(currentView);
+$("sideThreads").onclick = () => setSideMode("threads"); $("sideDocs").onclick = () => setSideMode("docs"); setSideMode(sideMode);
 $("sideToggle").onclick = () => morph(() => { store.set("noside", !store.get("noside", false)); layout(); });
 /* The mascot is one element that moves (its frame is never reloaded): in the sidebar's slot when the sidebar
    is open, at the top centre of the page when it is shut — it fades out, moves, and fades back in. */
@@ -196,7 +197,7 @@ function render() {
   for (const n of snap.nodes) { const h = (loadHist[n.node_id] = loadHist[n.node_id] || []); h.push((snap.load[n.node_id] || {}).gpu || 0); if (h.length > 40) h.shift(); }
   const agents = Object.entries(snap.agents), busy = agents.filter(([, a]) => a.phase !== "idle").length;
   $("stats").textContent = t("{n} agents · {busy} working", { n: agents.length, busy });
-  if (!drag && !coreHold) { renderCores(agents); if (currentView === "network") renderRooms(agents); }
+  if (!drag && !coreHold) { if (sideMode === "docs") renderDocs(); else renderCores(agents); }
   if (snap.ui && snap.ui.mascot && personas === null) { personas = []; loadPersonas(); } renderPersonaNav();
   renderFeed(); renderApprovals(); renderTop(); renderPill(); renderUsageCard(); mascot(); drawOrbParams(snap.mascot);
   // the open thread reloads at most every 1.5 s; news within that time is fetched when it ends, never dropped (the
@@ -227,8 +228,13 @@ function renderCores(agents) {
   for (const n of snap.nodes) {
     const load = (snap.load[n.node_id] || {}).gpu || 0, mine = agents.filter(([, a]) => a.node === n.node_id), c = document.createElement("div");
     c.className = "core" + (shut[n.node_id] ? " shut" : ""); c.dataset.node = n.node_id;
-    c.innerHTML = `<div class="chead"><span class="chev">${icon("chevron")}</span><span class="dot"></span><b></b><span class="pct">${Math.round(load * 100)}% · ${mine.length}</span><button type="button" class="cterm" title="${esc(t("Debug on {node}", { node: n.node_id }))}">${icon("terminal")}</button><button type="button" class="cnew" title="${esc(t("New thread on this core"))}">${icon("plus")}</button></div><div class="bar"><i style="width:${Math.round(load * 100)}%"></i></div><div class="rows"></div>`;
-    c.querySelector("b").textContent = n.node_id; const cn = c.querySelector(".cnew"); cn.setAttribute("aria-label", t("New thread on {node}", { node: n.node_id })); cn.onpointerdown = (e) => e.stopPropagation(); cn.onclick = (e) => { e.stopPropagation(); newThreadOn(n.node_id); };
+    c.innerHTML = `<div class="chead"><span class="chev">${icon("chevron")}</span><span class="dot"></span><b></b><span class="pct">${Math.round(load * 100)}% · ${mine.length}</span><span class="ldbars" title="${esc(t("GPU load"))}"></span><span class="askn" hidden></span><button type="button" class="cterm" title="${esc(t("Debug on {node}", { node: n.node_id }))}">${icon("terminal")}</button><button type="button" class="cnew" title="${esc(t("New thread on this core"))}">${icon("plus")}</button></div><div class="bar"><i style="width:${Math.round(load * 100)}%"></i></div><div class="rows"></div>`;
+    c.querySelector("b").textContent = n.node_id;
+    const hist = (loadHist[n.node_id] || []).slice(-28);
+    c.querySelector(".ldbars").innerHTML = hist.map((v) => `<i style="height:${Math.max(1, Math.round(v * 100))}%"></i>`).join("");
+    const waiting = (snap.approvals || []).filter((r) => { const ag = snap.agents[r.agent_id]; return ag && ag.node === n.node_id; }).length;
+    const an = c.querySelector(".askn"); an.hidden = !waiting; an.textContent = "⚠ " + waiting; an.title = t("{n} waiting for your approval", { n: waiting });
+    const cn = c.querySelector(".cnew"); cn.setAttribute("aria-label", t("New thread on {node}", { node: n.node_id })); cn.onpointerdown = (e) => e.stopPropagation(); cn.onclick = (e) => { e.stopPropagation(); newThreadOn(n.node_id); };
     const ct = c.querySelector(".cterm"); ct.setAttribute("aria-label", t("Debug on {node}", { node: n.node_id })); ct.disabled = !mine.length; ct.onpointerdown = (e) => e.stopPropagation(); ct.onclick = (e) => { e.stopPropagation(); debugHost(n.node_id); };
     c.querySelector(".chead").onclick = () => { shut[n.node_id] = !shut[n.node_id]; store.set("shut", shut); c.classList.toggle("shut"); requestAnimationFrame(drawTethers); };
     const rows = c.querySelector(".rows"); for (const [id, a] of [...mine].sort((x, y) => (y[1].pinned ? 1 : 0) - (x[1].pinned ? 1 : 0))) rows.append(row(id, a, snap.moves[id]));
@@ -237,30 +243,44 @@ function renderCores(agents) {
   }
   requestAnimationFrame(drawTethers);
 }
-function renderRooms(agents) {
-  const box = $("rooms"); box.textContent = ""; agents = agents.filter(([, a]) => !a.archived);
-  const busy = agents.filter(([, a]) => a.phase !== "idle").length;
-  $("roomsSummary").textContent = t("{n} agents · {busy} working", { n: agents.length, busy });
-  for (const n of snap.nodes) {
-    const load = (snap.load[n.node_id] || {}).gpu || 0, mine = agents.filter(([, a]) => a.node === n.node_id), c = document.createElement("article");
-    c.className = "core room"; c.dataset.node = n.node_id;
-    c.innerHTML = `<div class="chead"><span class="dot"></span><b></b><span class="pct">${Math.round(load * 100)}% · ${mine.length}</span><span class="ldbars" title="${esc(t("GPU load"))}"></span><span class="askn" hidden></span><button type="button" class="cterm" title="${esc(t("Debug on {node}", { node: n.node_id }))}">${icon("terminal")}</button><button type="button" class="cnew" title="${esc(t("New thread on this core"))}">${icon("plus")}</button></div><div class="bar"><i style="width:${Math.round(load * 100)}%"></i></div><div class="rows"></div>`;
-    c.querySelector("b").textContent = n.node_id;
-    const hist = (loadHist[n.node_id] || []).slice(-28);
-    c.querySelector(".ldbars").innerHTML = hist.map((v) => `<i style="height:${Math.max(1, Math.round(v * 100))}%"></i>`).join("");
-    const waiting = (snap.approvals || []).filter((r) => { const ag = snap.agents[r.agent_id]; return ag && ag.node === n.node_id; }).length;
-    const an = c.querySelector(".askn"); an.hidden = !waiting; an.textContent = "⚠ " + waiting; an.title = t("{n} waiting for your approval", { n: waiting });
-    const ct = c.querySelector(".cterm"); ct.setAttribute("aria-label", t("Debug on {node}", { node: n.node_id })); ct.disabled = !mine.length; ct.onpointerdown = (e) => e.stopPropagation(); ct.onclick = (e) => { e.stopPropagation(); debugHost(n.node_id); };
-    const cn = c.querySelector(".cnew"); cn.setAttribute("aria-label", t("New thread on {node}", { node: n.node_id })); cn.onpointerdown = (e) => e.stopPropagation(); cn.onclick = (e) => { e.stopPropagation(); newThreadOn(n.node_id); };
-    const rows = c.querySelector(".rows"); for (const [id, a] of [...mine].sort((x, y) => (y[1].pinned ? 1 : 0) - (x[1].pinned ? 1 : 0))) rows.append(row(id, a, snap.moves[id]));
-    for (const mv of Object.values(snap.moves)) if (mv.target === n.node_id && mv.source !== n.node_id && mv.state !== "committed") rows.insertAdjacentHTML("beforeend", `<div class="row moving"><span class="pdot" style="background:var(--copper)"></span><span class="t">⇢ ${esc(mv.agent)}</span><span class="prog">${esc(t(mv.state === "rolled_back" ? "rolled back" : mv.state))}</span></div>`);
-    if (!rows.children.length) rows.innerHTML = `<div class="empty-core">${esc(t("Drop a thread here"))}</div>`; box.append(c);
+function renderSide() { if (!snap) return; if (sideMode === "docs") renderDocs(); else renderCores(Object.entries(snap.agents)); }
+/* The thread's life as a line: what it wrote, read and said, in order. Documents open in the bench's
+   viewer; the rest stays small, so the files stand out. */
+function renderDocs() {
+  const box = $("cores"); box.textContent = "";
+  const id = selected, a = id && snap.agents[id];
+  if (!a) { box.insertAdjacentHTML("beforeend", `<div class="empty-core">${esc(t("Pick a thread to see its documents."))}</div>`); return; }
+  box.insertAdjacentHTML("beforeend", `<div class="dochead"><b>${esc(a.title || id)}</b><small>${esc(t("Its documents and steps, in order"))}</small></div>`);
+  const rail = document.createElement("div"); rail.className = "docrail";
+  let muted = 0;
+  const flushMuted = () => { if (!muted) return; rail.insertAdjacentHTML("beforeend", `<div class="docstep muted"><span class="ddot"></span><span class="dt">${esc(t("{n} other actions", { n: muted }))}</span></div>`); muted = 0; };
+  const NOTE = { teleport: "Moved between cores", published: "Pull request opened", workflow_done: "Workflow finished", stopped: "Stopped", provider_error: "The model failed", harness_error: "The agent stopped" };
+  for (const e of events) {
+    if (e.kind === "tool_call") {
+      const m = e.text.match(/(write_file|read_file|edit|create|write)[^:]*:\s*([\w./-]+\.\w+)/i);
+      if (!m) { muted++; continue; }
+      flushMuted();
+      const d = document.createElement("button"); d.type = "button"; d.className = "docstep file";
+      d.innerHTML = `<span class="ddot"></span>${icon("file")}<span class="dt"><b></b><small></small></span>`;
+      d.querySelector("b").textContent = m[2].split("/").pop(); d.querySelector("small").textContent = m[2];
+      d.onclick = () => openFile(m[2]); rail.append(d);
+    } else if (e.kind === "user_message" || e.kind === "assistant_message") {
+      flushMuted();
+      rail.insertAdjacentHTML("beforeend", `<div class="docstep msg ${e.kind === "user_message" ? "u" : "a"}"><span class="ddot"></span><span class="dt">${esc((e.text || "").replace(/\s+/g, " ").trim().slice(0, 90))}</span></div>`);
+    } else if (e.kind === "checkpoint") {
+      const label = NOTE[e.text.split(": ")[0]];
+      if (!label) { muted++; continue; }
+      flushMuted();
+      rail.insertAdjacentHTML("beforeend", `<div class="docstep note"><span class="ddot"></span><span class="dt">${esc(t(label))}</span></div>`);
+    } else if (e.kind !== "system" && e.kind !== "tool_result") muted++;
   }
-  requestAnimationFrame(drawTethers);
+  flushMuted();
+  if (!rail.children.length) rail.innerHTML = `<div class="empty-core">${esc(t("Nothing yet — its documents will line up here as it works."))}</div>`;
+  box.append(rail);
 }
 function drawTethers() {
   const svg = $("tethers"); svg.textContent = "";
-  const visibleCore = (id) => [...document.querySelectorAll(`.core[data-node="${CSS.escape(id)}"]`)].find((el) => el.getClientRects().length && el.classList.contains("room") === (currentView === "network"));
+  const visibleCore = (id) => [...document.querySelectorAll(`.core[data-node="${CSS.escape(id)}"]`)].find((el) => el.getClientRects().length);
   for (const mv of Object.values((snap && snap.moves) || {})) { if (!inFlight(mv)) continue;
     const a = visibleCore(mv.source), b = visibleCore(mv.target); if (!a || !b) continue;
     const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect(), x = ra.right - 6, y1 = ra.top + ra.height / 2, y2 = rb.top + rb.height / 2; svg.insertAdjacentHTML("beforeend", `<path d="M${x},${y1} C${x + 60},${y1} ${x + 60},${y2} ${x},${y2}"/>`); }
@@ -834,7 +854,7 @@ function frame(t) { if (!orbEl || !orbEl.isConnected) return; const ctx = orbCtx
 function renderTop() {
   const a = selected && snap.agents[selected], app = $("app"); app.classList.toggle("nosel", !a); if ($("ptitle").contentEditable !== "true") $("ptitle").textContent = a ? (a.title || selected) : composing ? t("New thread · {core}", { core: pendingCore || "" }) : "Inari";
   $("pphase").innerHTML = a ? `<span class="state${["listening", "loading", "inference"].includes(a.phase) ? " live" : ""}" style="--c:var(--${{ inference: "copper", loading: "copper", listening: "purple", success: "ok", error: "bad" }[a.phase] || "dim"})">${LABEL[a.phase]} <small>${esc(t("on {node}", { node: a.node }))}</small></span>` : "";
-  $("actionsBtn").hidden = !a; fillModeChip(a); fillCtxChip(a); fillAutoChip(a); const chip = $("modelChip"); chip.hidden = !a; if (a) fillModelChip(chip, a.model); document.body.classList.toggle("open", currentView === "network" || !!a || composing); placeFox(); drawComposer(); drawStop();
+  $("actionsBtn").hidden = !a; fillModeChip(a); fillCtxChip(a); fillAutoChip(a); const chip = $("modelChip"); chip.hidden = !a; if (a) fillModelChip(chip, a.model); document.body.classList.toggle("open", !!a || composing); placeFox(); drawComposer(); drawStop();
 }
 function fillModeChip(a) { const chip = $("modeChip"), fox = a && panels[selected], modes = fox && (fox.agents || []).length ? fox.agents : a ? harnessModes(a.node, a.harness) : []; chip.hidden = !modes.length; if (chip.hidden) return;
   // an OpenFox thread: the agent OpenFox runs it as now (it may switch by itself)
@@ -939,15 +959,15 @@ $("msg").onkeydown = (e) => { const box = $("msg");
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); recall = -1; $("composer").requestSubmit(); } };
 
 /* ---------- conversation ---------- */
-async function select(id) { setView("work"); selected = id; forkAt = null; viewing = null; files = null; events = []; tlStamp = 0; lastFiles = ""; critDraft = null; markPlanTab(); renderTop(); drawChat(); drawBench(); await refreshDetail();
+async function select(id) { selected = id; forkAt = null; viewing = null; files = null; events = []; tlStamp = 0; lastFiles = ""; critDraft = null; markPlanTab(); renderTop(); drawChat(); drawBench(); await refreshDetail();
   // an OpenFox thread opened before its panel came: ask for it
   const a = snap.agents[id], n = a && snap.nodes.find((x) => x.node_id === a.node); if (!panels[id] && n && n.capabilities && (n.capabilities.openfox || n.capabilities.engine)) api("/api/openfox/thread", { agent: id, action: "refresh" });
-  if (snap) renderCores(Object.entries(snap.agents)); $("msg").focus(); }
+  renderSide(); $("msg").focus(); }
 async function refreshDetail() { if (!selected) return; if (tlBusy) { refreshDetail.again = true; return; } tlBusy = true; refreshDetail.again = false; tlStamp = Date.now(); try { const id = selected, base = `/api/agent/${encodeURIComponent(id)}/timeline`, last = events.length ? events[events.length - 1].id : "";
     let tl = await api(last ? `${base}?after=${encodeURIComponent(last)}` : base); if (id !== selected) return;
     // a plain continuation is appended; a journal that changed under the page (a merge, a fork) is asked for whole
     if (last && !(tl.from === events.length && events.length + (tl.events || []).length === tl.count)) tl = await api(base);
-    if (id !== selected || tl.error) return; events = tl.from ? events.concat(tl.events || []) : tl.events || []; const a = snap.agents[selected] || {}, sig = a.files + ":" + a.events; if (!files || sig !== lastFiles) { files = (await api(`/api/agent/${encodeURIComponent(selected)}/files`)).files || []; lastFiles = sig; } drawChat(); drawBench(true); } finally { tlBusy = false; if (refreshDetail.again) refreshDetail(); } } // news that came during a reload is fetched right after it
+    if (id !== selected || tl.error) return; events = tl.from ? events.concat(tl.events || []) : tl.events || []; const a = snap.agents[selected] || {}, sig = a.files + ":" + a.events; if (!files || sig !== lastFiles) { files = (await api(`/api/agent/${encodeURIComponent(selected)}/files`)).files || []; lastFiles = sig; } drawChat(); drawBench(true); if (sideMode === "docs") renderDocs(); } finally { tlBusy = false; if (refreshDetail.again) refreshDetail(); } } // news that came during a reload is fetched right after it
 /* Markdown, the subset models write: headings, lists, quotes, tables, rules, links, code. Everything is
    escaped first; only http(s) links become anchors. One renderer for the chat and the viewer. */
 const LINK = 'target="_blank" rel="noopener noreferrer"';
@@ -1039,11 +1059,11 @@ function drawChat() {
 }
 $("jump").onclick = () => { const th = $("thread"); th.scrollTo({ top: th.scrollHeight, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }); $("jump").hidden = true; };
 $("thread").addEventListener("scroll", () => { const th = $("thread"); if (th.scrollHeight - th.scrollTop - th.clientHeight < 90) $("jump").hidden = true; }, { passive: true });
-$("back").onclick = () => { selected = null; composing = false; renderTop(); drawChat(); drawBench(); if (snap) renderCores(Object.entries(snap.agents)); };
+$("back").onclick = () => { selected = null; composing = false; renderTop(); drawChat(); drawBench(); renderSide(); };
 $("newThread").onclick = () => newThreadOn(pendingCore || (snap && snap.ui && snap.ui.self) || "");
 /* A new thread on a given core: the composer opens (on a phone too, where the page only shows with a thread), aimed at it. */
 let composing = false;
-function newThreadOn(node) { setView("work"); selected = null; composing = true; if (node) pendingCore = node; pendingHarness = ""; pendingModel = ""; renderTop(); drawChat(); drawBench(); if (snap) renderCores(Object.entries(snap.agents)); drawComposer();
+function newThreadOn(node) { selected = null; composing = true; if (node) pendingCore = node; pendingHarness = ""; pendingModel = ""; renderTop(); drawChat(); drawBench(); renderSide(); drawComposer();
   setTimeout(() => chooseSession(pendingCore, () => $("msg").focus()), 80); }
 async function debugHost(node) {
   const entry = Object.entries(snap.agents).filter(([, a]) => a.node === node && !a.archived).sort((x, y) => (y[1].pinned ? 1 : 0) - (x[1].pinned ? 1 : 0))[0];
@@ -1252,9 +1272,9 @@ function onUp(e) { window.onpointermove = window.onpointerup = window.onpointerc
   // where the finger last was: a touch's end does not always carry a position
   const ux = d.lx ?? e.clientX, uy = d.ly ?? e.clientY, moved = Math.hypot(ux - d.x, uy - d.y) > 8;
   if (d.ghost) d.ghost.remove(); d.el.style.opacity = ""; hot(null); $("dragline").setAttribute("hidden", "");
-  if (!d.active || (d.held && !moved)) { $("dropdock").hidden = true; document.querySelectorAll(".core").forEach((n) => n.classList.remove("valid", "invalid")); if (d.held && !d.guest) actionSheet(d.id); else select(d.id); if (snap) renderCores(Object.entries(snap.agents)); return; }
+  if (!d.active || (d.held && !moved)) { $("dropdock").hidden = true; document.querySelectorAll(".core").forEach((n) => n.classList.remove("valid", "invalid")); if (d.held && !d.guest) actionSheet(d.id); else select(d.id); renderSide(); return; }
   const t = dropTarget(ux, uy, d); $("dropdock").hidden = true; document.querySelectorAll(".core").forEach((n) => n.classList.remove("valid", "invalid"));
-  if (snap) renderCores(Object.entries(snap.agents)); if (!t) return;
+  renderSide(); if (!t) return;
   if (t.kind === "core") { if (t.node !== d.from) teleport(d.id, d.from, t.node); }
   else if (t.kind === "thread") mergeInto(t.id, d.id);
   else if (t.kind === "clone") cloneTo(d.id, t.harness);
