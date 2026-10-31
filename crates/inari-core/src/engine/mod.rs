@@ -15,6 +15,7 @@ mod mcp;
 mod panel;
 mod project;
 pub mod prompts;
+mod reach;
 mod run;
 pub mod state;
 pub mod tools;
@@ -52,6 +53,20 @@ pub struct Settings {
     /// so the small jobs can run on a small model and the hard ones on a large one.
     #[serde(default)]
     pub tiers: BTreeMap<String, String>,
+    /// What an agent working on a cloud model (an https provider) may do with the person's
+    /// brain: these `kitsune` actions and no others. The default lets it keep a note, read the
+    /// reminders and the lists and fill them, but not search everything kept.
+    #[serde(default = "cloud_kitsune")]
+    pub cloud_kitsune: Vec<String>,
+    /// Whether an agent working on a cloud model may read files (the person's documents).
+    #[serde(default)]
+    pub cloud_files: bool,
+    /// The person's own search engine (SearXNG, http://host:port) for the agents' web_search.
+    #[serde(default)]
+    pub search_url: String,
+    /// Ask the person before an agent opens a thread on another harness (on by default).
+    #[serde(default = "yes")]
+    pub delegate_asks: bool,
     /// The agent a thread works as when it chose none (builder, planner).
     #[serde(default = "builder")]
     pub mode: String,
@@ -94,6 +109,12 @@ fn limit() -> u64 {
     3600
 }
 
+fn cloud_kitsune() -> Vec<String> {
+    ["note", "reminders", "lists", "items", "add_items", "check"]
+        .map(String::from)
+        .to_vec()
+}
+
 impl Default for Settings {
     fn default() -> Self {
         serde_json::from_value(json!({})).expect("defaults")
@@ -116,9 +137,9 @@ impl Settings {
                     p.id
                 ));
             }
-            if !p.url.starts_with("http://") {
+            if !p.url.starts_with("http://") && !p.url.starts_with("https://") {
                 return Some(format!(
-                    "{}: the local engine speaks plain http (http://host:port/v1)",
+                    "{}: a model server's address is http://host:port/v1 (on the network) or https://… (a cloud provider)",
                     p.name
                 ));
             }
@@ -295,16 +316,17 @@ impl LocalEngine {
             let p = s.providers.iter().find(|p| p.id == id).cloned();
             let Some(p) = p else { continue };
             providers.push(match got {
-                Ok(models) => json!({"id": p.id, "name": p.name, "url": p.url, "key": keys.contains_key(&p.id),
+                Ok(models) => json!({"id": p.id, "name": p.name, "url": p.url, "key": keys.contains_key(&p.id), "cloud": llm::is_cloud(&p.url),
                                      "reachable": true, "models": models}),
-                Err(e) => json!({"id": p.id, "name": p.name, "url": p.url, "key": keys.contains_key(&p.id),
+                Err(e) => json!({"id": p.id, "name": p.name, "url": p.url, "key": keys.contains_key(&p.id), "cloud": llm::is_cloud(&p.url),
                                  "reachable": false, "problem": e, "models": []}),
             });
         }
         json!({"providers": providers, "model": s.model, "mode": s.mode, "context_window": s.context_window,
                "max_steps": s.max_steps, "turn_timeout": s.turn_timeout, "temperature": s.temperature,
                "instructions": s.instructions, "modes": self.modes(None), "keep_folder": s.keep_folder,
-               "tiers": s.tiers,
+               "tiers": s.tiers, "cloud_kitsune": s.cloud_kitsune, "cloud_files": s.cloud_files,
+               "search_url": s.search_url, "delegate_asks": s.delegate_asks,
                "forges": self.forges_view()})
     }
 
@@ -348,11 +370,24 @@ mod tests {
             providers: vec![Provider {
                 id: "v".into(),
                 name: "vLLM".into(),
-                url: "https://x/v1".into(),
+                url: "ftp://x/v1".into(),
             }],
             ..ok.clone()
         };
         assert!(bad.problem().is_some());
+        // a cloud provider is https, and allowed: what it may touch is a separate setting
+        let cloud = Settings {
+            providers: vec![Provider {
+                id: "gemini".into(),
+                name: "Gemini".into(),
+                url: "https://generativelanguage.googleapis.com/v1beta/openai".into(),
+            }],
+            ..ok.clone()
+        };
+        assert_eq!(cloud.problem(), None);
+        assert!(cloud.cloud_kitsune.contains(&"note".to_string()));
+        assert!(!cloud.cloud_kitsune.contains(&"search".to_string()) && !cloud.cloud_files);
+        assert!(cloud.delegate_asks);
         assert!(Settings {
             mode: "../x".into(),
             ..ok

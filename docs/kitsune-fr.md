@@ -165,10 +165,30 @@ chercher, garder une note, étiqueter, poser ou retirer un rappel, et gérer les
 courses, garde-manger : ajouter, cocher, retirer, ce qui périme). Quand l'agent travaille pour
 quelqu'un d'autre (un pass), chaque écriture doit être autorisée par le propriétaire.
 
+**Plus loin que le fil** :
+
+- `web_search` passe par **ton SearXNG** (réglage « Recherche web »), jamais par un moteur
+  public. `web_fetch` lit une page publique en texte, et refuse les adresses de la machine ou du
+  réseau privé. Le spécialiste `researcher` (niveau expert) cite ses sources.
+- `delegate` ouvre un **fil Inari** sur un autre harnais (moteur local, Claude Code, Codex…) avec
+  un travail complet. Le fil est étiqueté avec le fil qui l'a demandé, et tu le suis dans Inari.
+  Par défaut, l'agent demande ton accord avant d'ouvrir le fil. Le spécialiste `developer`
+  (niveau expert) écrit le plan et les critères d'acceptation.
+
+**Fournisseurs cloud** (Gemini par son endpoint compatible OpenAI, par exemple
+`https://generativelanguage.googleapis.com/v1beta/openai`, avec ta clé d'API) : on les ajoute
+comme n'importe quel serveur de modèles, et on les attribue à un niveau (par exemple expert →
+Gemini Pro). Le moteur les joint en https par `curl`, comme le reste du cœur : le binaire reste
+statique, et ni la clé ni la requête n'apparaissent dans une ligne de commande. **Ce que le cloud
+a le droit de toucher** se règle à part. Par défaut, un agent sur un modèle cloud peut garder une
+note, lire les rappels et les listes, et les remplir ; il ne peut ni fouiller toutes les notes,
+ni lire tes fichiers.
+
 **Les workflows** : `kitsune-inbox` (trie les notes du jour), `daily-plan` (plan du jour, que tu
 valides avant qu'il soit écrit), `weekly-review` (bilan de la semaine, privé), `groceries`
 (garde-manger et liste de courses), `doc-sort` (rangement de documents, que tu valides avant
-tout déplacement).
+tout déplacement), `research-brief` (une question, ses sources, gardée en note), `dev-handoff`
+(plan et critères ; une fois validés, un fil s'ouvre sur un harnais coder).
 
 ## Le chiffrement au repos (incrément 4)
 

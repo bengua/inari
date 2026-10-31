@@ -1,0 +1,56 @@
+{
+  "metadata": {
+    "id": "research-brief",
+    "name": "Research brief",
+    "description": "Researches a question on the web (your SearXNG), summarises it with its sources, and keeps it as a note.",
+    "version": "1.0.0",
+    "color": "#A68BEA",
+    "parameters": [
+      {
+        "id": "question",
+        "label": "Question",
+        "required": true
+      }
+    ]
+  },
+  "entryStep": "research",
+  "settings": {
+    "maxIterations": 12
+  },
+  "steps": [
+    {
+      "id": "research",
+      "name": "Research",
+      "type": "sub_agent",
+      "subAgentType": "researcher",
+      "prompt": "The question: {{question}}",
+      "transitions": [
+        {
+          "when": {
+            "type": "always"
+          },
+          "goto": "keep"
+        }
+      ]
+    },
+    {
+      "id": "keep",
+      "name": "Keep it",
+      "type": "agent",
+      "agentId": "assistant",
+      "model": "fast",
+      "prompt": "Keep this research as a note tagged \"recherche\" (kitsune note), sources included:\n\n{{stepOutput.content}}\n\nThen say the answer in three lines.",
+      "transitions": [
+        {
+          "when": {
+            "type": "always"
+          },
+          "goto": "$done"
+        }
+      ]
+    }
+  ],
+  "startCondition": {
+    "type": "always"
+  }
+}

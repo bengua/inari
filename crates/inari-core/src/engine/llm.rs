@@ -1,12 +1,14 @@
 //! An OpenAI-compatible model server, as local ones serve it (vLLM, SGLang, Ollama, llama.cpp,
 //! LM Studio): its models, and a chat completion streamed piece by piece, with the model's
-//! reasoning and its tool calls. Plain HTTP on the machine or the private network: the
-//! frontier models are reached through their own agents (ACP), not from here.
+//! reasoning and its tool calls. Plain HTTP on the machine or the private network; a cloud
+//! provider the person chose (Gemini's OpenAI-compatible endpoint, say) over HTTPS through curl,
+//! as the rest of the core reaches the outside: the binary stays static, with no TLS stack in it,
+//! and the key and the request never appear on a command line.
 
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::time::Duration;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 /// A model server as the settings name it.
@@ -48,9 +50,14 @@ struct Target {
     path: String,
 }
 
+/// Is this provider out on the internet (HTTPS) rather than on the machine or the network?
+pub fn is_cloud(url: &str) -> bool {
+    url.trim().starts_with("https://")
+}
+
 fn target(url: &str) -> Result<Target, String> {
     let rest = url.strip_prefix("http://").ok_or(
-        "the local engine speaks plain http to a server on the machine or the private network",
+        "the local engine speaks plain http to a server on the machine or the private network, https to a cloud provider",
     )?;
     let (authority, path) = match rest.find('/') {
         Some(i) => (&rest[..i], &rest[i..]),
@@ -73,7 +80,9 @@ fn target(url: &str) -> Result<Target, String> {
 
 /// A response's body, read as it comes: by length, by chunks, or to the end.
 struct Body {
-    stream: TcpStream,
+    stream: Box<dyn AsyncRead + Unpin + Send>,
+    /// The curl that reads an HTTPS answer, kept alive as long as its output is read.
+    _curl: Option<tokio::process::Child>,
     buf: Vec<u8>,
     chunked: bool,
     left: Option<usize>,
@@ -189,6 +198,9 @@ async fn send_with(
     body: Option<&Value>,
     extra: &[(String, String)],
 ) -> Result<(u16, Body), String> {
+    if is_cloud(&server.url) {
+        return send_https(server, method, path, body, extra).await;
+    }
     let t = target(&server.url)?;
     let mut stream = tokio::time::timeout(Duration::from_secs(10), TcpStream::connect(&t.host))
         .await
@@ -223,7 +235,8 @@ async fn send_with(
         stream.write_all(&p).await.map_err(|e| e.to_string())?;
     }
     let mut body = Body {
-        stream,
+        stream: Box::new(stream),
+        _curl: None,
         buf: Vec::new(),
         chunked: false,
         left: None,
@@ -259,6 +272,143 @@ async fn send_with(
         body.left = None;
     }
     Ok((status, body))
+}
+
+/// The status line and headers of an answer, then the body as it comes.
+async fn read_head(body: &mut Body, url: &str) -> Result<u16, String> {
+    let status_line = body
+        .line()
+        .await?
+        .ok_or_else(|| format!("{url} closed the connection"))?;
+    let status: u16 = status_line
+        .split_whitespace()
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .ok_or_else(|| format!("not an HTTP answer: {status_line:?}"))?;
+    while let Some(line) = body.line().await? {
+        if line.is_empty() {
+            break;
+        }
+        if let Some((k, v)) = line.split_once(':') {
+            let k = k.trim().to_ascii_lowercase();
+            if k == "content-length" {
+                body.left = v.trim().parse().ok();
+            }
+            body.headers.push((k, v.trim().to_string()));
+        }
+    }
+    Ok(status)
+}
+
+/// A file only this user can read, gone when dropped: a request on its way to curl.
+struct Private(std::path::PathBuf);
+
+impl Private {
+    fn write(bytes: &[u8]) -> Result<Self, String> {
+        use std::io::Write;
+        static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.subsec_nanos())
+            .unwrap_or(0);
+        let path =
+            std::env::temp_dir().join(format!("inari-llm-{}-{n}-{nanos}", std::process::id()));
+        let mut o = std::fs::OpenOptions::new();
+        o.write(true).create_new(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
+        let mut f = o.open(&path).map_err(|e| e.to_string())?;
+        f.write_all(bytes).map_err(|e| e.to_string())?;
+        Ok(Self(path))
+    }
+}
+
+impl Drop for Private {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// One HTTPS exchange through curl: its configuration (the key, the headers, where the request
+/// is) goes on its standard input, the request itself in a private file it reads, so neither
+/// shows on a command line. curl undoes the transfer's chunking itself.
+async fn send_https(
+    server: &Server,
+    method: &str,
+    path: &str,
+    body: Option<&Value>,
+    extra: &[(String, String)],
+) -> Result<(u16, Body), String> {
+    let url = format!("{}{path}", server.url.trim_end_matches('/'));
+    let quote = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
+    let mut config = String::from("header = \"Accept: */*\"\n");
+    if !server.key.is_empty() {
+        config.push_str(&format!(
+            "header = \"Authorization: Bearer {}\"\n",
+            quote(&server.key)
+        ));
+    }
+    for (k, v) in extra {
+        if k.contains(['\r', '\n', ':']) || v.contains(['\r', '\n']) {
+            return Err(format!("a bad header: {k}"));
+        }
+        config.push_str(&format!("header = \"{}: {}\"\n", quote(k), quote(v)));
+    }
+    let request = match body {
+        Some(b) => {
+            let file = Private::write(&serde_json::to_vec(b).expect("serializes"))?;
+            config.push_str("header = \"Content-Type: application/json\"\n");
+            config.push_str(&format!(
+                "data-binary = \"@{}\"\n",
+                quote(&file.0.display().to_string())
+            ));
+            Some(file)
+        }
+        None => None,
+    };
+    let mut child = tokio::process::Command::new("curl")
+        .args([
+            "-sS",
+            "-i",
+            "-N",
+            "--http1.1",
+            "--suppress-connect-headers",
+            "--connect-timeout",
+            "10",
+            "-X",
+            method,
+            "--config",
+            "-",
+            &url,
+        ])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| format!("curl cannot start ({e}): is it installed on this core?"))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(config.as_bytes())
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    let stdout = child.stdout.take().ok_or("curl gave no output")?;
+    let mut b = Body {
+        stream: Box::new(stdout),
+        _curl: Some(child),
+        buf: Vec::new(),
+        chunked: false,
+        left: None,
+        chunk_left: 0,
+        done: false,
+        headers: Vec::new(),
+    };
+    let status = read_head(&mut b, &server.url).await?;
+    // curl has read the request by the time the answer starts: the file can go
+    drop(request);
+    Ok((status, b))
 }
 
 fn error_of(status: u16, raw: &[u8]) -> String {
@@ -464,6 +614,68 @@ fn take(v: &Value, reply: &mut Reply, each: &mut impl FnMut(Piece<'_>)) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The HTTPS way (curl), checked against a local server curl reaches the same way: the key
+    /// and the request arrive, a chunked answer comes back whole, nothing is left on disk.
+    #[tokio::test]
+    async fn the_cloud_way_carries_the_key_and_the_request_and_reads_the_answer() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let seen = std::sync::Arc::new(tokio::sync::Mutex::new(String::new()));
+        let s2 = std::sync::Arc::clone(&seen);
+        tokio::spawn(async move {
+            let (mut s, _) = listener.accept().await.unwrap();
+            let mut got = Vec::new();
+            let mut buf = [0u8; 4096];
+            while !String::from_utf8_lossy(&got).contains("\"hello\"") {
+                let n = s.read(&mut buf).await.unwrap();
+                if n == 0 {
+                    break;
+                }
+                got.extend_from_slice(&buf[..n]);
+            }
+            *s2.lock().await = String::from_utf8_lossy(&got).to_string();
+            s.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n6\r\ndata: \r\n4\r\n{}\n\n\r\n0\r\n\r\n")
+                .await
+                .unwrap();
+        });
+        let server = Server {
+            url: format!("http://127.0.0.1:{port}/v1"),
+            key: "sekret".into(),
+        };
+        let (status, mut body) = send_https(
+            &server,
+            "POST",
+            "/chat/completions",
+            Some(&json!({"say": "hello"})),
+            &[],
+        )
+        .await
+        .unwrap();
+        assert_eq!(status, 200);
+        assert_eq!(
+            String::from_utf8(body.all().await.unwrap()).unwrap(),
+            "data: {}\n\n"
+        );
+        let req = seen.lock().await.clone();
+        assert!(req.starts_with("POST /v1/chat/completions"), "{req}");
+        assert!(req.contains("Authorization: Bearer sekret"));
+        assert!(req.contains("{\"say\":\"hello\"}"));
+        assert!(is_cloud(
+            "https://generativelanguage.googleapis.com/v1beta/openai"
+        ));
+        assert!(!is_cloud("http://127.0.0.1:8000/v1"));
+        let left = std::fs::read_dir(std::env::temp_dir())
+            .unwrap()
+            .flatten()
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with(&format!("inari-llm-{}-", std::process::id()))
+            })
+            .count();
+        assert_eq!(left, 0, "the request file is gone");
+    }
 
     #[test]
     fn a_streamed_reply_gathers_text_reasoning_and_tool_calls() {

@@ -980,3 +980,99 @@ async fn the_assistants_specialist_works_on_its_tier_and_keeps_the_note_in_the_b
     let items = k.lock().unwrap().store().items("Courses", false).unwrap();
     assert_eq!(items[0].text, "café");
 }
+
+/// The assistant searches through the person's SearXNG, then hands a development job to a new
+/// thread on a harness (a "room"): the thread exists, says who asked, and starts on the job.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_assistant_searches_the_web_and_hands_a_job_to_a_new_thread() {
+    let (model, port) = model_server().await;
+    // a stand-in SearXNG
+    let searx = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let sport = searx.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        while let Ok((mut s, _)) = searx.accept().await {
+            let mut buf = [0u8; 4096];
+            let n = s.read(&mut buf).await.unwrap_or(0);
+            let head = String::from_utf8_lossy(&buf[..n]).to_string();
+            assert!(
+                head.starts_with("GET /search?q=formulaire%20de%20contact&format=json"),
+                "{head}"
+            );
+            let b = json!({"results": [{"title": "Forms", "url": "https://example.org/forms", "content": "accessible forms"}]}).to_string();
+            let _ = s.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{b}", b.len()).as_bytes()).await;
+        }
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let engine = LocalEngine::new(dir.path().join("engine"));
+    engine
+        .set_settings(Settings {
+            providers: vec![Provider {
+                id: "gpu".into(),
+                name: "vLLM".into(),
+                url: format!("http://127.0.0.1:{port}/v1"),
+            }],
+            model: "gpu/qwen3-coder".into(),
+            mode: "assistant".into(),
+            search_url: format!("http://127.0.0.1:{sport}"),
+            delegate_asks: false,
+            ..Settings::default()
+        })
+        .unwrap();
+    let host = Arc::new(CapsuleHost::new("n1", &dir.path().join("node")).unwrap());
+    let runner = Runner::new(
+        Arc::clone(&host),
+        vec![("local".to_string(), engine)],
+        None,
+        None,
+    );
+    let agent = runner.create("t1", "", "a thread").unwrap();
+    {
+        let mut m = model.lock().unwrap();
+        m.script.push_back(call(
+            "w1",
+            "web_search",
+            json!({"query": "formulaire de contact"}),
+        ));
+        m.script.push_back(call(
+            "d1",
+            "delegate",
+            json!({"harness": "local", "title": "Formulaire de contact", "prompt": "Add an accessible contact form."}),
+        ));
+        m.script.push_back(answer(&["Opened."]));
+    }
+    runner
+        .run(&agent, "ajoute un formulaire de contact au site", vec![])
+        .await;
+    let asked = model.lock().unwrap().asked.clone();
+    let found = asked[1]["messages"].to_string();
+    assert!(
+        found.contains("accessible forms"),
+        "the search results reached the model: {found}"
+    );
+    // a new thread, labelled with the one that asked, with the job as its first message
+    let mut threads: Vec<String> = std::fs::read_dir(&host.agents)
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .filter(|n| n.starts_with("formulaire-de-contact-"))
+        .collect();
+    assert_eq!(threads.len(), 1, "{threads:?}");
+    let new = threads.remove(0);
+    let c = io::load(&host.agents.join(&new)).unwrap();
+    assert_eq!(c.manifest.labels()["delegated_by"], agent);
+    assert_eq!(c.manifest.labels()["harness"], "local");
+    // its run starts on its own: give it a moment, then its first message is the job
+    for _ in 0..50 {
+        if model
+            .lock()
+            .unwrap()
+            .asked
+            .iter()
+            .any(|r| r.to_string().contains("Add an accessible contact form."))
+        {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    panic!("the delegated thread never started on its job");
+}

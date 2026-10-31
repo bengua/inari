@@ -1,0 +1,88 @@
+{
+  "metadata": {
+    "id": "dev-handoff",
+    "name": "Hand off to a coder",
+    "description": "Writes a precise plan with acceptance criteria, waits for your approval, then opens an Inari thread on a coder harness that does the work.",
+    "version": "1.0.0",
+    "color": "#A68BEA",
+    "parameters": [
+      {
+        "id": "request",
+        "label": "What to build",
+        "required": true
+      },
+      {
+        "id": "harness",
+        "label": "Coder harness (empty: the default)",
+        "required": false
+      }
+    ]
+  },
+  "entryStep": "plan",
+  "settings": {
+    "maxIterations": 12
+  },
+  "steps": [
+    {
+      "id": "plan",
+      "name": "Plan",
+      "type": "sub_agent",
+      "subAgentType": "developer",
+      "prompt": "The request: {{request}}",
+      "transitions": [
+        {
+          "when": {
+            "type": "always"
+          },
+          "goto": "agree"
+        }
+      ]
+    },
+    {
+      "id": "agree",
+      "name": "Hand it off?",
+      "type": "user",
+      "transitions": [
+        {
+          "when": {
+            "type": "step_result",
+            "result": "Hand off"
+          },
+          "goto": "handoff"
+        },
+        {
+          "when": {
+            "type": "step_result",
+            "result": "Redo"
+          },
+          "goto": "plan"
+        },
+        {
+          "when": {
+            "type": "step_result",
+            "result": "Stop"
+          },
+          "goto": "$done"
+        }
+      ]
+    },
+    {
+      "id": "handoff",
+      "name": "Open the thread",
+      "type": "agent",
+      "agentId": "assistant",
+      "prompt": "Open a new thread for this job with the delegate tool (harness: \"{{harness}}\", empty for the core's default; a short title), giving it the whole plan below as its prompt:\n\n{{stepOutput.content}}\n\nThen keep a note tagged \"dev\" (kitsune note) with the title and the thread's id, and say where to follow it.",
+      "transitions": [
+        {
+          "when": {
+            "type": "always"
+          },
+          "goto": "$done"
+        }
+      ]
+    }
+  ],
+  "startCondition": {
+    "type": "always"
+  }
+}
