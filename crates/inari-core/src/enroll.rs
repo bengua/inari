@@ -181,13 +181,7 @@ pub async fn join(addr: &str, code: &str) -> Result<Grant, String> {
     })
 }
 
-/// The harnesses found on this machine, by name: what a new core can drive.
-pub fn detect_harnesses() -> Vec<(String, Vec<String>)> {
-    let path = std::env::var("PATH").unwrap_or_default();
-    let home = std::env::var("HOME").unwrap_or_default();
-    let dirs: Vec<PathBuf> = std::iter::once(Path::new(&home).join(".local/bin"))
-        .chain(std::env::split_paths(&path))
-        .collect();
+fn detect_harnesses_in(dirs: &[PathBuf]) -> Vec<(String, Vec<String>)> {
     let find = |bin: &str| {
         dirs.iter()
             .map(|d| d.join(bin))
@@ -204,7 +198,28 @@ pub fn detect_harnesses() -> Vec<(String, Vec<String>)> {
     if let Some(p) = find("openfox-acp") {
         out.push(("openfox".to_string(), vec![p]));
     }
+    if let Some(p) = find("kimi") {
+        out.push(("kimi".to_string(), vec![p, "acp".into()]));
+    }
     out
+}
+
+/// The harnesses found on this machine, by name: what a new core can drive.
+pub fn detect_harnesses() -> Vec<(String, Vec<String>)> {
+    let path = std::env::var("PATH").unwrap_or_default();
+    let home = std::env::var("HOME").unwrap_or_default();
+    let dirs: Vec<PathBuf> = std::iter::once(Path::new(&home).join(".local/bin"))
+        .chain(std::env::split_paths(&path))
+        .collect();
+    detect_harnesses_in(&dirs)
+}
+
+fn harness_spec(name: &str, command: Vec<String>) -> Value {
+    if name == "kimi" {
+        json!({"command": command, "timeout": 900, "update": {"npm": "@moonshot-ai/kimi-code"}})
+    } else {
+        json!({"command": command, "timeout": 900})
+    }
 }
 
 fn write_secret(path: &Path, data: &[u8]) -> std::io::Result<()> {
@@ -229,20 +244,44 @@ pub fn write_config(
     endpoint_port: u16,
     gateway_port: u16,
 ) -> std::io::Result<PathBuf> {
-    write_secret(&config_dir.join("mesh.key"), &grant.mesh_key)?;
-    write_secret(&config_dir.join("device.key"), &grant.device_key)?;
-    let token = crate::wire::random_hex(24);
-    write_secret(&config_dir.join("token"), token.as_bytes())?;
-    let harnesses: serde_json::Map<String, Value> = detect_harnesses()
-        .into_iter()
-        .map(|(n, c)| (n, json!({"command": c, "timeout": 900})))
-        .collect();
+    let detected = detect_harnesses();
     let home = std::env::var("HOME").unwrap_or_default();
     let usage = if Path::new(&home).join(".claude/.credentials.json").is_file() {
         json!([{"kind": "claude"}])
     } else {
         json!([])
     };
+    write_config_with_detection(
+        grant,
+        config_dir,
+        data_dir,
+        endpoint_port,
+        gateway_port,
+        detected,
+        usage,
+    )
+}
+
+fn write_config_with_detection(
+    grant: &Grant,
+    config_dir: &Path,
+    data_dir: &Path,
+    endpoint_port: u16,
+    gateway_port: u16,
+    detected: Vec<(String, Vec<String>)>,
+    usage: Value,
+) -> std::io::Result<PathBuf> {
+    write_secret(&config_dir.join("mesh.key"), &grant.mesh_key)?;
+    write_secret(&config_dir.join("device.key"), &grant.device_key)?;
+    let token = crate::wire::random_hex(24);
+    write_secret(&config_dir.join("token"), token.as_bytes())?;
+    let harnesses: serde_json::Map<String, Value> = detected
+        .into_iter()
+        .map(|(n, c)| {
+            let spec = harness_spec(&n, c);
+            (n, spec)
+        })
+        .collect();
     let cfg = json!({
         "node_id": grant.node_id, "role": "heavy", "hub": grant.hub,
         "data_dir": data_dir, "key_file": config_dir.join("mesh.key"), "device_key_file": config_dir.join("device.key"),
@@ -296,5 +335,70 @@ mod tests {
             .chars()
             .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit()));
         assert_ne!(c, new_code());
+    }
+
+    #[test]
+    fn kimi_detection_uses_absolute_path_and_acp() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let kimi = bin.join("kimi");
+        std::fs::write(&kimi, b"").unwrap();
+
+        let found = detect_harnesses_in(&[bin]);
+        assert_eq!(found.len(), 1);
+        let (_, command) = found.iter().find(|(name, _)| name == "kimi").unwrap();
+        assert_eq!(command, &vec![kimi.display().to_string(), "acp".into()]);
+    }
+
+    #[test]
+    fn kimi_spec_has_nested_update_npm() {
+        let kimi = harness_spec("kimi", vec!["/tmp/kimi".into(), "acp".into()]);
+        assert_eq!(kimi["update"]["npm"], "@moonshot-ai/kimi-code");
+        assert!(kimi.get("npm").is_none());
+
+        let other = harness_spec("gemini", vec!["gemini".into(), "--acp".into()]);
+        assert!(other.get("update").is_none());
+    }
+
+    #[test]
+    fn write_config_persists_kimi_update_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_dir = dir.path().join("config");
+        let data_dir = dir.path().join("data");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        std::fs::create_dir_all(&data_dir).unwrap();
+        let grant = Grant {
+            node_id: "test".into(),
+            hub: "127.0.0.1:7400".into(),
+            mesh_key: b"mesh".to_vec(),
+            device_key: b"device".to_vec(),
+            local_ip: "127.0.0.1".into(),
+        };
+        let detected = vec![(
+            "kimi".to_string(),
+            vec!["/detected/kimi".into(), "acp".into()],
+        )];
+
+        let path = write_config_with_detection(
+            &grant,
+            &config_dir,
+            &data_dir,
+            7401,
+            7487,
+            detected,
+            json!([]),
+        )
+        .unwrap();
+        let cfg: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(
+            cfg["harnesses"]["kimi"]["command"],
+            json!(["/detected/kimi", "acp"])
+        );
+        assert_eq!(
+            cfg["harnesses"]["kimi"]["update"]["npm"],
+            "@moonshot-ai/kimi-code"
+        );
+        assert!(cfg["harnesses"]["kimi"].get("npm").is_none());
     }
 }
