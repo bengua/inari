@@ -175,6 +175,14 @@ quelqu'un d'autre (un pass), chaque écriture doit être autorisée par le propr
   Par défaut, l'agent demande ton accord avant d'ouvrir le fil. Le spécialiste `developer`
   (niveau expert) écrit le plan et les critères d'acceptation.
 
+**Skills et outils de la communauté** : la fiche Skills du moteur local installe un skill
+directement depuis un dépôt GitHub. Deux raccourcis sont prévus : `karpathy-guidelines` et
+`security-audit` de Cloudflare. Le dépôt est refusé si sa licence n'est ni MIT ni Apache. Le skill
+devient le tien, et sa provenance est gardée à côté de lui (`.source`). La fiche MCP propose le
+préréglage **graphify** : un graphe de connaissances d'un code, servi en stdio par
+`graphify-mcp <chemin>/graphify-out/graph.json`, à installer avec
+`uv tool install "graphifyy[mcp]"`.
+
 **Fournisseurs cloud** (Gemini par son endpoint compatible OpenAI, par exemple
 `https://generativelanguage.googleapis.com/v1beta/openai`, avec ta clé d'API) : on les ajoute
 comme n'importe quel serveur de modèles, et on les attribue à un niveau (par exemple expert →
