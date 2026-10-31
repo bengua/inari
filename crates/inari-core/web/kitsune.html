@@ -67,6 +67,8 @@
           <textarea class="kfield" id="kText" rows="2" placeholder="What should I remember?"></textarea>
           <button class="btn small" id="kTextGo" type="button">Keep it</button>
         </details>
+        <button class="btn small" id="kLive" type="button" hidden>Talk live</button>
+        <p class="kmeta" id="kLiveState" aria-live="polite"></p>
         <div id="kReview" hidden>
           <label class="klab" for="kReviewText">What did you say?</label>
           <textarea class="kfield" id="kReviewText" rows="3"></textarea>
@@ -108,6 +110,19 @@
             <option value="nominatim">Nominatim</option>
             <option value="photon">Photon</option>
           </select>
+          <label class="klab" for="kSetLiveUrl">Live voice (your LiveKit server)</label>
+          <input class="kfield" id="kSetLiveUrl" type="text" placeholder="ws://127.0.0.1:7880" autocomplete="off">
+          <label class="klab" for="kSetLiveKey">Its API key</label>
+          <input class="kfield" id="kSetLiveKey" type="text" autocomplete="off">
+          <label class="klab" for="kSetLiveSecret">Its API secret</label>
+          <input class="kfield" id="kSetLiveSecret" type="password" autocomplete="off">
+          <label class="klab" for="kSetLiveMode">The live voice runs on</label>
+          <select class="kfield" id="kSetLiveMode">
+            <option value="private">Your own servers (nothing leaves the house)</option>
+            <option value="gemini">Gemini Live (cloud: your voice goes to Google)</option>
+          </select>
+          <label class="klab" for="kSetLiveModel">Gemini Live model</label>
+          <input class="kfield" id="kSetLiveModel" type="text" placeholder="as Google names it" autocomplete="off">
           <button class="btn small go" id="kSetGo" type="submit">Save</button>
           <p class="kmeta" id="kSetState" aria-live="polite"></p>
         </form>

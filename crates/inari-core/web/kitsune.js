@@ -173,6 +173,13 @@ function setFill() {
   put("kSetEmbed", emb.model);
   put("kSetGeoUrl", geo.url);
   put("kSetGeoKind", geo.kind || "nominatim");
+  const voice = s.voice || {};
+  put("kSetLiveUrl", voice.url);
+  put("kSetLiveKey", voice.api_key);
+  put("kSetLiveSecret", voice.api_secret);
+  put("kSetLiveMode", voice.mode || "private");
+  put("kSetLiveModel", voice.model);
+  $("kLive").hidden = !(voice.url && voice.api_key);
 }
 
 async function setSave() {
@@ -193,6 +200,12 @@ async function setSave() {
   s.embed.model = $("kSetEmbed").value.trim();
   s.geocoder.url = $("kSetGeoUrl").value.trim();
   s.geocoder.kind = $("kSetGeoKind").value;
+  s.voice = s.voice || {};
+  s.voice.url = $("kSetLiveUrl").value.trim();
+  s.voice.api_key = $("kSetLiveKey").value.trim();
+  s.voice.api_secret = $("kSetLiveSecret").value.trim();
+  s.voice.mode = $("kSetLiveMode").value;
+  s.voice.model = $("kSetLiveModel").value.trim();
   $("kSetState").textContent = "Saving…";
   const d = await api("/api/kitsune", { action: "set_settings", settings: s });
   if (!d || d.error) {
@@ -716,6 +729,67 @@ function localAt(dayOffset, h, m) {
   d.setHours(h, m || 0, 0, 0);
   return isoUtc(Math.round(d.getTime() / 1000));
 }
+
+/* Talking live: the page joins the owner's LiveKit room, where the voice agent answers (Gemini
+   Live, or privately on the person's own servers: a setting). LiveKit's client is served by the
+   core and loaded only now. */
+const live = { room: null };
+
+function loadScript(src) {
+  return new Promise((ok, fail) => {
+    if (window.LivekitClient) return ok();
+    const s = document.createElement("script");
+    s.src = src;
+    s.onload = ok;
+    s.onerror = () => fail(new Error("the live voice's client did not load"));
+    document.head.append(s);
+  });
+}
+
+async function liveToggle() {
+  const btn = $("kLive");
+  if (live.room) {
+    await live.room.disconnect();
+    return;
+  }
+  btn.disabled = true;
+  const d = await api("/api/kitsune", { action: "voice" });
+  if (d.error) { btn.disabled = false; return; }
+  try {
+    const v = (document.querySelector('meta[name="inari-page"]') || {}).content || "";
+    await loadScript("/assets/vendor/livekit-client.umd.js?v=" + encodeURIComponent(v));
+    const LK = window.LivekitClient;
+    const room = new LK.Room({ adaptiveStream: true, dynacast: true });
+    room.on(LK.RoomEvent.TrackSubscribed, (track) => {
+      if (track.kind !== "audio") return;
+      const el = track.attach();
+      el.hidden = true;
+      el.dataset.live = "1";
+      document.body.append(el);
+    });
+    room.on(LK.RoomEvent.ActiveSpeakersChanged, (speakers) => {
+      activity(speakers.some((p) => !p.isLocal) ? "working" : "listening");
+    });
+    room.on(LK.RoomEvent.Disconnected, () => {
+      live.room = null;
+      document.querySelectorAll("audio[data-live]").forEach((a) => a.remove());
+      btn.textContent = "Talk live";
+      $("kLiveState").textContent = "";
+      activity("idle");
+    });
+    await room.connect(d.url, d.token);
+    await room.localParticipant.setMicrophoneEnabled(true);
+    live.room = room;
+    btn.textContent = "End the live talk";
+    $("kLiveState").textContent = d.mode === "gemini" ? "Live, through Gemini Live (cloud)." : "Live, on your own servers.";
+    activity("listening");
+  } catch (e) {
+    toast((e && e.message) || "The live voice did not start.");
+  } finally {
+    btn.disabled = false;
+  }
+}
+$("kLive").addEventListener("click", liveToggle);
 
 /* The views: Talk (the stage, today, the memory), Assistants, Lists, Running, My week. */
 const view = { now: "talk", timer: 0 };

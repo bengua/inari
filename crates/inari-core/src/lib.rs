@@ -17,6 +17,7 @@ pub mod engine;
 pub mod enroll;
 pub mod gateway;
 pub mod host;
+pub mod livekit;
 pub mod mesh;
 pub mod node;
 pub mod openfox;

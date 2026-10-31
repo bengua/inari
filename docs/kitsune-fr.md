@@ -190,6 +190,26 @@ valides avant qu'il soit écrit), `weekly-review` (bilan de la semaine, privé),
 tout déplacement), `research-brief` (une question, ses sources, gardée en note), `dev-handoff`
 (plan et critères ; une fois validés, un fil s'ouvre sur un harnais coder).
 
+## La voix en direct
+
+Le bouton « Talk live » de la page Kitsune ouvre une conversation en temps réel, comme Jarvis. La
+page rejoint une salle sur **ton serveur LiveKit** (auto-hébergé, Apache-2.0). Le cœur lui donne
+un jeton signé (HMAC-SHA256, valable une heure). L'agent vocal `services/kitsune-voice` (LiveKit
+Agents, Python) répond dans cette salle. Deux modes, au choix dans les réglages :
+
+- **Gemini Live** (cloud) : un modèle temps réel qui comprend la voix et répond à voix haute, sans
+  charger ton GPU. Ta voix, et ce que l'agent lit, partent chez Google. Sur l'offre gratuite,
+  Google peut s'en servir pour améliorer ses produits. Le nom du modèle est un réglage, parce que
+  Google change ses noms. La clé `GOOGLE_API_KEY` reste dans l'environnement du service, jamais
+  dans les réglages du cœur.
+- **Privé** : tout reste chez toi. Ton Whisper transcrit, ton petit modèle répond, ta voix locale
+  (Kokoro-82M, Apache-2.0, par exemple) parle.
+
+Ce que la voix a le droit de faire avec ton cerveau se règle par la liste `voice.tools`. Par
+défaut : garder une note, lire les rappels et les listes, ajouter et cocher. Le client LiveKit
+pour le navigateur est servi par ton cœur (`/assets/vendor/`), et seulement quand tu lances une
+conversation en direct.
+
 ## Le chiffrement au repos (incrément 4)
 
 Les fichiers audio — captures vocales brutes et voix synthétisée, le gros de ce qui est

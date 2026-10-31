@@ -51,6 +51,55 @@ pub struct Settings {
     /// How reminders ring.
     #[serde(default)]
     pub rings: crate::rings::RingConfig,
+    /// The live voice (LiveKit and its voice agent): off until a LiveKit server is set.
+    #[serde(default)]
+    pub voice: VoiceConfig,
+}
+
+/// Talking with Kitsune live: the page joins a LiveKit room (the person's own LiveKit server), and
+/// the voice agent (`services/kitsune-voice`) answers there, either on Gemini Live (the cloud, the
+/// person's choice: their voice goes to Google) or privately (the local speech-to-text, the
+/// standard tier, a local voice such as Kokoro). Nothing here is assumed: every field is a setting.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VoiceConfig {
+    /// The LiveKit server as the page reaches it (ws://host:7880 or wss://…); empty: no live voice.
+    pub url: String,
+    pub api_key: String,
+    pub api_secret: String,
+    /// gemini (realtime, in the cloud) or private (everything on the person's own servers).
+    pub mode: String,
+    /// The Gemini Live model, as Google names it (a setting: names change).
+    pub model: String,
+    /// The voice the model speaks with.
+    pub voice: String,
+    /// The language it speaks (fr-FR…).
+    pub language: String,
+    /// The tools the voice agent may use with the brain (the kitsune tool's actions).
+    pub tools: Vec<String>,
+}
+
+impl Default for VoiceConfig {
+    fn default() -> Self {
+        Self {
+            url: String::new(),
+            api_key: String::new(),
+            api_secret: String::new(),
+            mode: "private".into(),
+            model: String::new(),
+            voice: String::new(),
+            language: "fr-FR".into(),
+            tools: ["note", "reminders", "lists", "items", "add_items", "check"]
+                .map(String::from)
+                .to_vec(),
+        }
+    }
+}
+
+impl VoiceConfig {
+    pub fn ready(&self) -> bool {
+        !self.url.trim().is_empty() && !self.api_key.is_empty() && !self.api_secret.is_empty()
+    }
 }
 
 /// A thought to keep, and where it comes from.
