@@ -1141,6 +1141,9 @@ async function swarmSend(text) {
   swarmLog.push({ kind: "you", text, note: one ? t("Sent to {name}", { name: one.title || targets[0] }) : t("Delivered to {n} agents", { n: targets.length }) });
   swarmTrim(); drawBench();
 }
+/* the colour of a core, shared by the target chips and the conversation's speakers,
+   so the eye groups the swarm by machine */
+function nodePalette(node) { const palette = ["#e48a46", "#8b5cf6", "#4ade80", "#4285f4", "#ff6b9d", "#22d3ee"]; const ni = Math.max(0, (snap ? snap.nodes : []).findIndex((n) => n.node_id === node)); return palette[ni % palette.length]; }
 function swarmPanel(body) {
   if (swarmTarget !== "all" && !(swarmTarget in snap.agents)) swarmTarget = "all";
   const agents = swarmAgents();
@@ -1154,35 +1157,32 @@ function swarmPanel(body) {
   body.style.padding = "10px";
   body.innerHTML = `<div id="swarm">
     <div class="termhost">${icon("share")}<span>${esc(t("Swarm"))}</span><i id="swarmlive" class="${live ? "on" : ""}"></i><span class="swarmdist">${chips}</span></div>
-    <div class="swarmroster"><button class="swarmrow all${swarmTarget === "all" ? " on" : ""}" type="button">${icon("share")}<span>${esc(t("All agents"))}</span><small class="pg">${agents.length}</small></button></div>
+    <div class="swarmtargets" role="group" aria-label="${esc(t("Message target"))}"></div>
     <div id="swarmout"></div>
     <form id="swarmform"><input id="swarminput" autocomplete="off" placeholder="${esc(t("Message one agent, or the whole swarm…"))}" aria-label="${esc(t("Message the swarm"))}"><button class="btn small go" type="submit">${esc(t("Send"))}</button></form>
   </div>`;
-  const roster = body.querySelector(".swarmroster");
-  for (const [id, a] of agents) {
+  /* who the message goes to: a single strip of chips — the conversation below is the hero,
+     the sidebar already lists the threads */
+  const strip = body.querySelector(".swarmtargets");
+  const mk = (id, a, label) => {
     const b = document.createElement("button");
-    b.type = "button"; b.className = "swarmrow" + (swarmTarget === id ? " on" : "");
-    b.title = a.last || "";
-    /* a logo badge when the model is known; otherwise a coloured core dot (the colour is the core,
-       so the eye groups the swarm by machine even when a bot runs no named model) */
-    if (family(a.model || "").id !== "local") b.append(badge(a.model || ""));
-    else { const dot = document.createElement("span"); const palette = ["#e48a46", "#8b5cf6", "#4ade80", "#4285f4", "#ff6b9d", "#22d3ee"];
-      const ni = Math.max(0, snap.nodes.findIndex((n) => n.node_id === a.node));
-      dot.className = "mb node"; dot.style.background = palette[ni % palette.length];
-      dot.textContent = (a.node || "?").charAt(0).toUpperCase(); dot.title = a.node; b.append(dot); }
-    const name = document.createElement("span"); name.textContent = a.title || id; b.append(name);
-    const ph = document.createElement("small"); ph.className = "pg"; ph.textContent = `${GLYPH[a.phase] || "·"} ${a.node}`; b.append(ph);
-    const last = document.createElement("small"); last.textContent = a.last || ""; b.append(last);
+    b.type = "button"; b.className = "swarmtgt" + (swarmTarget === id ? " on" : "");
+    b.title = a ? (a.last || a.title || id) : t("Message the whole swarm");
+    if (!a) b.insertAdjacentHTML("beforeend", icon("share"));
+    else if (family(a.model || "").id !== "local") b.append(badge(a.model || ""));
+    else { const dot = document.createElement("span"); dot.className = "mb node"; dot.style.background = nodePalette(a.node); dot.textContent = (a.node || "?").charAt(0).toUpperCase(); b.append(dot); }
+    const name = document.createElement("span"); name.textContent = label; b.append(name);
     b.onclick = () => { swarmTarget = swarmTarget === id ? "all" : id; drawBench(); };
-    roster.append(b);
-  }
+    strip.append(b);
+  };
+  mk("all", null, t("All agents") + " · " + agents.length);
+  for (const [id, a] of agents) mk(id, a, a.title || id);
   const out = body.querySelector("#swarmout");
   out.innerHTML = swarmLog.map((l) => l.kind === "you"
     ? `<div class="cmd">$ ${esc(l.text)}</div><div class="out dim">${esc(l.note)}</div>`
-    : `<div class="cmd bot">${esc(GLYPH.inference)} ${esc(l.name)}</div><div class="out">${esc(l.text)}</div>`).join("")
-    || `<div class="out dim">${esc(t("The swarm's common room: what was done, what it changes, what is next."))}</div>`;
+    : `<div class="cmd bot"><span class="sdot" style="background:${nodePalette((snap.agents[l.who] || {}).node)}"></span>${esc(l.name)}</div><div class="out">${esc(l.text)}</div>`).join("")
+    || `<div class="swarmempty">${icon("share")}<p>${esc(t("The swarm's common room: what was done, what it changes, what is next."))}</p><small>${esc(t("Write below — the agents you write to answer here."))}</small></div>`;
   out.scrollTop = out.scrollHeight;
-  roster.querySelector(".all").onclick = () => { swarmTarget = "all"; drawBench(); };
   const form = body.querySelector("#swarmform"), inp = body.querySelector("#swarminput");
   form.onsubmit = async (e) => { e.preventDefault(); const text = inp.value.trim(); if (!text) return; inp.value = ""; inp.disabled = true; await swarmSend(text); inp.disabled = false; const again = $("swarminput"); if (again) again.focus(); };
 }
