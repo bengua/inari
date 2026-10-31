@@ -1,3 +1,230 @@
+/* French when the phone or the browser speaks it: the page's words through T(), the static ones
+   translated once at load. */
+const FR_ON = /^fr\b/i.test(navigator.language || "");
+const FR = {
+ " still to come.": " encore à venir.",
+ " not set yet.": " pas encore réglé(s).",
+ "Local ": "Serveur local : ",
+ " ready": " prêt",
+ " off": " éteint",
+ " and ": " et ",
+ "speech to text": "parole en texte",
+ "text to speech": "texte en voix",
+ "Access token or pass": "Jeton d'accès ou pass",
+ "Add": "Ajouter",
+ "Add an item": "Ajouter un élément",
+ "Aisle": "Rayon",
+ "All": "Tout",
+ "Assistants": "Assistants",
+ "Cancel": "Annuler",
+ "Connect": "Se connecter",
+ "Done": "Fait",
+ "Each has one job, works on the model tier its job needs, and says where it runs. Settings: Inari → Agents and subscriptions → Local engine.": "Chacun a un métier, travaille sur le niveau de modèle qu'il lui faut, et dit où il tourne. Réglages : Inari → Agents et abonnements → Moteur local.",
+ "Find": "Chercher",
+ "Gemini Live (cloud: your voice goes to Google)": "Gemini Live (cloud : ta voix part chez Google)",
+ "Gemini Live model": "Modèle Gemini Live",
+ "HAS: the French recommendations on ADHD": "HAS : les recommandations françaises sur le TDAH",
+ "Hold to talk": "Maintiens pour parler",
+ "HyperSupers – TDAH France: the association, its guides and its contacts": "HyperSupers – TDAH France : l'association, ses guides et ses contacts",
+ "In 1 h": "Dans 1 h",
+ "Inari: the cores, the threads, the settings": "Inari : les cœurs, les fils, les réglages",
+ "Item": "Élément",
+ "Its API key": "Sa clé d'API",
+ "Its API secret": "Son secret d'API",
+ "Its kind": "Son type",
+ "Its model": "Son modèle",
+ "Its voice": "Sa voix",
+ "Keep it": "Garder",
+ "Kind of list": "Type de liste",
+ "Kitsune helps to get organised. It replaces no care and gives no medical advice.": "Kitsune aide à s'organiser. Il ne remplace aucun soin et ne donne aucun conseil médical.",
+ "List": "Liste",
+ "Lists": "Listes",
+ "Live voice (your LiveKit server)": "Voix en direct (ton serveur LiveKit)",
+ "Local servers": "Serveurs locaux",
+ "Meaning (384-wide embeddings)": "Sens (embeddings 384)",
+ "Memory": "Mémoire",
+ "My week": "Ma semaine",
+ "NICE NG87: ADHD diagnosis and management": "NICE NG87 : diagnostic et prise en charge du TDAH",
+ "Notes": "Notes",
+ "Pantry": "Garde-manger",
+ "Place": "Lieu",
+ "Places (your own Nominatim or Photon)": "Lieux (ton propre Nominatim ou Photon)",
+ "Private: it stays on your core.": "Privé : ça reste sur ton cœur.",
+ "Reminders": "Rappels",
+ "Running": "En cours",
+ "Save": "Enregistrer",
+ "Save the words": "Garder les mots",
+ "Search the notes": "Chercher dans les notes",
+ "Search what you said": "Cherche ce que tu as dit",
+ "Servers": "Serveurs",
+ "Shopping": "Courses",
+ "Speech to text": "Parole en texte",
+ "Spoken language": "Langue parlée",
+ "Start": "Lancer",
+ "Talk": "Parler",
+ "Talk live": "Parler en direct",
+ "Tasks": "Tâches",
+ "Text to speech": "Texte en voix",
+ "The assistants' workflows. A step that waits for you shows its choices here; the whole thread is in": "Les workflows des assistants. Une étape qui t'attend montre ses choix ici ; le fil complet est dans",
+ "The live voice runs on": "La voix en direct tourne sur",
+ "Today": "Aujourd'hui",
+ "Type it instead": "Le taper plutôt",
+ "Understanding (small language model)": "Compréhension (petit modèle de langage)",
+ "Understanding ADHD": "Comprendre le TDAH",
+ "Weekly review with the assistant": "Bilan de la semaine avec l'assistant",
+ "What did you say?": "Qu'as-tu dit ?",
+ "What should I remember?": "Que dois-je retenir ?",
+ "What should come back?": "Qu'est-ce qui doit revenir ?",
+ "What to be reminded of": "Ce qui doit revenir",
+ "When": "Quand",
+ "Your own servers (nothing leaves the house)": "Tes propres serveurs (rien ne sort de la maison)",
+ "aisle (1-fruits)": "rayon (1-fruits)",
+ "as Google names it": "tel que Google le nomme",
+ "kitchen, car, office": "cuisine, voiture, bureau",
+ "things done": "choses faites",
+ "thoughts kept": "pensées gardées",
+ "your voice notebook, on your own core": "ton carnet vocal, sur ton propre cœur",
+ "Speech to text ": "Parole en texte ",
+ "Text to speech ": "Texte en voix ",
+ "The core cannot be reached. Check the connection and try again.": "Le cœur est injoignable. Vérifie la connexion et réessaie.",
+ "Too many attempts. Try again in ": "Trop d'essais. Réessaie dans ",
+ "This token or pass is not known by this core.": "Ce cœur ne connaît pas ce jeton ou ce pass.",
+ "The core cannot be reached.": "Le cœur est injoignable.",
+ "The core refused this request.": "Le cœur a refusé cette demande.",
+ "Saving…": "Enregistrement…",
+ "The core refused it: ": "Le cœur l'a refusé : ",
+ "The core did not answer.": "Le cœur n'a pas répondu.",
+ "Saved. ": "Enregistré. ",
+ "Saved. No server set.": "Enregistré. Aucun serveur réglé.",
+ "Settings kept.": "Réglages gardés.",
+ "This core holds no Kitsune yet.": "Ce cœur n'a pas encore de Kitsune.",
+ "Ready. Notes: ": "Prêt. Notes : ",
+ "The microphone is blocked. Allow it for this page, then try again.": "Le micro est bloqué. Autorise-le pour cette page, puis réessaie.",
+ "No microphone answers on this machine.": "Aucun micro ne répond sur cette machine.",
+ "Another program holds the microphone.": "Un autre programme tient le micro.",
+ "The microphone did not open: ": "Le micro ne s'est pas ouvert : ",
+ "This browser cannot record audio. Type the note instead.": "Ce navigateur ne sait pas enregistrer. Tape la note plutôt.",
+ "Listening — release to keep": "J'écoute — relâche pour garder",
+ "Too short. Hold the button while you speak.": "Trop court. Maintiens le bouton pendant que tu parles.",
+ "Writing it down on this core…": "Je l'écris sur ce cœur…",
+ "The capture was not kept.": "La capture n'a pas été gardée.",
+ "The audio could not be read: ": "L'audio n'a pas pu être lu : ",
+ "Kept: ": "Gardé : ",
+ "Kept, with the audio.": "Gardé, avec l'audio.",
+ "I kept the audio but could not write it out. Type what you said.": "J'ai gardé l'audio mais je n'ai pas pu l'écrire. Tape ce que tu as dit.",
+ "Write what you said first.": "Écris d'abord ce que tu as dit.",
+ "Corrected: ": "Corrigé : ",
+ "Audio kept, words missing.": "Audio gardé, mots manquants.",
+ "Nothing written in this note.": "Rien d'écrit dans cette note.",
+ "Read aloud": "Lire à voix haute",
+ "Correct the note": "Corriger la note",
+ "Nothing matches ": "Rien ne correspond à ",
+ "Nothing kept yet.": "Rien de gardé pour l'instant.",
+ "That audio cannot be read back.": "Cet audio ne peut pas être relu.",
+ "Here is what you said.": "Voici ce que tu as dit.",
+ "There are no words to read back yet.": "Il n'y a pas encore de mots à relire.",
+ "The core answered without audio.": "Le cœur a répondu sans audio.",
+ "Reading it back.": "Je le relis.",
+ "Write the words first.": "Écris d'abord les mots.",
+ "Forget this note and its audio?": "Oublier cette note et son audio ?",
+ "Forgotten.": "Oublié.",
+ "Reminder #": "Rappel n°",
+ "Nothing set to come back.": "Rien ne doit revenir.",
+ "Say what should come back.": "Dis ce qui doit revenir.",
+ "Pick a time first.": "Choisis d'abord une heure.",
+ "That time cannot be read.": "Cette heure est illisible.",
+ "The reminder was not kept.": "Le rappel n'a pas été gardé.",
+ "It comes back on ": "Ça revient le ",
+ "It comes back in an hour.": "Ça revient dans une heure.",
+ "Done.": "Fait.",
+ "End the live talk": "Terminer la conversation",
+ "Live, through Gemini Live (cloud).": "En direct, par Gemini Live (cloud).",
+ "Live, on your own servers.": "En direct, sur tes propres serveurs.",
+ "The live voice did not start.": "La voix en direct n'a pas démarré.",
+ "Nothing planned yet. The assistant can plan the day with you.": "Rien de prévu pour l'instant. L'assistant peut planifier la journée avec toi.",
+ "Tomorrow 9:00": "Demain 9 h",
+ "Placed again, ": "Replacé, ",
+ "Plan of the day": "Plan du jour",
+ "Three priorities at most, each with its smallest first step, its duration and its cue. You agree before anything is written.": "Trois priorités au plus, chacune avec son plus petit premier pas, sa durée et son déclencheur. Tu valides avant que rien ne soit écrit.",
+ "Sort my notes": "Trier mes notes",
+ "Each note to its list, its reminder or its specialist.": "Chaque note vers sa liste, son rappel ou son spécialiste.",
+ "Shopping & pantry": "Courses et garde-manger",
+ "What expires, what is missing, the list by aisle, meal ideas.": "Ce qui périme, ce qui manque, la liste par rayon, des idées repas.",
+ "Weekly review": "Bilan de la semaine",
+ "What went well, one pattern, one thing for next week. Private.": "Ce qui a bien marché, un constat, une chose pour la semaine prochaine. Privé.",
+ "Sort documents": "Ranger des documents",
+ "A name and a place for each document; nothing moves until you approve.": "Un nom et une place pour chaque document ; rien ne bouge sans ton accord.",
+ "A question searched on your SearXNG, with its sources, kept as a note.": "Une question cherchée sur ton SearXNG, avec ses sources, gardée en note.",
+ "A plan with acceptance criteria; once you agree, a coder works on it in an Inari thread.": "Un plan avec des critères d'acceptation ; une fois validé, un codeur s'y met dans un fil Inari.",
+ "What to build": "Ce qu'il faut construire",
+ "Coder harness (empty: the default)": "Harnais codeur (vide : celui par défaut)",
+ "Soon past their date: ": "Bientôt périmé : ",
+ "Meal ideas": "Idées repas",
+ "Empty for now: add the first item.": "Vide pour l'instant : ajoute le premier élément.",
+ "Done. One less.": "Fait. Un de moins.",
+ "All done here.": "Tout est fait ici.",
+ "Open the thread in Inari": "Ouvrir le fil dans Inari",
+ "No assistant is working. Start one in Assistants.": "Aucun assistant ne travaille. Lance-en un dans Assistants.",
+ "Listening — tap anywhere to keep": "J'écoute — touche n'importe où pour garder",
+ "You are at ": "Tu es à ",
+ "Reminder: ": "Rappel : ",
+ " did not happen. Place it again?": " n'a pas eu lieu. On le replace ?",
+ " newest notes.": " notes les plus récentes.",
+ "The ": "Les ",
+ " note(s) for ": " note(s) pour ",
+ ": started. Follow it in Running.": " : lancé. Suis-le dans En cours.",
+ " to go.": " à faire.",
+ "until ": "jusqu'au ",
+ "anywhere": "partout",
+ "waits for you": "t'attend",
+ "Research": "Recherche",
+ "Development": "Développement",
+ "Folder": "Dossier",
+ "Question": "Question",
+ "fast": "rapide",
+ "standard": "standard",
+ "expert": "expert",
+ "local": "local",
+ "your expert tier": "ton niveau expert",
+ "an Inari thread": "un fil Inari",
+ "now": "maintenant",
+ "in ": "dans ",
+ " ago": "",
+ "ago ": "il y a ",
+ ". I will place ": ". Je placerai ",
+ " when the map answers.": " quand la carte répondra.",
+ ". I could not find ": ". Je n'ai pas trouvé ",
+ ", so no place reminder.": ", donc pas de rappel de lieu.",
+ ". Several places are called ": ". Plusieurs lieux s'appellent ",
+ ": set it by hand.": " : règle-le à la main.",
+ ". It comes back ": ". Ça revient ",
+ ". It comes back at ": ". Ça revient à ",
+ "that place": "ce lieu",
+ "the place": "le lieu",
+ "rang": "a sonné",
+ "within ": "dans un rayon de ",
+ "a place": "un lieu"
+};
+function T(s) {
+  return FR_ON && Object.prototype.hasOwnProperty.call(FR, s) ? FR[s] : s;
+}
+function translatePage(root) {
+  if (!FR_ON) return;
+  document.documentElement.lang = "fr";
+  const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+    const s = n.nodeValue.trim();
+    if (s && Object.prototype.hasOwnProperty.call(FR, s)) n.nodeValue = n.nodeValue.replace(s, FR[s]);
+  }
+  for (const el of root.querySelectorAll("[placeholder],[aria-label],[title]")) {
+    for (const a of ["placeholder", "aria-label", "title"]) {
+      const v = el.getAttribute(a);
+      if (v && Object.prototype.hasOwnProperty.call(FR, v)) el.setAttribute(a, FR[v]);
+    }
+  }
+}
+translatePage(document.body);
+
 "use strict";
 /* Kitsune page: the voice notebook, driven by /api/kitsune on this core. */
 const $ = (id) => document.getElementById(id);
@@ -35,19 +262,19 @@ function showLogin(why) {
 
 async function signIn(secret) {
   const r = await fetch("/api/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ secret }) }).catch(() => null);
-  if (!r) return { ok: false, why: "The core cannot be reached. Check the connection and try again." };
-  if (r.status === 429) { const d = await r.json().catch(() => ({})); return { ok: false, why: "Too many attempts. Try again in " + (d.retry_after || 60) + " s." }; }
-  return r.ok ? { ok: true } : { ok: false, why: "This token or pass is not known by this core." };
+  if (!r) return { ok: false, why: T("The core cannot be reached. Check the connection and try again.") };
+  if (r.status === 429) { const d = await r.json().catch(() => ({})); return { ok: false, why: T("Too many attempts. Try again in ") + (d.retry_after || 60) + " s." }; }
+  return r.ok ? { ok: true } : { ok: false, why: T("This token or pass is not known by this core.") };
 }
 
 async function api(path, body) {
   const r = await fetch(path, body === undefined
     ? { headers: { Accept: "application/json" } }
     : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).catch(() => null);
-  if (!r) { toast("The core cannot be reached."); return { error: "offline" }; }
+  if (!r) { toast(T("The core cannot be reached.")); return { error: "offline" }; }
   if (r.status === 401) { showLogin(""); return { error: "unauthorized" }; }
   const data = await r.json().catch(() => ({}));
-  if (!r.ok) { toast(data.error || "The core refused this request."); return Object.assign({ error: data.error || "http " + r.status }, data); }
+  if (!r.ok) { toast(data.error || T("The core refused this request.")); return Object.assign({ error: data.error || "http " + r.status }, data); }
   return data;
 }
 
@@ -137,7 +364,7 @@ function orbFrame(t) {
 
 function chip(el, ready, label) {
   el.className = "state " + (ready ? "ok live" : "off");
-  el.textContent = label + (ready ? " ready" : " off");
+  el.textContent = label + (ready ? T(" ready") : T(" off"));
 }
 
 function text(el, value) {
@@ -206,10 +433,10 @@ async function setSave() {
   s.voice.api_secret = $("kSetLiveSecret").value.trim();
   s.voice.mode = $("kSetLiveMode").value;
   s.voice.model = $("kSetLiveModel").value.trim();
-  $("kSetState").textContent = "Saving…";
+  $("kSetState").textContent = T("Saving…");
   const d = await api("/api/kitsune", { action: "set_settings", settings: s });
   if (!d || d.error) {
-    $("kSetState").textContent = d && d.error ? "The core refused it: " + d.error : "The core did not answer.";
+    $("kSetState").textContent = d && d.error ? T("The core refused it: ") + d.error : T("The core did not answer.");
     return;
   }
   await load();
@@ -219,8 +446,8 @@ async function setSave() {
   if (s.slm.url) on.push("understanding");
   if (s.embed.url) on.push("meaning");
   if (s.geocoder.url) on.push("places");
-  $("kSetState").textContent = on.length ? "Saved. " + on.join(", ") + " on." : "Saved. No server set.";
-  say("Settings kept.");
+  $("kSetState").textContent = on.length ? T("Saved. ") + on.join(", ") + " on." : "Saved. No server set.";
+  say(T("Settings kept."));
 }
 
 $("kSet").addEventListener("submit", (ev) => {
@@ -231,7 +458,7 @@ $("kSet").addEventListener("submit", (ev) => {
 async function load() {
   const d = await api("/api/kitsune");
   if (d.error) {
-    if (d.error !== "unauthorized" && d.error !== "offline") say("This core holds no Kitsune yet.");
+    if (d.error !== "unauthorized" && d.error !== "offline") say(T("This core holds no Kitsune yet."));
     return;
   }
   state.settings = d.settings || {};
@@ -243,9 +470,9 @@ async function load() {
   render();
   setFill();
   const missing = [];
-  if (!state.asrReady) missing.push("speech to text");
-  if (!state.ttsReady) missing.push("text to speech");
-  say(missing.length ? "Local " + missing.join(" and ") + " not set yet." : "Ready. Notes: " + state.notes + ".");
+  if (!state.asrReady) missing.push(T("speech to text"));
+  if (!state.ttsReady) missing.push(T("text to speech"));
+  say(missing.length ? T("Local ") + missing.join(T(" and ")) + T(" not set yet.") : T("Ready. Notes: ") + state.notes + ".");
   memLoad();
   remFillWhen();
   remLoad();
@@ -269,16 +496,16 @@ function recMime() {
 
 function micError(e) {
   const n = e && e.name;
-  if (n === "NotAllowedError" || n === "SecurityError") return "The microphone is blocked. Allow it for this page, then try again.";
-  if (n === "NotFoundError" || n === "OverconstrainedError") return "No microphone answers on this machine.";
-  if (n === "NotReadableError") return "Another program holds the microphone.";
-  return "The microphone did not open: " + ((e && e.message) || "unknown reason") + ".";
+  if (n === "NotAllowedError" || n === "SecurityError") return T("The microphone is blocked. Allow it for this page, then try again.");
+  if (n === "NotFoundError" || n === "OverconstrainedError") return T("No microphone answers on this machine.");
+  if (n === "NotReadableError") return T("Another program holds the microphone.");
+  return T("The microphone did not open: ") + ((e && e.message) || "unknown reason") + ".";
 }
 
 async function startTalk() {
   if (rec.media || rec.busy) return;
   const mime = recMime();
-  if (!mime) return say("This browser cannot record audio. Type the note instead.");
+  if (!mime) return say(T("This browser cannot record audio. Type the note instead."));
   let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({
@@ -294,7 +521,7 @@ async function startTalk() {
   rec.t0 = performance.now();
   activity("listening");
   $("kTalk").classList.add("live");
-  $("kTalkLabel").textContent = "Listening — release to keep";
+  $("kTalkLabel").textContent = T("Listening — release to keep");
   $("kTime").textContent = "0:00";
   rec.tick = setInterval(() => { $("kTime").textContent = clock(performance.now() - rec.t0); }, 200);
 }
@@ -305,7 +532,7 @@ async function stopTalk() {
   clearInterval(rec.tick);
   rec.media = null;
   $("kTalk").classList.remove("live");
-  $("kTalkLabel").textContent = "Hold to talk";
+  $("kTalkLabel").textContent = T("Hold to talk");
   const stopped = new Promise((res) => m.addEventListener("stop", res, { once: true }));
   if (m.state !== "inactive") m.stop();
   if (rec.stream) rec.stream.getTracks().forEach((t) => t.stop());
@@ -315,19 +542,19 @@ async function stopTalk() {
   rec.chunks = [];
   const ms = performance.now() - rec.t0;
   $("kTime").textContent = clock(ms);
-  if (ms < 400) { activity("idle"); return say("Too short. Hold the button while you speak."); }
+  if (ms < 400) { activity("idle"); return say(T("Too short. Hold the button while you speak.")); }
   rec.busy = true;
   $("kTalk").disabled = true;
   activity("working");
-  say("Writing it down on this core…");
+  say(T("Writing it down on this core…"));
   try {
     const wav = await toWav(blob);
     const d = await api("/api/kitsune", { action: "ingest_voice", audio: b64(wav), place: $("kPlace").value.trim() });
     if (d.inaudible) say(d.error);
-    else if (d.error) say("The capture was not kept.");
+    else if (d.error) say(T("The capture was not kept."));
     else await keep(d.id);
   } catch (e) {
-    toast("The audio could not be read: " + ((e && e.message) || e));
+    toast(T("The audio could not be read: ") + ((e && e.message) || e));
   } finally {
     rec.busy = false;
     $("kTalk").disabled = false;
@@ -388,12 +615,12 @@ function b64(bytes) {
 
 // what happens next to a kept note, said in one short sentence
 function comesBack(n) {
-  const where = n.location_raw || "that place";
-  if (n.status === "pending_geocode") return ". I will place " + where + " when the map answers.";
-  if (n.status === "failed_geocode") return ". I could not find " + where + ", so no place reminder.";
-  if (n.status === "ambiguous_geocode") return ". Several places are called " + where + ": set it by hand.";
-  if (n.trigger_type === "time") return ". It comes back " + stamp(n.due_date) + ".";
-  if (n.trigger_type === "geofence") return ". It comes back at " + where + ".";
+  const where = n.location_raw || T("that place");
+  if (n.status === "pending_geocode") return T(". I will place ") + where + T(" when the map answers.");
+  if (n.status === "failed_geocode") return T(". I could not find ") + where + T(", so no place reminder.");
+  if (n.status === "ambiguous_geocode") return T(". Several places are called ") + where + T(": set it by hand.");
+  if (n.trigger_type === "time") return T(". It comes back ") + stamp(n.due_date) + ".";
+  if (n.trigger_type === "geofence") return T(". It comes back at ") + where + ".";
   return ".";
 }
 
@@ -404,7 +631,7 @@ async function keep(id) {
   await load();
   if (n.status === "pending_transcription") return showReview(n);
   hideReview();
-  say(words(n) ? "Kept: " + words(n) + comesBack(n) : "Kept, with the audio.");
+  say(words(n) ? T("Kept: ") + words(n) + comesBack(n) : T("Kept, with the audio."));
 }
 
 function showReview(n) {
@@ -412,7 +639,7 @@ function showReview(n) {
   $("kReview").hidden = false;
   $("kReviewText").value = words(n);
   $("kReviewText").focus();
-  say("I kept the audio but could not write it out. Type what you said.");
+  say(T("I kept the audio but could not write it out. Type what you said."));
 }
 
 function hideReview() {
@@ -423,14 +650,14 @@ function hideReview() {
 async function saveReview() {
   const id = rec.reviewId, words = $("kReviewText").value.trim();
   if (!id) return;
-  if (!words) { toast("Write what you said first."); $("kReviewText").focus(); return; }
+  if (!words) { toast(T("Write what you said first.")); $("kReviewText").focus(); return; }
   activity("working");
   const d = await api("/api/kitsune", { action: "correct_note", id, text: words });
   activity("idle");
   if (d.error) return;
   hideReview();
   await load();
-  say("Corrected: " + words);
+  say(T("Corrected: ") + words);
 }
 
 async function keepTyped() {
@@ -476,7 +703,7 @@ function noteLi(n) {
   li.dataset.id = String(n.id);
   const said = document.createElement("p");
   said.className = "knote-text" + (words(n) ? "" : " waiting");
-  said.textContent = words(n) || (n.status === "pending_transcription" ? "Audio kept, words missing." : "Nothing written in this note.");
+  said.textContent = words(n) || (n.status === "pending_transcription" ? T("Audio kept, words missing.") : T("Nothing written in this note."));
   li.appendChild(said);
   const meta = document.createElement("p");
   meta.className = "kmeta";
@@ -486,7 +713,7 @@ function noteLi(n) {
   li.appendChild(meta);
   const acts = document.createElement("div");
   acts.className = "knote-actions";
-  acts.append(actButton("read", "Read aloud"), actButton("fix", "Correct"), actButton("drop", "Delete", "btn small danger"));
+  acts.append(actButton("read", T("Read aloud")), actButton("fix", "Correct"), actButton("drop", "Delete", "btn small danger"));
   li.appendChild(acts);
   const fix = document.createElement("div");
   fix.className = "knote-fix";
@@ -494,7 +721,7 @@ function noteLi(n) {
   const ta = document.createElement("textarea");
   ta.className = "kfield";
   ta.value = words(n);
-  ta.setAttribute("aria-label", "Correct the note");
+  ta.setAttribute("aria-label", T("Correct the note"));
   fix.appendChild(ta);
   fix.append(actButton("save", "Save", "btn small go"), actButton("cancel", "Cancel"));
   li.appendChild(fix);
@@ -520,8 +747,8 @@ async function memLoad() {
   const notes = q ? (d.hits || []).map((h) => h.note) : (d.notes || []);
   $("kFindClear").hidden = !q;
   renderNotes(notes);
-  if (!notes.length) return memState(q ? "Nothing matches " + q + "." : "Nothing kept yet.");
-  memState(q ? notes.length + " note(s) for " + q + "." : "The " + notes.length + " newest notes.");
+  if (!notes.length) return memState(q ? T("Nothing matches ") + q + "." : "Nothing kept yet.");
+  memState(q ? notes.length + T(" note(s) for ") + q + "." : "The " + notes.length + " newest notes.");
 }
 
 function playAudio(src, revoke) {
@@ -541,40 +768,40 @@ async function readNote(id) {
     activity("working");
     const r = await fetch("/api/kitsune/audio?path=" + encodeURIComponent(kept.path)).catch(() => null);
     activity("idle");
-    if (!r || !r.ok) { toast("That audio cannot be read back."); return; }
+    if (!r || !r.ok) { toast(T("That audio cannot be read back.")); return; }
     playAudio(URL.createObjectURL(await r.blob()), true);
-    return say("Here is what you said.");
+    return say(T("Here is what you said."));
   }
-  if (!words(n)) { toast("There are no words to read back yet."); return; }
+  if (!words(n)) { toast(T("There are no words to read back yet.")); return; }
   activity("working");
   const s = await api("/api/kitsune", { action: "speak", text: words(n), note_id: n.id });
   activity("idle");
   if (s.error) return;
-  if (!s.audio) { toast("The core answered without audio."); return; }
+  if (!s.audio) { toast(T("The core answered without audio.")); return; }
   const bytes = Uint8Array.from(atob(s.audio), (c) => c.charCodeAt(0));
   playAudio(URL.createObjectURL(new Blob([bytes], { type: s.mime || "audio/wav" })), true);
-  say("Reading it back.");
+  say(T("Reading it back."));
 }
 
 async function saveFix(li) {
   const words = li.querySelector(".knote-fix .kfield").value.trim();
-  if (!words) { toast("Write the words first."); return; }
+  if (!words) { toast(T("Write the words first.")); return; }
   activity("working");
   const d = await api("/api/kitsune", { action: "correct_note", id: Number(li.dataset.id), text: words });
   activity("idle");
   if (d.error) return;
   await load();
-  say("Corrected: " + words);
+  say(T("Corrected: ") + words);
 }
 
 async function dropNote(li) {
-  if (!confirm("Forget this note and its audio?")) return;
+  if (!confirm(T("Forget this note and its audio?"))) return;
   activity("working");
   const d = await api("/api/kitsune", { action: "delete_note", id: Number(li.dataset.id) });
   activity("idle");
   if (d.error) return;
   await load();
-  say("Forgotten.");
+  say(T("Forgotten."));
 }
 
 $("kNotesList").addEventListener("click", (ev) => {
@@ -624,20 +851,20 @@ function remLi(n) {
   body.className = "ktri-body";
   const p = document.createElement("p");
   p.className = "ktri-text";
-  p.textContent = words(n) || "Reminder #" + n.id;
+  p.textContent = words(n) || T("Reminder #") + n.id;
   const meta = document.createElement("p");
   meta.className = "kmeta";
   const bits = [];
   if (n.trigger_type === "time") {
     bits.push(stamp(n.due_date), rel(n.due_date));
-    if (n.notified_at) bits.push("rang");
+    if (n.notified_at) bits.push(T("rang"));
   } else {
-    bits.push((n.location_raw || "a place") + ", within " + n.radius_meters + " m");
+    bits.push((n.location_raw || T("a place")) + ", within " + n.radius_meters + " m");
   }
   meta.textContent = bits.filter(Boolean).join(" \u00b7 ");
   body.append(p, meta);
   li.append(body);
-  if (n.trigger_type === "time") li.append(actButton("later", "In 1 h", "btn small"));
+  if (n.trigger_type === "time") li.append(actButton("later", T("In 1 h"), "btn small"));
   li.append(actButton("done", "Done", "btn small go"));
   return li;
 }
@@ -654,29 +881,29 @@ async function remLoad() {
   const all = d.reminders || [];
   phoneSync(all);
   for (const n of all) list.appendChild(remLi(n));
-  remState(!all.length ? "Nothing set to come back." : all.length + " still to come.");
+  remState(!all.length ? T("Nothing set to come back.") : all.length + T(" still to come."));
 }
 
 async function keepReminder(ev) {
   ev.preventDefault();
   const what = $("kRemWhat").value.trim();
   const when = $("kRemWhen").value;
-  if (!what) { toast("Say what should come back."); return; }
-  if (!when) { toast("Pick a time first."); return; }
+  if (!what) { toast(T("Say what should come back.")); return; }
+  if (!when) { toast(T("Pick a time first.")); return; }
   const at = Math.round(new Date(when).getTime() / 1000);
-  if (!Number.isFinite(at)) { toast("That time cannot be read."); return; }
+  if (!Number.isFinite(at)) { toast(T("That time cannot be read.")); return; }
   activity("working");
   const kept = await api("/api/kitsune", { action: "capture_text", text: what, tags: ["reminder"] });
   if (kept.error) { activity("idle"); return; }
   const made = await api("/api/kitsune", { action: "set_reminder", id: kept.id,
     reminder: { trigger_type: "time", due_date: isoUtc(at) } });
   activity("idle");
-  if (made.error || !made.ok) { toast("The reminder was not kept."); return; }
+  if (made.error || !made.ok) { toast(T("The reminder was not kept.")); return; }
   $("kRemWhat").value = "";
   $("kRemWhen").value = "";
   remFillWhen();
   await load();
-  say("It comes back on " + whenText(at) + ".");
+  say(T("It comes back on ") + whenText(at) + ".");
 }
 
 async function remAct(li, act) {
@@ -688,7 +915,7 @@ async function remAct(li, act) {
   activity("idle");
   if (d.error) return;
   await load();
-  say(act === "later" ? "It comes back in an hour." : "Done.");
+  say(act === "later" ? T("It comes back in an hour.") : T("Done."));
 }
 
 $("kTrigList").addEventListener("click", (ev) => {
@@ -717,9 +944,9 @@ function rel(iso) {
   const at = Date.parse(iso);
   if (!at) return "";
   const m = Math.round((at - Date.now()) / 60000);
-  if (Math.abs(m) < 1) return "now";
+  if (Math.abs(m) < 1) return T("now");
   const span = Math.abs(m) < 60 ? Math.abs(m) + " min" : Math.abs(m) < 1440 ? Math.round(Math.abs(m) / 60) + " h" : Math.round(Math.abs(m) / 1440) + " d";
-  return m > 0 ? "in " + span : span + " ago";
+  return m > 0 ? T("in ") + span : FR_ON ? "il y a " + span : span + " ago";
 }
 
 // a local time today or tomorrow (hh:mm), as the brain's ISO 8601 UTC
@@ -773,18 +1000,18 @@ async function liveToggle() {
     room.on(LK.RoomEvent.Disconnected, () => {
       live.room = null;
       document.querySelectorAll("audio[data-live]").forEach((a) => a.remove());
-      btn.textContent = "Talk live";
+      btn.textContent = T("Talk live");
       $("kLiveState").textContent = "";
       activity("idle");
     });
     await room.connect(d.url, d.token);
     await room.localParticipant.setMicrophoneEnabled(true);
     live.room = room;
-    btn.textContent = "End the live talk";
-    $("kLiveState").textContent = d.mode === "gemini" ? "Live, through Gemini Live (cloud)." : "Live, on your own servers.";
+    btn.textContent = T("End the live talk");
+    $("kLiveState").textContent = d.mode === "gemini" ? T("Live, through Gemini Live (cloud).") : T("Live, on your own servers.");
     activity("listening");
   } catch (e) {
-    toast((e && e.message) || "The live voice did not start.");
+    toast((e && e.message) || T("The live voice did not start."));
   } finally {
     btn.disabled = false;
   }
@@ -828,7 +1055,7 @@ async function todayLoad() {
       box.append(li);
     }
   }
-  $("kTodayState").textContent = box.children.length ? "" : "Nothing planned yet. The assistant can plan the day with you.";
+  $("kTodayState").textContent = box.children.length ? "" : T("Nothing planned yet. The assistant can plan the day with you.");
   const o = await api("/api/kitsune", { action: "overdue" });
   const host = $("kOverdue");
   host.textContent = "";
@@ -836,9 +1063,9 @@ async function todayLoad() {
     const row = document.createElement("div");
     row.className = "kgentle";
     const s = document.createElement("span");
-    s.textContent = "“" + it.text + "” did not happen. Place it again?";
-    const later = actButton("later", "In 1 h");
-    const tomorrow = actButton("tomorrow", "Tomorrow 9:00");
+    s.textContent = "“" + it.text + "”" + T(" did not happen. Place it again?");
+    const later = actButton("later", T("In 1 h"));
+    const tomorrow = actButton("tomorrow", T("Tomorrow 9:00"));
     later.onclick = () => moveItem(it.id, isoUtc(Math.round(Date.now() / 1000) + 3600));
     tomorrow.onclick = () => moveItem(it.id, localAt(1, 9));
     row.append(s, later, tomorrow);
@@ -849,19 +1076,19 @@ async function todayLoad() {
 async function moveItem(id, due) {
   const d = await api("/api/kitsune", { action: "move_item", id, due_date: due });
   if (d.error) return;
-  say("Placed again, " + rel(due) + ".");
+  say(T("Placed again, ") + rel(due) + ".");
   todayLoad();
 }
 
 /* Assistants: one per job, each on its tier, started in a thread of its own. */
 const ASSISTANTS = [
-  { wf: "daily-plan", name: "Plan of the day", what: "Three priorities at most, each with its smallest first step, its duration and its cue. You agree before anything is written.", tier: "standard", where: "local" },
-  { wf: "kitsune-inbox", name: "Sort my notes", what: "Each note to its list, its reminder or its specialist.", tier: "fast", where: "local" },
-  { wf: "groceries", name: "Shopping & pantry", what: "What expires, what is missing, the list by aisle, meal ideas.", tier: "fast", where: "local" },
-  { wf: "weekly-review", name: "Weekly review", what: "What went well, one pattern, one thing for next week. Private.", tier: "standard", where: "local" },
-  { wf: "doc-sort", name: "Sort documents", what: "A name and a place for each document; nothing moves until you approve.", tier: "standard", where: "local", params: [{ id: "folder", label: "Folder" }] },
-  { wf: "research-brief", name: "Research", what: "A question searched on your SearXNG, with its sources, kept as a note.", tier: "expert", where: "your expert tier", params: [{ id: "question", label: "Question" }] },
-  { wf: "dev-handoff", name: "Development", what: "A plan with acceptance criteria; once you agree, a coder works on it in an Inari thread.", tier: "expert", where: "an Inari thread", params: [{ id: "request", label: "What to build" }, { id: "harness", label: "Coder harness (empty: the default)", optional: true }] },
+  { wf: "daily-plan", name: T("Plan of the day"), what: T("Three priorities at most, each with its smallest first step, its duration and its cue. You agree before anything is written."), tier: "standard", where: "local" },
+  { wf: "kitsune-inbox", name: T("Sort my notes"), what: T("Each note to its list, its reminder or its specialist."), tier: "fast", where: "local" },
+  { wf: "groceries", name: T("Shopping & pantry"), what: T("What expires, what is missing, the list by aisle, meal ideas."), tier: "fast", where: "local" },
+  { wf: "weekly-review", name: T("Weekly review"), what: T("What went well, one pattern, one thing for next week. Private."), tier: "standard", where: "local" },
+  { wf: "doc-sort", name: T("Sort documents"), what: T("A name and a place for each document; nothing moves until you approve."), tier: "standard", where: "local", params: [{ id: "folder", label: "Folder" }] },
+  { wf: "research-brief", name: "Research", what: T("A question searched on your SearXNG, with its sources, kept as a note."), tier: "expert", where: T("your expert tier"), params: [{ id: "question", label: "Question" }] },
+  { wf: "dev-handoff", name: "Development", what: T("A plan with acceptance criteria; once you agree, a coder works on it in an Inari thread."), tier: "expert", where: T("an Inari thread"), params: [{ id: "request", label: T("What to build") }, { id: "harness", label: T("Coder harness (empty: the default)"), optional: true }] },
 ];
 const assist = { pick: null };
 
@@ -872,10 +1099,10 @@ function assistDraw() {
     const b = document.createElement("button");
     b.type = "button";
     b.className = "kassistant";
-    const n = document.createElement("b"); n.textContent = a.name;
+    const n = document.createElement("b"); n.textContent = T(a.name);
     const w = document.createElement("span"); w.textContent = a.what;
-    const tier = document.createElement("em"); tier.className = "ktier"; tier.textContent = a.tier;
-    const where = document.createElement("em"); where.className = "ktier where"; where.textContent = a.where;
+    const tier = document.createElement("em"); tier.className = "ktier"; tier.textContent = T(a.tier);
+    const where = document.createElement("em"); where.className = "ktier where"; where.textContent = T(a.where);
     b.append(n, w, tier, where);
     b.onclick = () => assistOpen(a);
     grid.append(b);
@@ -886,11 +1113,11 @@ function assistOpen(a) {
   assist.pick = a;
   if (!a.params) return assistStart({});
   $("kAssistForm").hidden = false;
-  $("kAssistTitle").textContent = a.name;
+  $("kAssistTitle").textContent = T(a.name);
   const host = $("kAssistParams");
   host.textContent = "";
   for (const p of a.params) {
-    const lab = document.createElement("label"); lab.className = "klab"; lab.textContent = p.label; lab.htmlFor = "kp-" + p.id;
+    const lab = document.createElement("label"); lab.className = "klab"; lab.textContent = T(p.label); lab.htmlFor = "kp-" + p.id;
     const inp = document.createElement("input"); inp.className = "kfield"; inp.id = "kp-" + p.id; inp.dataset.param = p.id; inp.required = !p.optional;
     host.append(lab, inp);
   }
@@ -904,7 +1131,7 @@ async function assistStart(params) {
   activity("idle");
   if (d.error) return;
   $("kAssistForm").hidden = true;
-  say(a.name + ": started. Follow it in Running.");
+  say(T(a.name) + T(": started. Follow it in Running."));
   showView("runs");
 }
 
@@ -937,8 +1164,8 @@ async function listsLoad() {
       const box = document.createElement("div");
       box.className = "kgentle";
       const s = document.createElement("span");
-      s.textContent = "Soon past their date: " + e.items.map((i) => i.text + " (" + i.expires_on + ")").join(", ");
-      const meals = actButton("meals", "Meal ideas", "btn small go");
+      s.textContent = T("Soon past their date: ") + e.items.map((i) => i.text + " (" + i.expires_on + ")").join(", ");
+      const meals = actButton("meals", T("Meal ideas"), "btn small go");
       meals.onclick = () => { assist.pick = ASSISTANTS.find((a) => a.wf === "groceries"); assistStart({}); };
       box.append(s, meals);
       $("kExpiring").append(box);
@@ -950,26 +1177,26 @@ async function listsLoad() {
 async function itemsLoad() {
   const ul = $("kItems");
   ul.textContent = "";
-  if (!lists.name || $("kListPick").selectedOptions[0]?.text.endsWith("(new)")) { $("kListState").textContent = "Empty for now: add the first item."; return; }
+  if (!lists.name || $("kListPick").selectedOptions[0]?.text.endsWith("(new)")) { $("kListState").textContent = T("Empty for now: add the first item."); return; }
   const d = await api("/api/kitsune", { action: "items", list: lists.name, with_done: true });
   let aisle = null;
   for (const it of d.items || []) {
     if (lists.kind !== "todo" && !it.done && it.aisle !== aisle) {
       aisle = it.aisle;
-      const h = document.createElement("li"); h.className = "kaisle-h"; h.textContent = aisle || "anywhere"; ul.append(h);
+      const h = document.createElement("li"); h.className = "kaisle-h"; h.textContent = aisle || T("anywhere"); ul.append(h);
     }
     const li = document.createElement("li");
     li.className = "kitem" + (it.done ? " done" : "");
     const box = document.createElement("input"); box.type = "checkbox"; box.checked = it.done; box.id = "ki-" + it.id;
-    box.onchange = async () => { await api("/api/kitsune", { action: "check", ids: [it.id], done: box.checked }); itemsLoad(); if (box.checked) say("Done. One less."); };
+    box.onchange = async () => { await api("/api/kitsune", { action: "check", ids: [it.id], done: box.checked }); itemsLoad(); if (box.checked) say(T("Done. One less.")); };
     const lab = document.createElement("label"); lab.htmlFor = box.id; lab.textContent = it.text;
     li.append(box, lab);
-    const meta = [it.qty != null ? it.qty + (it.unit ? " " + it.unit : "") : "", it.due_date ? rel(it.due_date) : "", it.expires_on ? "until " + it.expires_on : ""].filter(Boolean).join(" · ");
+    const meta = [it.qty != null ? it.qty + (it.unit ? " " + it.unit : "") : "", it.due_date ? rel(it.due_date) : "", it.expires_on ? T("until ") + it.expires_on : ""].filter(Boolean).join(" · ");
     if (meta) { const m = document.createElement("span"); m.className = "kmeta"; m.textContent = meta; li.append(m); }
     ul.append(li);
   }
   const open = (d.items || []).filter((i) => !i.done).length;
-  $("kListState").textContent = open ? open + " to go." : "All done here.";
+  $("kListState").textContent = open ? open + T(" to go.") : T("All done here.");
 }
 
 $("kListKinds").addEventListener("click", (ev) => {
@@ -1001,7 +1228,7 @@ async function runsLoad() {
     const title = document.createElement("p"); title.className = "knote-text"; title.textContent = r.title || r.id;
     const wf = r.workflow || {};
     const meta = document.createElement("p"); meta.className = "kmeta";
-    meta.textContent = [wf.status === "waiting" ? "waits for you" : wf.status, wf.step, r.phase].filter(Boolean).join(" · ");
+    meta.textContent = [wf.status === "waiting" ? T("waits for you") : wf.status, wf.step, r.phase].filter(Boolean).join(" · ");
     li.append(title, meta);
     if (r.said) { const s = document.createElement("p"); s.className = "krun-said"; s.textContent = String(r.said).slice(0, 1200); li.append(s); }
     if (wf.status === "waiting") {
@@ -1013,11 +1240,11 @@ async function runsLoad() {
       }
       li.append(row);
     }
-    const open = document.createElement("a"); open.href = "/app"; open.textContent = "Open the thread in Inari"; open.className = "kmeta";
+    const open = document.createElement("a"); open.href = "/app"; open.textContent = T("Open the thread in Inari"); open.className = "kmeta";
     li.append(open);
     ul.append(li);
   }
-  $("kRunsState").textContent = (d.runs || []).length ? "" : "No assistant is working. Start one in Assistants.";
+  $("kRunsState").textContent = (d.runs || []).length ? "" : T("No assistant is working. Start one in Assistants.");
 }
 
 /* My week: kept and done, privately, and the weekly review. */
@@ -1045,7 +1272,7 @@ function phoneSync(reminders) {
   } catch (e) {}
 }
 
-// "Done" and "In 1 h" pressed on the phone's notifications while the page was closed
+// "Done" and T("In 1 h") pressed on the phone's notifications while the page was closed
 async function phoneActions() {
   const p = phone();
   if (!p) return;
@@ -1062,7 +1289,7 @@ async function phoneActions() {
 // the widget's one tap (and #talk): Kitsune listens now, a tap anywhere keeps the note
 window.inariTalk = async function () {
   await startTalk();
-  if (rec.media) $("kTalkLabel").textContent = "Listening — tap anywhere to keep";
+  if (rec.media) $("kTalkLabel").textContent = T("Listening — tap anywhere to keep");
 };
 
 /* Rings: a reminder that comes back stays on screen until it is done or put off. */
@@ -1072,15 +1299,15 @@ function ringShow() {
   const n = ring.queue[0];
   $("kRing").hidden = !n;
   if (!n) return;
-  $("kRingText").textContent = words(n) || "Reminder #" + n.id;
-  $("kRingMore").textContent = n.trigger_type === "geofence" ? "You are at " + (n.location_raw || "the place") + "." : stamp(n.due_date) + " · " + rel(n.due_date);
+  $("kRingText").textContent = words(n) || T("Reminder #") + n.id;
+  $("kRingMore").textContent = n.trigger_type === "geofence" ? T("You are at ") + (n.location_raw || T("the place")) + "." : stamp(n.due_date) + " · " + rel(n.due_date);
 }
 
 function ringHeard(n) {
   if (ring.queue.some((x) => x.id === n.id)) return;
   ring.queue.push(n);
   ringShow();
-  say("Reminder: " + (words(n) || "#" + n.id));
+  say(T("Reminder: ") + (words(n) || "#" + n.id));
   try { if (navigator.vibrate) navigator.vibrate([200, 100, 200]); } catch (e) {}
   try {
     if (window.Notification && Notification.permission === "granted" && document.hidden) new Notification("Kitsune", { body: words(n), tag: "kitsune-" + n.id });
@@ -1107,7 +1334,7 @@ $("kRing").addEventListener("click", async (ev) => {
   ring.queue.shift();
   ringShow();
   await load();
-  say(b.dataset.act === "later" ? "It comes back in an hour." : "Done.");
+  say(b.dataset.act === "later" ? T("It comes back in an hour.") : T("Done."));
 });
 
 // asked once, on a gesture, so a reminder can reach the person when the page is hidden

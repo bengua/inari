@@ -46,7 +46,7 @@
         {
           "when": {
             "type": "step_result",
-            "result": "Hand off"
+            "result": "Hand-off"
           },
           "goto": "handoff"
         },

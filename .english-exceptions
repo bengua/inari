@@ -19,3 +19,5 @@ crates/kitsune/src/lists.rs # French list fixtures in tests (courses, garde-mang
 crates/inari-core/web/vendor/livekit-client.umd.js # LiveKit's minified browser client (Apache-2.0), vendored unchanged: code, not prose
 services/kitsune-voice/kitsune_voice/agent.py # the voice's instructions are French: the owner speaks French with Kitsune
 services/kitsune-voice/tests/test_tools.py # French list fixtures: what the owner says, never the code
+crates/inari-core/web/kitsune.js # the French table of the Kitsune page (FR): a locale, not prose; the page itself is English
+services/kitsune-voice/tests/test_e2e.py # French words the owner says to the voice in the end-to-end test
