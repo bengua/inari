@@ -27,4 +27,6 @@ pip install .
 kitsune-voice dev      # or: kitsune-voice start
 ```
 
-Tests: `python -m unittest discover -s tests`.
+Tests: `python -m unittest discover -s tests`. Against a running core, the end-to-end test drives
+LiveKit Agents' own session in text with a stand-in model and checks that the shopping list in the
+core is filled: `INARI_E2E_URL=http://127.0.0.1:8765 INARI_E2E_TOKEN=… python -m unittest tests.test_e2e`.

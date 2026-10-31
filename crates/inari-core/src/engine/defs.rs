@@ -376,6 +376,27 @@ fn one_line(s: &str) -> String {
 mod tests {
     use super::*;
 
+    /// A branch a step for the person offers is sent back as an id (Launch::problem): a space in
+    /// it made the choice fail silently once (dev-handoff's "Hand off").
+    #[test]
+    fn every_built_in_workflow_offers_choices_the_node_takes() {
+        for raw in BUILTIN_WORKFLOWS {
+            let w: Value = serde_json::from_str(raw).expect("a built-in workflow is JSON");
+            for step in w["steps"].as_array().expect("steps") {
+                for x in step["transitions"].as_array().into_iter().flatten() {
+                    if let Some(r) = x.pointer("/when/result").and_then(Value::as_str) {
+                        assert!(
+                            r.chars()
+                                .all(|c| c.is_ascii_alphanumeric() || "_-.".contains(c)),
+                            "{}: the choice {r:?} is not an id",
+                            w["metadata"]["id"]
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn openfoxs_agents_read_as_they_are() {
         let all = agents(Path::new("/nonexistent"), None);

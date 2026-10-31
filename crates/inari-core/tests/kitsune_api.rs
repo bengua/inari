@@ -853,3 +853,316 @@ async fn the_page_keeps_lists_places_a_task_again_and_counts_the_week() {
     let (_, runs) = k(json!({"action": "runs"})).await;
     assert_eq!(runs["runs"].as_array().unwrap().len(), 0);
 }
+
+/// A model server as the local engine reaches it (OpenAI-compatible, streamed): it plays a script
+/// of answers, one per request, and keeps the requests.
+async fn scripted_model(script: Vec<Value>) -> (u16, Arc<std::sync::Mutex<Vec<Value>>>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let asked: Arc<std::sync::Mutex<Vec<Value>>> = Arc::default();
+    let script = Arc::new(std::sync::Mutex::new(std::collections::VecDeque::from(
+        script,
+    )));
+    let seen = Arc::clone(&asked);
+    tokio::spawn(async move {
+        while let Ok((mut s, _)) = listener.accept().await {
+            let (seen, script) = (Arc::clone(&seen), Arc::clone(&script));
+            tokio::spawn(async move {
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 8192];
+                let (head, body) = loop {
+                    let n = s.read(&mut chunk).await.unwrap_or(0);
+                    if n == 0 {
+                        return;
+                    }
+                    buf.extend_from_slice(&chunk[..n]);
+                    if let Some(i) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                        let head = String::from_utf8_lossy(&buf[..i]).to_lowercase();
+                        let len: usize = head
+                            .lines()
+                            .find_map(|l| {
+                                l.strip_prefix("content-length:")
+                                    .map(|v| v.trim().parse().unwrap_or(0))
+                            })
+                            .unwrap_or(0);
+                        while buf.len() < i + 4 + len {
+                            let n = s.read(&mut chunk).await.unwrap_or(0);
+                            if n == 0 {
+                                break;
+                            }
+                            buf.extend_from_slice(&chunk[..n]);
+                        }
+                        break (head, buf[i + 4..].to_vec());
+                    }
+                };
+                if head
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap_or("")
+                    .ends_with("/models")
+                {
+                    let b = json!({"data": [{"id": "qwen3"}]}).to_string();
+                    let _ = s.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{b}", b.len()).as_bytes()).await;
+                    return;
+                }
+                seen.lock()
+                    .unwrap()
+                    .push(serde_json::from_slice(&body).unwrap_or(Value::Null));
+                let next = script
+                    .lock()
+                    .unwrap()
+                    .pop_front()
+                    .unwrap_or(json!({"text": "ok"}));
+                let events: Vec<Value> = match next.get("call") {
+                    Some(c) => vec![
+                        json!({"choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "id": "c", "type": "function", "function": {"name": c["name"], "arguments": c["args"].to_string()}}]}}]}),
+                        json!({"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]}),
+                    ],
+                    None => vec![
+                        json!({"choices": [{"index": 0, "delta": {"content": next["text"]}}]}),
+                        json!({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}),
+                    ],
+                };
+                let mut out = String::new();
+                for e in events {
+                    out.push_str(&format!("data: {e}\n\n"));
+                }
+                out.push_str("data: [DONE]\n\n");
+                let _ = s.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{out}", out.len()).as_bytes()).await;
+            });
+        }
+    });
+    (port, asked)
+}
+
+/// The whole way an assistant goes, on a real node: the page starts the inbox workflow, the
+/// gateway makes a thread on the core's local engine and launches it, the assistant (a scripted
+/// model) fills the shopping list through the kitsune tool, the brain the page reads holds it, and
+/// the page sees the run in Running.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_assistant_started_from_the_page_works_through_to_the_brain() {
+    let (model_port, asked) = scripted_model(vec![
+        json!({"call": {"name": "kitsune", "args": {"action": "add_items", "list": "Courses", "kind": "shopping", "items": [{"text": "café", "aisle": "3-épicerie"}]}}}),
+        json!({"call": {"name": "step_done", "args": {}}}),
+        json!({"call": {"name": "step_done", "args": {}}}),
+    ])
+    .await;
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path();
+    for (n, v) in [("mesh.key", "m"), ("device.key", "d"), ("token", "owner")] {
+        std::fs::write(d.join(n), v).unwrap();
+    }
+    // the local engine's settings, as the interface would have set them
+    let engine = d.join("home").join("engine").join("local");
+    std::fs::create_dir_all(&engine).unwrap();
+    std::fs::write(
+        engine.join("settings.json"),
+        json!({"providers": [{"id": "gpu", "name": "vLLM", "url": format!("http://127.0.0.1:{model_port}/v1")}],
+               "model": "gpu/qwen3", "mode": "assistant"})
+        .to_string(),
+    )
+    .unwrap();
+    let cfg: NodeConfig = serde_json::from_value(json!({
+        "node_id": "home", "data_dir": d.join("home"), "key_file": d.join("mesh.key"), "device_key_file": d.join("device.key"),
+        "gateway_listen": "127.0.0.1:0", "gateway_token_file": d.join("token"), "heartbeat": 0.1,
+        "harnesses": {"local": {"kind": "local"}},
+    }))
+    .unwrap();
+    let home = Node::start(cfg).await.unwrap();
+    let port = home.gateway_port;
+    let owner = "token=owner";
+
+    // the gateway learns that this core runs the local engine
+    let mut started = Value::Null;
+    for _ in 0..60 {
+        let (st, d) = call(
+            port,
+            owner,
+            "POST",
+            "/api/kitsune",
+            Some(
+                json!({"action": "assist", "workflow": "kitsune-inbox", "title": "Sort my notes"}),
+            ),
+        )
+        .await;
+        if st == 200 {
+            started = d;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    let thread = started["thread"]
+        .as_str()
+        .unwrap_or_else(|| panic!("never started: {started}"))
+        .to_string();
+    assert!(thread.starts_with("kitsune-kitsune-inbox-"));
+
+    // the assistant's work reaches the brain the page reads
+    let mut items = Value::Null;
+    for _ in 0..80 {
+        let (st, got) = call(
+            port,
+            owner,
+            "POST",
+            "/api/kitsune",
+            Some(json!({"action": "items", "list": "Courses"})),
+        )
+        .await;
+        if st == 200 && got["items"].as_array().is_some_and(|a| !a.is_empty()) {
+            items = got;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    assert_eq!(items["items"][0]["text"], "café", "{items}");
+    // the model was asked as the assistant, with the brain's tool and the workflow's step
+    let first = asked.lock().unwrap()[0].clone();
+    assert!(first["tools"].to_string().contains("\"kitsune\""));
+    assert!(
+        first["messages"].to_string().contains("triage"),
+        "the assistant's own prompt"
+    );
+    // the page sees the run
+    let (_, runs) = call(
+        port,
+        owner,
+        "POST",
+        "/api/kitsune",
+        Some(json!({"action": "runs"})),
+    )
+    .await;
+    assert!(
+        runs["runs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["id"] == thread.as_str()),
+        "{runs}"
+    );
+}
+
+/// A node whose local engine talks to `model_port` (settings as the interface writes them).
+async fn engine_node(d: &std::path::Path, model_port: u16, extra: Value) -> Arc<Node> {
+    for (n, v) in [("mesh.key", "m"), ("device.key", "d"), ("token", "owner")] {
+        std::fs::write(d.join(n), v).unwrap();
+    }
+    let engine = d.join("home").join("engine").join("local");
+    std::fs::create_dir_all(&engine).unwrap();
+    let mut settings = json!({"providers": [{"id": "gpu", "name": "vLLM", "url": format!("http://127.0.0.1:{model_port}/v1")}],
+                              "model": "gpu/qwen3", "mode": "assistant"});
+    for (k, v) in extra.as_object().unwrap() {
+        settings[k] = v.clone();
+    }
+    std::fs::write(engine.join("settings.json"), settings.to_string()).unwrap();
+    let cfg: NodeConfig = serde_json::from_value(json!({
+        "node_id": "home", "data_dir": d.join("home"), "key_file": d.join("mesh.key"), "device_key_file": d.join("device.key"),
+        "gateway_listen": "127.0.0.1:0", "gateway_token_file": d.join("token"), "heartbeat": 0.1,
+        "harnesses": {"local": {"kind": "local"}},
+    }))
+    .unwrap();
+    Node::start(cfg).await.unwrap()
+}
+
+/// Development handed off, the whole way: the page starts dev-handoff, the developer writes the
+/// plan, the workflow waits for the person, the page sends their choice, and the assistant opens a
+/// new thread for the coder through the node (announced, labelled, started on the plan).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_development_job_is_planned_approved_and_handed_to_a_new_thread() {
+    let (model_port, asked) = scripted_model(vec![
+        // the developer (a sub-agent): its plan
+        json!({"call": {"name": "return_value", "args": {"content": "## Goal\nA contact form.\n## Acceptance criteria\n- it sends"}}}),
+        // after the person's choice, the assistant opens the thread, then says the step is done
+        json!({"call": {"name": "delegate", "args": {"harness": "local", "title": "Contact form", "prompt": "## Goal\nA contact form."}}}),
+        json!({"call": {"name": "step_done", "args": {}}}),
+    ])
+    .await;
+    let dir = tempfile::tempdir().unwrap();
+    // the person chose not to be asked before a thread opens
+    let home = engine_node(dir.path(), model_port, json!({"delegate_asks": false})).await;
+    let port = home.gateway_port;
+    let owner = "token=owner";
+    let k = |body: Value| call(port, owner, "POST", "/api/kitsune", Some(body));
+
+    let mut started = Value::Null;
+    for _ in 0..60 {
+        let (st, d) = k(json!({"action": "assist", "workflow": "dev-handoff", "title": "Development", "params": {"request": "a contact form"}})).await;
+        if st == 200 {
+            started = d;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    let thread = started["thread"]
+        .as_str()
+        .unwrap_or_else(|| panic!("never started: {started}"))
+        .to_string();
+
+    // the run waits for the person, with its choices, on the page
+    let mut choice = Value::Null;
+    for _ in 0..80 {
+        let (_, runs) = k(json!({"action": "runs"})).await;
+        if let Some(r) = runs["runs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["id"] == thread.as_str())
+        {
+            if r["workflow"]["status"] == "waiting" {
+                choice = r["workflow"]["choices"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|c| c["id"] == "Hand-off")
+                    .cloned()
+                    .unwrap();
+                break;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    assert_eq!(
+        choice["id"], "Hand-off",
+        "the step for the person never showed"
+    );
+    let (st, _) = call(port, owner, "POST", "/api/message",
+        Some(json!({"agent": thread, "text": "", "workflow": {"resume": true, "choice": "Hand-off", "label": "Hand-off"}}))).await;
+    assert_eq!(st, 200);
+
+    // a new thread, the coder's, opened by the assistant and started on the plan
+    let mut opened = String::new();
+    for _ in 0..80 {
+        let found = asked.lock().unwrap().iter().any(|r| {
+            r["messages"].as_array().is_some_and(|m| {
+                m.len() <= 3
+                    && m.iter().any(|x| {
+                        x["role"] == "user"
+                            && x["content"]
+                                .as_str()
+                                .is_some_and(|c| c.contains("## Goal\nA contact form."))
+                    })
+            })
+        });
+        if found {
+            opened = "yes".into();
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    assert_eq!(
+        opened, "yes",
+        "the coder's thread never started on the plan"
+    );
+    let threads: Vec<String> =
+        std::fs::read_dir(dir.path().join("home").join("host").join("agents"))
+            .map(|rd| {
+                rd.flatten()
+                    .map(|e| e.file_name().to_string_lossy().to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+    assert!(
+        threads.iter().any(|t| t.starts_with("contact-form-")),
+        "{threads:?}"
+    );
+}
