@@ -45,12 +45,21 @@ pub struct CommandDef {
     pub scope: String,
 }
 
-const BUILTIN_AGENTS: [&str; 5] = [
+const BUILTIN_AGENTS: [&str; 13] = [
     include_str!("defaults/builder.agent.md"),
     include_str!("defaults/planner.agent.md"),
     include_str!("defaults/explorer.agent.md"),
     include_str!("defaults/verifier.agent.md"),
     include_str!("defaults/code-reviewer.agent.md"),
+    // Kitsune's assistant and its specialists, one per function (see docs/tdah-recherche-fr.md)
+    include_str!("defaults/assistant.agent.md"),
+    include_str!("defaults/triage.agent.md"),
+    include_str!("defaults/organizer.agent.md"),
+    include_str!("defaults/shopper.agent.md"),
+    include_str!("defaults/tracker.agent.md"),
+    include_str!("defaults/librarian.agent.md"),
+    include_str!("defaults/summarizer.agent.md"),
+    include_str!("defaults/home.agent.md"),
 ];
 
 const BUILTIN_COMMANDS: [&str; 3] = [
@@ -59,7 +68,15 @@ const BUILTIN_COMMANDS: [&str; 3] = [
     include_str!("defaults/commit-push.command.md"),
 ];
 
-pub const BUILTIN_WORKFLOWS: [&str; 1] = [include_str!("defaults/default.workflow.json")];
+pub const BUILTIN_WORKFLOWS: [&str; 6] = [
+    include_str!("defaults/default.workflow.json"),
+    // the assistant's everyday workflows
+    include_str!("defaults/kitsune-inbox.workflow.json"),
+    include_str!("defaults/daily-plan.workflow.json"),
+    include_str!("defaults/weekly-review.workflow.json"),
+    include_str!("defaults/groceries.workflow.json"),
+    include_str!("defaults/doc-sort.workflow.json"),
+];
 
 /// A Markdown file's front matter (simple `key: value` lines and `- item` lists) and its body.
 pub fn front_matter(text: &str) -> (BTreeMap<String, Value>, String) {
@@ -366,8 +383,22 @@ mod tests {
                 "planner",
                 "explorer",
                 "verifier",
-                "code_reviewer"
+                "code_reviewer",
+                "assistant",
+                "triage",
+                "organizer",
+                "shopper",
+                "tracker",
+                "librarian",
+                "summarizer",
+                "home"
             ]
+        );
+        // the assistant's specialists work on the tier their job needs
+        let tier = |id: &str| all.iter().find(|a| a.id == id).unwrap().model.clone();
+        assert_eq!(
+            (tier("triage"), tier("organizer")),
+            ("fast".into(), "standard".into())
         );
         let builder = &all[0];
         assert!(!builder.subagent && builder.tools.contains(&"edit_file".to_string()));
@@ -385,6 +416,7 @@ mod tests {
             tools: vec!["read_file".into()],
             prompt: "Be strict.".into(),
             scope: "user".into(),
+            model: "fast".into(),
         };
         let back = parse_agent(&agent_file(&a), "user").unwrap();
         assert_eq!(back, a);
@@ -392,6 +424,6 @@ mod tests {
         assert!(c
             .iter()
             .any(|c| c.id == "init" && c.agent_mode == "builder"));
-        assert_eq!(workflows(Path::new("/nonexistent"), None).len(), 1);
+        assert_eq!(workflows(Path::new("/nonexistent"), None).len(), 6);
     }
 }

@@ -1,0 +1,77 @@
+{
+  "metadata": {
+    "id": "doc-sort",
+    "name": "Sort documents",
+    "description": "Proposes a name and a place for each document of a folder; nothing moves until the person approves.",
+    "version": "1.0.0",
+    "color": "#E48A46",
+    "parameters": [
+      {
+        "id": "folder",
+        "label": "Folder",
+        "required": true
+      }
+    ]
+  },
+  "entryStep": "propose",
+  "settings": {
+    "maxIterations": 12
+  },
+  "steps": [
+    {
+      "id": "propose",
+      "name": "Propose",
+      "type": "sub_agent",
+      "subAgentType": "librarian",
+      "prompt": "Sort the documents in {{folder}}.",
+      "transitions": [
+        {
+          "when": {
+            "type": "always"
+          },
+          "goto": "agree"
+        }
+      ]
+    },
+    {
+      "id": "agree",
+      "name": "Approve the moves?",
+      "type": "user",
+      "transitions": [
+        {
+          "when": {
+            "type": "step_result",
+            "result": "Apply"
+          },
+          "goto": "apply"
+        },
+        {
+          "when": {
+            "type": "step_result",
+            "result": "Stop"
+          },
+          "goto": "$done"
+        }
+      ]
+    },
+    {
+      "id": "apply",
+      "name": "Move",
+      "type": "agent",
+      "agentId": "builder",
+      "model": "fast",
+      "prompt": "Apply exactly this approved plan, file by file, creating folders as needed, and nothing else:\n\n{{stepOutput.content}}\n\nThen list what moved.",
+      "transitions": [
+        {
+          "when": {
+            "type": "always"
+          },
+          "goto": "$done"
+        }
+      ]
+    }
+  ],
+  "startCondition": {
+    "type": "always"
+  }
+}

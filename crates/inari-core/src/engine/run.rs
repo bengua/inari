@@ -217,7 +217,8 @@ impl LocalEngine {
                 out.push(e.to_string());
             }
         }
-        if !a.subagent || a.id == "explorer" {
+        // a top-level agent, the explorer, and a sub-agent that asks for them get the MCP servers' tools
+        if !a.subagent || a.id == "explorer" || a.tools.iter().any(|t| t == "mcp") {
             out.extend(self.mcp_tool_names());
         }
         out
@@ -754,6 +755,7 @@ impl LocalEngine {
             "background_process" | "dev_server" | "project_tasks" => {
                 self.project_tool(t, name, args).await
             }
+            "kitsune" => self.kitsune_tool(t, args).await,
             mcp => self.mcp_call(mcp, args).await,
         }
     }

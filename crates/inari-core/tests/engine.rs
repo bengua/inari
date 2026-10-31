@@ -919,3 +919,64 @@ async fn a_repository_is_cloned_from_a_forge_into_the_threads_folder() {
         .await
         .is_err());
 }
+
+/// Kitsune's assistant: the thread works as the assistant, its triage specialist runs on the fast
+/// tier's model and keeps the note in the core's brain through the `kitsune` tool.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_assistants_specialist_works_on_its_tier_and_keeps_the_note_in_the_brain() {
+    let (model, port) = model_server().await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut engine = LocalEngine::new(dir.path().join("engine"));
+    engine.kitsune_dir = Some(dir.path().join("kitsune"));
+    let mut tiers = std::collections::BTreeMap::new();
+    tiers.insert("fast".to_string(), "gpu/qwen2.5-3b".to_string());
+    engine
+        .set_settings(Settings {
+            providers: vec![Provider {
+                id: "gpu".into(),
+                name: "llama.cpp".into(),
+                url: format!("http://127.0.0.1:{port}/v1"),
+            }],
+            model: "gpu/qwen3-14b".into(),
+            mode: "assistant".into(),
+            tiers,
+            ..Settings::default()
+        })
+        .unwrap();
+    let host = Arc::new(CapsuleHost::new("n1", &dir.path().join("node")).unwrap());
+    let runner = Runner::new(host, vec![("local".to_string(), engine)], None, None);
+    let agent = runner.create("t1", "", "a thread").unwrap();
+    {
+        let mut m = model.lock().unwrap();
+        m.script.push_back(call(
+            "c1",
+            "call_sub_agent",
+            json!({"subAgentType": "triage", "prompt": "Rajoute du café à la liste"}),
+        ));
+        // the triage specialist's own run, on the small model
+        m.script.push_back(call(
+            "k1",
+            "kitsune",
+            json!({"action": "add_items", "list": "Courses", "kind": "shopping", "items": [{"text": "café", "aisle": "3-épicerie"}]}),
+        ));
+        m.script.push_back(call(
+            "r1",
+            "return_value",
+            json!({"content": "{\"function\": \"shopping\"}"}),
+        ));
+        m.script.push_back(answer(&["C'est sur la liste."]));
+    }
+    let out = runner.run(&agent, "rajoute du café", vec![]).await;
+    assert_eq!(out.final_text, "C'est sur la liste.");
+    let asked = model.lock().unwrap().asked.clone();
+    assert_eq!(
+        asked[0]["model"], "qwen3-14b",
+        "the assistant on the thread's model"
+    );
+    assert_eq!(asked[1]["model"], "qwen2.5-3b", "triage on the fast tier");
+    assert!(asked[0]["tools"].to_string().contains("\"kitsune\""));
+    // the brain holds it, for the pages and the phone as much as for the agents
+    let k = kitsune::Kitsune::shared(&dir.path().join("kitsune")).unwrap();
+    let items = k.lock().unwrap().store().items("Courses", false).unwrap();
+    assert_eq!(items[0].text, "café");
+}

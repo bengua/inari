@@ -6,6 +6,7 @@
 //! `<data_dir>/engine/<harness>/`; a provider's key is kept apart (`keys.json`, mode 600) and
 //! never shown.
 
+mod brain;
 pub mod defs;
 pub mod forge;
 mod library;
@@ -303,6 +304,7 @@ impl LocalEngine {
         json!({"providers": providers, "model": s.model, "mode": s.mode, "context_window": s.context_window,
                "max_steps": s.max_steps, "turn_timeout": s.turn_timeout, "temperature": s.temperature,
                "instructions": s.instructions, "modes": self.modes(None), "keep_folder": s.keep_folder,
+               "tiers": s.tiers,
                "forges": self.forges_view()})
     }
 

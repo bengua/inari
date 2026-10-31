@@ -1,0 +1,64 @@
+{
+  "metadata": {
+    "id": "weekly-review",
+    "name": "Weekly review",
+    "description": "What went well, one pattern, one thing for next week: private, kind, short.",
+    "version": "1.0.0",
+    "color": "#E48A46"
+  },
+  "entryStep": "track",
+  "settings": {
+    "maxIterations": 12
+  },
+  "steps": [
+    {
+      "id": "track",
+      "name": "Look back",
+      "type": "sub_agent",
+      "subAgentType": "tracker",
+      "prompt": "Review the past seven days: tracking notes, done and replaced items, reminders kept or put off.",
+      "transitions": [
+        {
+          "when": {
+            "type": "always"
+          },
+          "goto": "next"
+        }
+      ]
+    },
+    {
+      "id": "next",
+      "name": "Next week",
+      "type": "sub_agent",
+      "subAgentType": "organizer",
+      "prompt": "From this review:\n\n{{stepOutput.content}}\n\npropose ONE thing for next week, with its smallest first step and its cue.",
+      "transitions": [
+        {
+          "when": {
+            "type": "always"
+          },
+          "goto": "keep"
+        }
+      ]
+    },
+    {
+      "id": "keep",
+      "name": "Keep it",
+      "type": "agent",
+      "agentId": "assistant",
+      "model": "fast",
+      "prompt": "Keep the review and next week's one thing as a note tagged \"bilan\" (kitsune note), then say them in four short lines.",
+      "transitions": [
+        {
+          "when": {
+            "type": "always"
+          },
+          "goto": "$done"
+        }
+      ]
+    }
+  ],
+  "startCondition": {
+    "type": "always"
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "metadata": {
+    "id": "groceries",
+    "name": "Groceries",
+    "description": "Checks the pantry, fills the shopping list by aisle, and suggests meals from what expires.",
+    "version": "1.0.0",
+    "color": "#E48A46"
+  },
+  "entryStep": "pantry",
+  "settings": {
+    "maxIterations": 12
+  },
+  "steps": [
+    {
+      "id": "pantry",
+      "name": "Pantry and list",
+      "type": "sub_agent",
+      "subAgentType": "shopper",
+      "prompt": "Look at the pantry: what expires within three days, what is missing for the usual meals. Add what is missing to the \"Courses\" shopping list, by aisle, and suggest two meals with what expires.",
+      "transitions": [
+        {
+          "when": {
+            "type": "always"
+          },
+          "goto": "$done"
+        }
+      ]
+    }
+  ],
+  "startCondition": {
+    "type": "always"
+  }
+}

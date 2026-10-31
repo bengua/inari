@@ -1,0 +1,70 @@
+{
+  "metadata": {
+    "id": "daily-plan",
+    "name": "Plan of the day",
+    "description": "Three priorities at most, each with its smallest first step, its duration and its cue; the person agrees, then it is written down.",
+    "version": "1.0.0",
+    "color": "#E48A46"
+  },
+  "entryStep": "plan",
+  "settings": {
+    "maxIterations": 12
+  },
+  "steps": [
+    {
+      "id": "plan",
+      "name": "Plan",
+      "type": "sub_agent",
+      "subAgentType": "organizer",
+      "prompt": "Plan today with the person. Read today's reminders, open todo items and yesterday's notes.",
+      "transitions": [
+        {
+          "when": {
+            "type": "always"
+          },
+          "goto": "agree"
+        }
+      ]
+    },
+    {
+      "id": "agree",
+      "name": "Does it suit you?",
+      "type": "user",
+      "transitions": [
+        {
+          "when": {
+            "type": "step_result",
+            "result": "Apply"
+          },
+          "goto": "apply"
+        },
+        {
+          "when": {
+            "type": "step_result",
+            "result": "Redo"
+          },
+          "goto": "plan"
+        }
+      ]
+    },
+    {
+      "id": "apply",
+      "name": "Write it down",
+      "type": "agent",
+      "agentId": "assistant",
+      "model": "fast",
+      "prompt": "The person agreed to this plan:\n\n{{stepOutput.content}}\n\nWrite each priority's first step as an item of the \"Today\" todo list (kitsune add_items, kind todo) and set a reminder for each one that has a time. Then say it back in two lines.",
+      "transitions": [
+        {
+          "when": {
+            "type": "always"
+          },
+          "goto": "$done"
+        }
+      ]
+    }
+  ],
+  "startCondition": {
+    "type": "always"
+  }
+}
