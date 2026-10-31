@@ -11,7 +11,9 @@ Newest first. An entry says what changed for someone using the thing.
 
 - **Network rooms and per-core debugging**: the Network view gives every core a room with its
   threads, live state, load and model badges; its terminal action opens an existing thread's safe
-  workspace on that core. The left and right pane controls use the same directional treatment.
+  workspace on that core. The terminal can switch cores directly, the desktop mascot leaves more
+  room for threads, and thread creation and search are prominent. Both pane controls share one
+  visible shape, active treatment and expanded state.
 - **Kitsune becomes an assistant for people with ADHD**, grounded in the research
   (docs/tdah-recherche-fr.md): one brain (`brain.db`) with notes, reminders and lists (todo,
   shopping by aisle, pantry with what expires); screens for Talk, Assistants, Lists, Running and My

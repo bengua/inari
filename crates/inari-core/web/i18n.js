@@ -24,6 +24,7 @@ fr: /* FR-START */ {
  "Show or hide the right panel": "Afficher ou masquer le panneau droit",
  "Debug on {node}": "Diagnostiquer sur {node}",
  "Terminal on {node}": "Terminal sur {node}",
+ "Choose a core to debug": "Choisir un cœur à diagnostiquer",
  "Add a core": "Ajouter un cœur",
  "Added to the message: {names}": "Ajouté au message : {names}",
  "Allow at least one harness": "Autorisez au moins un moteur",
