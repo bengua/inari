@@ -21,7 +21,7 @@ pub mod understand;
 pub mod vecext;
 
 pub use asr::AsrConfig;
-pub use brain::{Capture, Kitsune, Retried, Settings};
+pub use brain::{Capture, Kitsune, Retried, Settings, VoiceConfig};
 pub use crypto::{AudioVault, Key};
 pub use embed::EmbedConfig;
 pub use geocode::GeocoderConfig;

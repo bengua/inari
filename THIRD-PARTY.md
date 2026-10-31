@@ -33,3 +33,11 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## LiveKit client (browser)
+
+`crates/inari-core/web/vendor/livekit-client.umd.js` is `dist/livekit-client.umd.js` of
+livekit-client 2.23.0 (https://github.com/livekit/client-sdk-js), unchanged, published under the
+Apache License 2.0. The core serves it under `/assets/vendor/` and the Kitsune page loads it only to
+start a live talk. The voice agent in `services/kitsune-voice` depends on LiveKit Agents
+(Apache-2.0), installed by pip, not vendored.

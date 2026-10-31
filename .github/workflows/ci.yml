@@ -35,3 +35,17 @@ jobs:
           name: inari-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 14
+
+  # Kitsune's live voice (services/kitsune-voice): its tools against a stand-in core.
+  voice:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/kitsune-voice
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install .
+      - run: python -m unittest discover -s tests -v

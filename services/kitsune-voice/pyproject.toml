@@ -1,0 +1,15 @@
+[project]
+name = "kitsune-voice"
+version = "0.1.0"
+description = "Kitsune's live voice: a LiveKit voice agent for Inari, on Gemini Live or on the person's own servers"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = [
+  # Apache-2.0
+  "livekit-agents[google,openai,silero]==1.8.10",
+  # BSD-3-Clause
+  "httpx>=0.27",
+]
+
+[project.scripts]
+kitsune-voice = "kitsune_voice.agent:main"

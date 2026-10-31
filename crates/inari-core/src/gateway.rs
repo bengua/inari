@@ -52,6 +52,13 @@ const ASSETS: &[(&str, &str, &[u8])] = &[
         "text/javascript; charset=utf-8",
         include_bytes!("../web/kitsune.js"),
     ),
+    // LiveKit's browser client (Apache-2.0, see THIRD-PARTY.md), for Kitsune's live voice: served
+    // from the core, loaded only when the person starts talking live
+    (
+        "vendor/livekit-client.umd.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../web/vendor/livekit-client.umd.js"),
+    ),
     (
         "fonts/ibm_plex_sans.woff2",
         "font/woff2",
@@ -2500,6 +2507,23 @@ impl Gateway {
                         .expiring(&day)
                         .map(|i| json!({"items": i}))
                         .map_err(|e| e.to_string())
+                })
+                .await
+            }
+            // the live voice: a token for the owner's room on their LiveKit server
+            "voice" => {
+                self.with_kitsune(|k| {
+                    let v = k.settings().voice.clone();
+                    if !v.ready() {
+                        return Err("no live voice set up: Settings → Live voice (your LiveKit server, its key and secret)".to_string());
+                    }
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    let room = "kitsune-voice";
+                    Ok(json!({"url": v.url, "room": room, "mode": v.mode,
+                              "token": crate::livekit::token(&v.api_key, &v.api_secret, "owner", room, now, 3600)}))
                 })
                 .await
             }
