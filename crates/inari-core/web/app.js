@@ -30,6 +30,9 @@ const store = { get: (k, d) => { try { return JSON.parse(localStorage.getItem("i
 const PAGE = (document.querySelector('meta[name="inari-page"]') || {}).content || ""; // the core writes the version of this page there
 let stream = null, lastSnapAt = 0, offlineTick = null, pendingDraft = null;
 let snap = null, selected = null, tab = "artifacts", events = [], files = null, viewing = null, forkAt = null, drag = null, termHist = [], termPos = 0, pendingModel = "", pendingCore = "", attachments = [];
+/* the Swarm pane: a common room to message every thread at once. The log is client-side for now;
+   replies are detected from the snapshot's per-agent "last" line, so no new endpoint is needed. */
+let swarmTarget = "all", swarmLog = [], swarmSeen = {}, swarmLastSent = {}, swarmTouched = new Set();
 let currentView = store.get("view", "work");
 // messages sent while the agent works, per thread: shown at once, "waiting", until the agent reads them (drawChat)
 const queued = {};
@@ -197,6 +200,7 @@ function render() {
   // last piece of an answer used to wait for the next snapshot, however late that came)
   if (selected) { const wait = 1500 - (Date.now() - tlStamp); clearTimeout(render.tl); if (wait <= 0) refreshDetail(); else render.tl = setTimeout(refreshDetail, wait); }
   else { drawChat(); drawComposer(); if (!$("bbody").firstChild) drawBench(); }
+  if (tab === "swarm") { swarmWatch(); drawBench(true); }
 }
 const inFlight = (mv) => mv && !["committed", "rolled_back"].includes(mv.state);
 function row(id, a, mv) {
@@ -1034,10 +1038,85 @@ function terminal(body) {
   $("termform").onsubmit = async (e) => { e.preventDefault(); const cmd = inp.value.trim(); if (!cmd) return; termHist.push(cmd); termPos = termHist.length; inp.value = ""; inp.disabled = true; await api("/api/exec", { agent: selected, cmd }); inp.disabled = false; tlStamp = 0; files = null; await refreshDetail(); drawBench(); const again = $("terminput"); if (again) again.focus(); };
   inp.onkeydown = (e) => { if (e.key === "ArrowUp" && termPos > 0) { inp.value = termHist[--termPos]; e.preventDefault(); } else if (e.key === "ArrowDown") inp.value = termHist[++termPos] || ""; };
 }
+/* ---------- swarm pane: one message to the whole mesh, replies watched live ---------- */
+const swarmAgents = () => Object.entries(snap.agents).filter(([, a]) => !a.archived);
+function swarmTrim() { if (swarmLog.length > 200) swarmLog.splice(0, swarmLog.length - 200); }
+// a reply is a change of an agent's "last" line after we messaged it; our own message echoed
+// back in that line is not a reply
+function swarmWatch() {
+  if (!snap) return;
+  for (const [id, a] of swarmAgents()) {
+    const last = a.last || "";
+    if (!(id in swarmSeen)) { swarmSeen[id] = last; continue; }
+    if (swarmSeen[id] === last) continue;
+    swarmSeen[id] = last;
+    const sent = swarmLastSent[id] || "";
+    if (!swarmTouched.has(id) || !last || (sent && last.includes(sent.slice(0, 40)))) continue;
+    const prev = swarmLog[swarmLog.length - 1];
+    if (prev && prev.who === id && prev.text === last) continue;
+    swarmLog.push({ who: id, name: a.title || id, text: last });
+    swarmTrim();
+    const out = $("swarmout");
+    if (out && !(document.activeElement && document.activeElement.id === "swarminput")) drawBench(true);
+  }
+}
+async function swarmSend(text) {
+  const targets = swarmTarget === "all" ? swarmAgents().map(([id]) => id) : swarmAgents().map(([id]) => id).filter((id) => id === swarmTarget);
+  if (!targets.length) return toast(t("No agents yet. Create threads and they gather here."));
+  for (const id of targets) {
+    swarmTouched.add(id); swarmLastSent[id] = text;
+    await api("/api/message", { agent: id, text });
+  }
+  const one = targets.length === 1 ? snap.agents[targets[0]] : null;
+  swarmLog.push({ kind: "you", text, note: one ? t("Sent to {name}", { name: one.title || targets[0] }) : t("Delivered to {n} agents", { n: targets.length }) });
+  swarmTrim(); drawBench();
+}
+function swarmPanel(body) {
+  if (swarmTarget !== "all" && !(swarmTarget in snap.agents)) swarmTarget = "all";
+  const agents = swarmAgents();
+  const live = stream && stream.readyState === 1 && Date.now() - lastSnapAt < 20000;
+  const byNode = {};
+  for (const [, a] of agents) byNode[a.node] = (byNode[a.node] || 0) + 1;
+  const chips = Object.entries(byNode).map(([n, c]) => {
+    const over = n === "mindhub" && c > 2;
+    return `<span class="swarmchip${over ? " over" : ""}"${over ? ` title="${esc(t("Mindhub cap is {n} agents", { n: 2 }))}"` : ""}>${esc(n)} · ${c}${over ? " ⚠" : ""}</span>`;
+  }).join("");
+  body.style.padding = "10px";
+  body.innerHTML = `<div id="swarm">
+    <div class="termhost">${icon("share")}<span>${esc(t("Swarm"))}</span><i id="swarmlive" class="${live ? "on" : ""}"></i><span class="swarmdist">${chips}</span></div>
+    <div class="swarmroster"><button class="swarmrow all${swarmTarget === "all" ? " on" : ""}" type="button">${icon("share")}<span>${esc(t("All agents"))}</span><small class="pg">${agents.length}</small></button></div>
+    <div id="swarmout"></div>
+    <form id="swarmform"><input id="swarminput" autocomplete="off" placeholder="${esc(t("Message one agent, or the whole swarm…"))}" aria-label="${esc(t("Message the swarm"))}"><button class="btn small go" type="submit">${esc(t("Send"))}</button></form>
+  </div>`;
+  const roster = body.querySelector(".swarmroster");
+  for (const [id, a] of agents) {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "swarmrow" + (swarmTarget === id ? " on" : "");
+    b.title = a.last || "";
+    b.append(badge(a.model || ""));
+    const name = document.createElement("span"); name.textContent = a.title || id; b.append(name);
+    const ph = document.createElement("small"); ph.className = "pg"; ph.textContent = `${GLYPH[a.phase] || "·"} ${a.node}`; b.append(ph);
+    const last = document.createElement("small"); last.textContent = a.last || ""; b.append(last);
+    b.onclick = () => { swarmTarget = swarmTarget === id ? "all" : id; drawBench(); };
+    roster.append(b);
+  }
+  const out = body.querySelector("#swarmout");
+  out.innerHTML = swarmLog.map((l) => l.kind === "you"
+    ? `<div class="cmd">$ ${esc(l.text)}</div><div class="out dim">${esc(l.note)}</div>`
+    : `<div class="cmd bot">${esc(GLYPH.inference)} ${esc(l.name)}</div><div class="out">${esc(l.text)}</div>`).join("")
+    || `<div class="out dim">${esc(t("The swarm's common room: what was done, what it changes, what is next."))}</div>`;
+  out.scrollTop = out.scrollHeight;
+  roster.querySelector(".all").onclick = () => { swarmTarget = "all"; drawBench(); };
+  const form = body.querySelector("#swarmform"), inp = body.querySelector("#swarminput");
+  form.onsubmit = async (e) => { e.preventDefault(); const text = inp.value.trim(); if (!text) return; inp.value = ""; inp.disabled = true; await swarmSend(text); inp.disabled = false; const again = $("swarminput"); if (again) again.focus(); };
+}
 function drawBench(soft) {
   document.querySelectorAll(".tab").forEach((t) => { const on = t.dataset.tab === tab; t.classList.toggle("on", on); t.setAttribute("aria-selected", on); t.tabIndex = on ? 0 : -1; }); const body = $("bbody"); body.setAttribute("aria-label", tab); if (soft && tab === "terminal" && document.activeElement && document.activeElement.id === "terminput") return;
+  if (soft && tab === "swarm" && document.activeElement && document.activeElement.id === "swarminput") return; // a composition in progress stays as it is
   if (soft && tab === "plan" && (critDraft || (body.contains(document.activeElement) && document.activeElement.matches("input, textarea")))) return; // an edit in progress stays as it is
-  const keep = body.scrollTop; body.textContent = ""; body.style.padding = ""; if (!selected) { body.innerHTML = `<p class="empty">${esc(t("Select a thread to see its files, run commands, view results and read its journal."))}</p>`; return; }
+  const keep = body.scrollTop; body.textContent = ""; body.style.padding = "";
+  if (tab === "swarm") { swarmWatch(); swarmPanel(body); body.scrollTop = keep; return; }
+  if (!selected) { body.innerHTML = `<p class="empty">${esc(t("Select a thread to see its files, run commands, view results and read its journal."))}</p>`; return; }
   if (tab === "artifacts") { const hidden = !store.get("showgit", false); const shown = files ? files.filter((f) => !hidden || !f.path.startsWith(".git/")) : files; if (!files) { body.innerHTML = `<p class="empty">${esc(t("Loading…"))}</p>`; return; } if (!shown.length) { body.innerHTML = `<p class="empty">${esc(t("No files yet. Ask the agent to create something — its workspace travels with it when you move it."))}</p>`; return; } body.insertAdjacentHTML("beforeend", `<label class="empty" style="display:flex;gap:6px;align-items:center;margin-bottom:6px"><input type="checkbox" id="showgit" ${hidden ? "" : "checked"}> ${esc(t("show .git ({n} files)", { n: files.length - files.filter((f) => !f.path.startsWith(".git/")).length }))}</label><div class="files"></div>`); $("showgit").onchange = (e) => { store.set("showgit", e.target.checked); drawBench(); };
     for (const f of shown) { const b = document.createElement("button"); b.innerHTML = `<span class="ic">${icon(KIND[ext(f.path)] || "file")}</span><span></span><small></small>`; b.children[1].textContent = f.path; b.children[2].textContent = f.size + " B"; b.onclick = () => openFile(f.path); body.querySelector(".files").append(b); } }
   else if (tab === "terminal") terminal(body); else if (tab === "viewer") viewer(body); else if (tab === "plan") planTab(body);
