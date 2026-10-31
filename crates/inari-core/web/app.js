@@ -523,6 +523,14 @@ async function foxLibrary(node, harness, kind) { const data = await foxRead(node
     if (!it.read_only && it.scope !== "builtin") { const del = foxBtn(t("Remove"), null); del.onclick = twice(del, t("Remove {name}?", { name: it.name }), () => act("item_remove", { of: kind, id: it.id })); btns.push(del); }
     const row = foxRow(form, bits, btns); if (it.description) row.title = it.description; }
   if (!(data.items || []).length) form.append(Object.assign(document.createElement("p"), { className: "empty", textContent: t("None yet.") }));
+  // skills from a repository (MIT or Apache only): every folder with a SKILL.md, or the one named
+  if (kind === "skills") { form.append(Object.assign(document.createElement("h3"), { textContent: t("Install from GitHub") }));
+    const url = foxField(form, t("Repository (or a folder of it)"), Object.assign(document.createElement("input"), { type: "url", placeholder: "https://github.com/cloudflare/security-audit-skill", spellcheck: false }));
+    const path = foxField(form, t("Folder of the skill (optional)"), Object.assign(document.createElement("input"), { type: "text", placeholder: "skills/security-audit", spellcheck: false }));
+    const row = document.createElement("div"); row.className = "row2";
+    for (const [label, u, f] of [["karpathy-guidelines", "https://github.com/Barathraj2387/andrej-karapathy-skills", "skills/karpathy-guidelines"], ["security-audit", "https://github.com/cloudflare/security-audit-skill", "skills/security-audit"]]) row.append(foxBtn(label, () => { url.value = u; path.value = f; }));
+    row.append(foxBtn(t("Install"), () => act("skill_install_git", { url: url.value.trim(), path: path.value.trim() }), "go")); form.append(row);
+    form.append(Object.assign(document.createElement("small"), { className: "empty", textContent: t("Only under the MIT or Apache licence. The skill becomes yours; where it came from is kept beside it.") })); }
   sheet(t(FOX_KINDS[kind]), [], t("OpenFox's own are duplicated to be changed: the copy is yours."), form); }
 async function foxItem(node, harness, kind, it) { const data = await foxRead(node, harness, kind, it.id); if (!data) return; const form = foxForm(), ro = it.read_only || it.scope === "builtin";
   let save;
@@ -551,6 +559,9 @@ async function foxMcp(node, harness) { const data = await foxRead(node, harness,
   const show = () => { const http = kind.value === "http"; for (const [x, on] of [[command, !http], [env, !http], [url, http], [headers, http]]) x.parentElement.hidden = !on; }; kind.onchange = show; show();
   // a preset: AI-Memory (akitaonrails/ai-memory), long-term shared memory for the agents, over its MCP bridge
   form.append(foxBtn(t("AI-Memory (shared agent memory)"), () => { name.value = "ai-memory"; kind.value = "stdio"; command.value = "ai-memory mcp-bridge"; show(); name.focus(); }));
+  // a preset: graphify (Graphify-Labs, Apache-2.0/MIT), a knowledge graph of a code base, over its MCP stdio server;
+  // installed with: uv tool install "graphifyy[mcp]", the graph made with: graphify .
+  form.append(foxBtn(t("graphify (knowledge graph of a code base)"), () => { name.value = "graphify"; kind.value = "stdio"; command.value = "graphify-mcp /path/to/project/graphify-out/graph.json"; show(); command.focus(); }));
   form.append(Object.assign(document.createElement("small"), { className: "empty", textContent: t("The values go to OpenFox and nowhere else: Inari neither keeps nor shows them.") }));
   const body = () => ({ name: name.value.trim(), transport: kind.value, command: command.value, env: env.value, url: url.value, headers: headers.value });
   const row = document.createElement("div"); row.className = "row2"; row.append(foxBtn(t("Test"), () => foxNodeAct(node, harness, "mcp_test", body())), foxBtn(t("Add"), () => { act("mcp_add", body()); env.value = ""; headers.value = ""; }, "go")); form.append(row);
