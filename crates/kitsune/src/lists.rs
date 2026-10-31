@@ -203,6 +203,40 @@ impl Store {
         Ok(n)
     }
 
+    /// Place a task again (a new due date, or none): no penalty, no trace of the old one.
+    pub fn set_item_due(&self, id: i64, due: Option<&str>) -> Result<bool> {
+        let due = match due {
+            Some(d) => Some(clock::iso(clock::parse(d).ok_or_else(|| {
+                Error::Invalid(format!("not an ISO 8601 UTC time: {d:?}"))
+            })?)),
+            None => None,
+        };
+        Ok(self.conn.execute(
+            "UPDATE list_items SET due_date = ?2 WHERE id = ?1",
+            params![id, due],
+        )? == 1)
+    }
+
+    /// The open tasks whose due date has passed (to be placed again, never to be blamed for).
+    pub fn overdue(&self, now: i64) -> Result<Vec<Item>> {
+        let mut st = self.conn.prepare(&format!(
+            "SELECT {ITEM_COLUMNS} FROM list_items i JOIN lists l ON l.id = i.list_id
+             WHERE i.done = 0 AND i.due_date IS NOT NULL AND i.due_date < ?1
+             ORDER BY i.due_date, i.id"
+        ))?;
+        let rows = st.query_map([clock::iso(now)], item_of)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// How many items were done since `since` (seconds since the epoch).
+    pub fn done_since(&self, since: i64) -> Result<i64> {
+        Ok(self.conn.query_row(
+            "SELECT count(*) FROM list_items WHERE done = 1 AND done_at >= ?1",
+            [clock::iso(since)],
+            |r| r.get(0),
+        )?)
+    }
+
     pub fn remove_items(&self, ids: &[i64]) -> Result<usize> {
         let mut n = 0;
         for id in ids {
@@ -324,6 +358,32 @@ mod tests {
                 }]
             )
             .is_err());
+    }
+
+    #[test]
+    fn a_task_is_placed_again_and_the_week_counts_what_was_done() {
+        let s = Store::open_in_memory().unwrap();
+        let ids = s
+            .add_items(
+                "Pro",
+                "todo",
+                &[
+                    NewItem {
+                        text: "Rappeler la banque".into(),
+                        due_date: Some("2026-10-30T09:00:00Z".into()),
+                        ..Default::default()
+                    },
+                    item("Devis"),
+                ],
+            )
+            .unwrap();
+        let now = clock::parse("2026-10-31T08:00:00Z").unwrap();
+        assert_eq!(s.overdue(now).unwrap()[0].id, ids[0]);
+        s.set_item_due(ids[0], Some("2026-10-31T10:00:00Z"))
+            .unwrap();
+        assert!(s.overdue(now).unwrap().is_empty());
+        s.check_items(&[ids[1]], true).unwrap();
+        assert_eq!(s.done_since(clock::now() - 7 * 86_400).unwrap(), 1);
     }
 
     #[test]

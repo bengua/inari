@@ -957,6 +957,98 @@ impl Gateway {
         }
     }
 
+    /// Start an assistant's workflow (`workflow`, `params`, `title`) in a new thread on the first
+    /// core whose local engine answers: made, waited for, then launched, as the page does it.
+    async fn kitsune_assist(&self, d: &Value) -> std::result::Result<Value, String> {
+        let workflow = s(d, "workflow");
+        if workflow.is_empty()
+            || !workflow
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            return Err("an assistant names its workflow".into());
+        }
+        let (node, harness) = {
+            let st = self.state.lock().expect("not poisoned");
+            st.nodes
+                .iter()
+                .find_map(|n| {
+                    let engines = n.pointer("/capabilities/engine")?.as_object()?;
+                    let harness = engines.keys().next()?.clone();
+                    Some((n["node_id"].as_str()?.to_string(), harness))
+                })
+                .ok_or("no core of the mesh runs the local engine: Settings → Agents and subscriptions")?
+        };
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|x| x.as_millis() % 1_000_000)
+            .unwrap_or(0);
+        let thread = format!("kitsune-{workflow}-{stamp}");
+        let title = format!(
+            "Kitsune · {}",
+            s(d, "title").chars().take(40).collect::<String>()
+        );
+        self.bus.publish(
+            "agent.create",
+            json!({"thread_id": thread, "node": node, "harness": harness, "title": title}),
+        );
+        let mut made = false;
+        for _ in 0..100 {
+            if self
+                .state
+                .lock()
+                .expect("not poisoned")
+                .telemetry
+                .agents
+                .contains_key(&thread)
+            {
+                made = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(150)).await;
+        }
+        if !made {
+            return Err(format!("the thread did not start on {node}"));
+        }
+        let params = d.get("params").cloned().unwrap_or(json!({}));
+        self.bus.publish(
+            &format!("agent.{thread}.run"),
+            json!({"text": "", "workflow": {"id": workflow, "params": params, "label": s(d, "title")}}),
+        );
+        Ok(json!({"thread": thread, "node": node}))
+    }
+
+    /// The threads the assistants started (their ids begin with `kitsune-`): their phase, their
+    /// workflow where it stands (and the choices of a step that waits for the person), and the
+    /// last thing they said.
+    fn kitsune_runs(&self) -> Value {
+        let st = self.state.lock().expect("not poisoned");
+        let mut runs: Vec<Value> = st
+            .telemetry
+            .agents
+            .iter()
+            .filter(|(id, _)| id.starts_with("kitsune-"))
+            .map(|(id, a)| {
+                let said = st
+                    .log
+                    .get(id)
+                    .and_then(|log| {
+                        log.iter()
+                            .rev()
+                            .find(|e| e["kind"] == "assistant_message")
+                            .and_then(|e| e.pointer("/data/text"))
+                            .cloned()
+                    })
+                    .unwrap_or(Value::Null);
+                json!({"id": id, "title": a.get("title"), "phase": a.get("phase"), "node": a.get("node"),
+                       "workflow": st.panels.get(id).and_then(|p| p.get("workflow")).cloned(),
+                       "said": said})
+            })
+            .collect();
+        runs.sort_by(|a, b| b["id"].as_str().cmp(&a["id"].as_str()));
+        json!({"runs": runs})
+    }
+
     /// GET /api/kitsune/events: the reminders as they ring (`event: ring`), for the owner's page.
     async fn kitsune_events(&self, w: &mut TcpStream) -> std::io::Result<()> {
         let mut rx = self.rings.subscribe();
@@ -2340,6 +2432,118 @@ impl Gateway {
                 })
                 .await
             }
+            // the lists beside the notes: todo, shopping, pantry
+            "lists" => {
+                self.with_kitsune(|k| {
+                    k.store()
+                        .lists()
+                        .map(|l| json!({"lists": l}))
+                        .map_err(|e| e.to_string())
+                })
+                .await
+            }
+            "items" => {
+                let list = s(&d, "list");
+                let with_done = d.get("with_done").and_then(Value::as_bool).unwrap_or(false);
+                self.with_kitsune(move |k| {
+                    k.store()
+                        .items(&list, with_done)
+                        .map(|i| json!({"items": i}))
+                        .map_err(|e| e.to_string())
+                })
+                .await
+            }
+            "add_items" => {
+                let (list, kind) = (s(&d, "list"), s(&d, "kind"));
+                let items: std::result::Result<Vec<kitsune::NewItem>, _> =
+                    serde_json::from_value(d.get("items").cloned().unwrap_or(json!([])));
+                match items {
+                    Ok(items) => {
+                        self.with_kitsune(move |k| {
+                            let kind = if kind.is_empty() {
+                                "custom".to_string()
+                            } else {
+                                kind
+                            };
+                            k.store()
+                                .add_items(&list, &kind, &items)
+                                .map(|ids| json!({"ids": ids}))
+                                .map_err(|e| e.to_string())
+                        })
+                        .await
+                    }
+                    Err(e) => Some(Err(format!("bad items: {e}"))),
+                }
+            }
+            "check" | "remove_items" => {
+                let ids: Vec<i64> = d
+                    .get("ids")
+                    .and_then(Value::as_array)
+                    .map(|a| a.iter().filter_map(Value::as_i64).collect())
+                    .unwrap_or_default();
+                let done = d.get("done").and_then(Value::as_bool).unwrap_or(true);
+                let remove = action == "remove_items";
+                self.with_kitsune(move |k| {
+                    let n = if remove {
+                        k.store().remove_items(&ids)
+                    } else {
+                        k.store().check_items(&ids, done)
+                    };
+                    n.map(|n| json!({"changed": n})).map_err(|e| e.to_string())
+                })
+                .await
+            }
+            "expiring" => {
+                let day = s(&d, "day");
+                self.with_kitsune(move |k| {
+                    k.store()
+                        .expiring(&day)
+                        .map(|i| json!({"items": i}))
+                        .map_err(|e| e.to_string())
+                })
+                .await
+            }
+            // a task placed again, without penalty
+            "move_item" => {
+                let id = d.get("id").and_then(Value::as_i64).unwrap_or(-1);
+                let due = d.get("due_date").and_then(Value::as_str).map(String::from);
+                self.with_kitsune(move |k| {
+                    k.store()
+                        .set_item_due(id, due.as_deref())
+                        .map(|ok| json!({"ok": ok}))
+                        .map_err(|e| e.to_string())
+                })
+                .await
+            }
+            "overdue" => {
+                self.with_kitsune(|k| {
+                    k.store()
+                        .overdue(kitsune::clock::now())
+                        .map(|i| json!({"items": i}))
+                        .map_err(|e| e.to_string())
+                })
+                .await
+            }
+            // the week, privately: what was kept and what was done
+            "week" => {
+                self.with_kitsune(|k| {
+                    let since = kitsune::clock::now() - 7 * 86_400;
+                    let kept = k
+                        .store()
+                        .notes_between(since, kitsune::clock::now() + 60)
+                        .map(|n| n.len());
+                    let done = k.store().done_since(since);
+                    match (kept, done) {
+                        (Ok(kept), Ok(done)) => Ok(json!({"kept": kept, "done": done})),
+                        (Err(e), _) | (_, Err(e)) => Err(e.to_string()),
+                    }
+                })
+                .await
+            }
+            // an assistant's workflow, started in a thread of its own on a core's local engine
+            "assist" => Some(self.kitsune_assist(&d).await),
+            // the assistants' threads: where each is, and what it last said
+            "runs" => Some(Ok(self.kitsune_runs())),
             "seen_at" => {
                 // the phone's passive position (never polled): picks between places of one name
                 match (

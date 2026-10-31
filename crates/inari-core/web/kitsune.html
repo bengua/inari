@@ -25,8 +25,15 @@
     <span class="sp"></span>
     <span class="state" id="kAsr" title="Speech to text">ASR</span>
     <span class="state" id="kTts" title="Text to speech">TTS</span>
-    <a class="btn small" href="/app" title="Back to Inari">Inari</a>
+    <a class="btn small" href="/app" title="Inari: the cores, the threads, the settings">Inari</a>
   </header>
+  <nav id="kviews" aria-label="Kitsune">
+    <button type="button" data-view="talk" aria-current="page">Talk</button>
+    <button type="button" data-view="assist">Assistants</button>
+    <button type="button" data-view="lists">Lists</button>
+    <button type="button" data-view="runs">Running</button>
+    <button type="button" data-view="week">My week</button>
+  </nav>
   <main id="kmain">
     <section id="kstage" class="glass" aria-label="FoxBot">
       <div id="kfox"></div>
@@ -41,6 +48,12 @@
       </div>
     </section>
     <aside id="kside">
+      <section class="glass kcard" id="ktoday" aria-label="Today">
+        <h2>Today</h2>
+        <ol class="ktoday" id="kTodayList"></ol>
+        <p class="kmeta" id="kTodayState" aria-live="polite"></p>
+        <div id="kOverdue"></div>
+      </section>
       <section class="glass kcard" id="kcap">
         <h2>Talk</h2>
         <button class="ktalk" id="kTalk" type="button" aria-describedby="kTime">
@@ -120,6 +133,73 @@
       </form>
       <p class="kmeta" id="kRemState" aria-live="polite"></p>
       <ul class="plist" id="kTrigList"></ul>
+    </section>
+  </main>
+
+  <main class="kview" id="vAssist" hidden>
+    <section class="glass kcard">
+      <h2>Assistants</h2>
+      <p class="kmeta">Each has one job, works on the model tier its job needs, and says where it runs. Settings: Inari → Agents and subscriptions → Local engine.</p>
+      <div class="kgrid" id="kAssistList"></div>
+      <form class="kassist" id="kAssistForm" hidden>
+        <h3 id="kAssistTitle"></h3>
+        <div id="kAssistParams"></div>
+        <div class="kring-acts">
+          <button class="btn small" type="button" id="kAssistCancel">Cancel</button>
+          <button class="btn small go" type="submit">Start</button>
+        </div>
+      </form>
+    </section>
+  </main>
+
+  <main class="kview" id="vLists" hidden>
+    <section class="glass kcard">
+      <h2>Lists</h2>
+      <div class="kseg" role="tablist" aria-label="Kind of list" id="kListKinds">
+        <button type="button" role="tab" data-kind="shopping" aria-selected="true">Shopping</button>
+        <button type="button" role="tab" data-kind="pantry" aria-selected="false">Pantry</button>
+        <button type="button" role="tab" data-kind="todo" aria-selected="false">Tasks</button>
+      </div>
+      <div id="kExpiring"></div>
+      <label class="klab" for="kListPick">List</label>
+      <select class="kfield" id="kListPick"></select>
+      <ul class="kitems" id="kItems"></ul>
+      <form class="kfind" id="kAddItem">
+        <input class="kfield" id="kItemText" type="text" placeholder="Add an item" autocomplete="off" aria-label="Item">
+        <input class="kfield kaisle" id="kItemAisle" type="text" placeholder="aisle (1-fruits)" autocomplete="off" aria-label="Aisle">
+        <button class="btn small go" type="submit">Add</button>
+      </form>
+      <p class="kmeta" id="kListState" aria-live="polite"></p>
+    </section>
+  </main>
+
+  <main class="kview" id="vRuns" hidden>
+    <section class="glass kcard">
+      <h2>Running</h2>
+      <p class="kmeta">The assistants' workflows. A step that waits for you shows its choices here; the whole thread is in <a href="/app">Inari</a>.</p>
+      <ul class="plist" id="kRunsList"></ul>
+      <p class="kmeta" id="kRunsState" aria-live="polite"></p>
+    </section>
+  </main>
+
+  <main class="kview" id="vWeek" hidden>
+    <section class="glass kcard">
+      <h2>My week</h2>
+      <p class="kmeta">Private: it stays on your core.</p>
+      <div class="kstats">
+        <div><b id="kWeekDone">—</b><span>things done</span></div>
+        <div><b id="kWeekKept">—</b><span>thoughts kept</span></div>
+      </div>
+      <button class="btn small go" type="button" id="kWeekReview">Weekly review with the assistant</button>
+    </section>
+    <section class="glass kcard">
+      <h2>Understanding ADHD</h2>
+      <ul class="klinks">
+        <li><a href="https://www.tdah-france.fr/" target="_blank" rel="noopener">HyperSupers – TDAH France: the association, its guides and its contacts</a></li>
+        <li><a href="https://www.has-sante.fr/jcms/p_3542741/fr/" target="_blank" rel="noopener">HAS: the French recommendations on ADHD</a></li>
+        <li><a href="https://www.nice.org.uk/guidance/ng87" target="_blank" rel="noopener">NICE NG87: ADHD diagnosis and management</a></li>
+      </ul>
+      <p class="kmeta">Kitsune helps to get organised. It replaces no care and gives no medical advice.</p>
     </section>
   </main>
 </div>

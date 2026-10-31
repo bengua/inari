@@ -616,7 +616,7 @@ function remLi(n) {
   meta.className = "kmeta";
   const bits = [];
   if (n.trigger_type === "time") {
-    bits.push(stamp(n.due_date));
+    bits.push(stamp(n.due_date), rel(n.due_date));
     if (n.notified_at) bits.push("rang");
   } else {
     bits.push((n.location_raw || "a place") + ", within " + n.radius_meters + " m");
@@ -699,6 +699,262 @@ $("kTalk").addEventListener("blur", stopTalk);
 $("kTextGo").addEventListener("click", keepTyped);
 $("kReviewSave").addEventListener("click", saveReview);
 
+/* Time made visible (docs/tdah-recherche-fr.md, P6): "in 20 min" beside "09:00". */
+function rel(iso) {
+  const at = Date.parse(iso);
+  if (!at) return "";
+  const m = Math.round((at - Date.now()) / 60000);
+  if (Math.abs(m) < 1) return "now";
+  const span = Math.abs(m) < 60 ? Math.abs(m) + " min" : Math.abs(m) < 1440 ? Math.round(Math.abs(m) / 60) + " h" : Math.round(Math.abs(m) / 1440) + " d";
+  return m > 0 ? "in " + span : span + " ago";
+}
+
+// a local time today or tomorrow (hh:mm), as the brain's ISO 8601 UTC
+function localAt(dayOffset, h, m) {
+  const d = new Date();
+  d.setDate(d.getDate() + dayOffset);
+  d.setHours(h, m || 0, 0, 0);
+  return isoUtc(Math.round(d.getTime() / 1000));
+}
+
+/* The views: Talk (the stage, today, the memory), Assistants, Lists, Running, My week. */
+const view = { now: "talk", timer: 0 };
+
+function showView(name) {
+  view.now = name;
+  const map = { talk: "kmain", assist: "vAssist", lists: "vLists", runs: "vRuns", week: "vWeek" };
+  for (const [k, id] of Object.entries(map)) $(id).hidden = k !== name;
+  document.querySelectorAll("#kviews button").forEach((b) => {
+    if (b.dataset.view === name) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
+  });
+  clearInterval(view.timer);
+  if (name === "assist") assistDraw();
+  if (name === "lists") listsLoad();
+  if (name === "runs") { runsLoad(); view.timer = setInterval(runsLoad, 5000); }
+  if (name === "week") weekLoad();
+  try { history.replaceState(null, "", name === "talk" ? location.pathname : "#" + name); } catch (e) {}
+}
+$("kviews").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button[data-view]");
+  if (b) showView(b.dataset.view);
+});
+
+/* Today: the "Today" list's first steps, and what did not happen, to place again without blame. */
+async function todayLoad() {
+  const box = $("kTodayList");
+  const l = await api("/api/kitsune", { action: "lists" });
+  const today = (l.lists || []).find((x) => x.kind === "todo" && /^(today|aujourd)/i.test(x.name));
+  box.textContent = "";
+  if (today) {
+    const d = await api("/api/kitsune", { action: "items", list: today.name });
+    for (const it of (d.items || []).slice(0, 3)) {
+      const li = document.createElement("li");
+      li.textContent = it.text;
+      if (it.due_date) { const m = document.createElement("span"); m.className = "kmeta"; m.textContent = " · " + rel(it.due_date); li.append(m); }
+      box.append(li);
+    }
+  }
+  $("kTodayState").textContent = box.children.length ? "" : "Nothing planned yet. The assistant can plan the day with you.";
+  const o = await api("/api/kitsune", { action: "overdue" });
+  const host = $("kOverdue");
+  host.textContent = "";
+  for (const it of (o.items || []).slice(0, 2)) {
+    const row = document.createElement("div");
+    row.className = "kgentle";
+    const s = document.createElement("span");
+    s.textContent = "“" + it.text + "” did not happen. Place it again?";
+    const later = actButton("later", "In 1 h");
+    const tomorrow = actButton("tomorrow", "Tomorrow 9:00");
+    later.onclick = () => moveItem(it.id, isoUtc(Math.round(Date.now() / 1000) + 3600));
+    tomorrow.onclick = () => moveItem(it.id, localAt(1, 9));
+    row.append(s, later, tomorrow);
+    host.append(row);
+  }
+}
+
+async function moveItem(id, due) {
+  const d = await api("/api/kitsune", { action: "move_item", id, due_date: due });
+  if (d.error) return;
+  say("Placed again, " + rel(due) + ".");
+  todayLoad();
+}
+
+/* Assistants: one per job, each on its tier, started in a thread of its own. */
+const ASSISTANTS = [
+  { wf: "daily-plan", name: "Plan of the day", what: "Three priorities at most, each with its smallest first step, its duration and its cue. You agree before anything is written.", tier: "standard", where: "local" },
+  { wf: "kitsune-inbox", name: "Sort my notes", what: "Each note to its list, its reminder or its specialist.", tier: "fast", where: "local" },
+  { wf: "groceries", name: "Shopping & pantry", what: "What expires, what is missing, the list by aisle, meal ideas.", tier: "fast", where: "local" },
+  { wf: "weekly-review", name: "Weekly review", what: "What went well, one pattern, one thing for next week. Private.", tier: "standard", where: "local" },
+  { wf: "doc-sort", name: "Sort documents", what: "A name and a place for each document; nothing moves until you approve.", tier: "standard", where: "local", params: [{ id: "folder", label: "Folder" }] },
+  { wf: "research-brief", name: "Research", what: "A question searched on your SearXNG, with its sources, kept as a note.", tier: "expert", where: "your expert tier", params: [{ id: "question", label: "Question" }] },
+  { wf: "dev-handoff", name: "Development", what: "A plan with acceptance criteria; once you agree, a coder works on it in an Inari thread.", tier: "expert", where: "an Inari thread", params: [{ id: "request", label: "What to build" }, { id: "harness", label: "Coder harness (empty: the default)", optional: true }] },
+];
+const assist = { pick: null };
+
+function assistDraw() {
+  const grid = $("kAssistList");
+  grid.textContent = "";
+  for (const a of ASSISTANTS) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "kassistant";
+    const n = document.createElement("b"); n.textContent = a.name;
+    const w = document.createElement("span"); w.textContent = a.what;
+    const tier = document.createElement("em"); tier.className = "ktier"; tier.textContent = a.tier;
+    const where = document.createElement("em"); where.className = "ktier where"; where.textContent = a.where;
+    b.append(n, w, tier, where);
+    b.onclick = () => assistOpen(a);
+    grid.append(b);
+  }
+}
+
+function assistOpen(a) {
+  assist.pick = a;
+  if (!a.params) return assistStart({});
+  $("kAssistForm").hidden = false;
+  $("kAssistTitle").textContent = a.name;
+  const host = $("kAssistParams");
+  host.textContent = "";
+  for (const p of a.params) {
+    const lab = document.createElement("label"); lab.className = "klab"; lab.textContent = p.label; lab.htmlFor = "kp-" + p.id;
+    const inp = document.createElement("input"); inp.className = "kfield"; inp.id = "kp-" + p.id; inp.dataset.param = p.id; inp.required = !p.optional;
+    host.append(lab, inp);
+  }
+  host.querySelector("input").focus();
+}
+
+async function assistStart(params) {
+  const a = assist.pick;
+  activity("working");
+  const d = await api("/api/kitsune", { action: "assist", workflow: a.wf, title: a.name, params });
+  activity("idle");
+  if (d.error) return;
+  $("kAssistForm").hidden = true;
+  say(a.name + ": started. Follow it in Running.");
+  showView("runs");
+}
+
+$("kAssistForm").addEventListener("submit", (ev) => {
+  ev.preventDefault();
+  const params = {};
+  for (const inp of $("kAssistParams").querySelectorAll("input")) if (inp.value.trim()) params[inp.dataset.param] = inp.value.trim();
+  assistStart(params);
+});
+$("kAssistCancel").addEventListener("click", () => { $("kAssistForm").hidden = true; });
+
+/* Lists: shopping by aisle, the pantry and what expires, the tasks. */
+const lists = { kind: "shopping", name: "" };
+
+async function listsLoad() {
+  document.querySelectorAll("#kListKinds button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.kind === lists.kind)));
+  const d = await api("/api/kitsune", { action: "lists" });
+  const mine = (d.lists || []).filter((l) => l.kind === lists.kind);
+  const pick = $("kListPick");
+  pick.textContent = "";
+  for (const l of mine) pick.append(new Option(l.name + (l.open ? " · " + l.open : ""), l.name, false, l.name === lists.name));
+  const fallback = { shopping: "Courses", pantry: "Garde-manger", todo: "Today" }[lists.kind];
+  if (!mine.length) pick.append(new Option(fallback + " (new)", fallback, false, true));
+  lists.name = pick.value;
+  $("kItemAisle").hidden = lists.kind === "todo";
+  $("kExpiring").textContent = "";
+  if (lists.kind === "pantry") {
+    const e = await api("/api/kitsune", { action: "expiring", day: new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10) });
+    if ((e.items || []).length) {
+      const box = document.createElement("div");
+      box.className = "kgentle";
+      const s = document.createElement("span");
+      s.textContent = "Soon past their date: " + e.items.map((i) => i.text + " (" + i.expires_on + ")").join(", ");
+      const meals = actButton("meals", "Meal ideas", "btn small go");
+      meals.onclick = () => { assist.pick = ASSISTANTS.find((a) => a.wf === "groceries"); assistStart({}); };
+      box.append(s, meals);
+      $("kExpiring").append(box);
+    }
+  }
+  itemsLoad();
+}
+
+async function itemsLoad() {
+  const ul = $("kItems");
+  ul.textContent = "";
+  if (!lists.name || $("kListPick").selectedOptions[0]?.text.endsWith("(new)")) { $("kListState").textContent = "Empty for now: add the first item."; return; }
+  const d = await api("/api/kitsune", { action: "items", list: lists.name, with_done: true });
+  let aisle = null;
+  for (const it of d.items || []) {
+    if (lists.kind !== "todo" && !it.done && it.aisle !== aisle) {
+      aisle = it.aisle;
+      const h = document.createElement("li"); h.className = "kaisle-h"; h.textContent = aisle || "anywhere"; ul.append(h);
+    }
+    const li = document.createElement("li");
+    li.className = "kitem" + (it.done ? " done" : "");
+    const box = document.createElement("input"); box.type = "checkbox"; box.checked = it.done; box.id = "ki-" + it.id;
+    box.onchange = async () => { await api("/api/kitsune", { action: "check", ids: [it.id], done: box.checked }); itemsLoad(); if (box.checked) say("Done. One less."); };
+    const lab = document.createElement("label"); lab.htmlFor = box.id; lab.textContent = it.text;
+    li.append(box, lab);
+    const meta = [it.qty != null ? it.qty + (it.unit ? " " + it.unit : "") : "", it.due_date ? rel(it.due_date) : "", it.expires_on ? "until " + it.expires_on : ""].filter(Boolean).join(" · ");
+    if (meta) { const m = document.createElement("span"); m.className = "kmeta"; m.textContent = meta; li.append(m); }
+    ul.append(li);
+  }
+  const open = (d.items || []).filter((i) => !i.done).length;
+  $("kListState").textContent = open ? open + " to go." : "All done here.";
+}
+
+$("kListKinds").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button[data-kind]");
+  if (!b) return;
+  lists.kind = b.dataset.kind;
+  lists.name = "";
+  listsLoad();
+});
+$("kListPick").addEventListener("change", () => { lists.name = $("kListPick").value; itemsLoad(); });
+$("kAddItem").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const text = $("kItemText").value.trim();
+  if (!text) return;
+  const d = await api("/api/kitsune", { action: "add_items", list: lists.name, kind: lists.kind, items: [{ text, aisle: $("kItemAisle").value.trim() }] });
+  if (d.error) return;
+  $("kItemText").value = "";
+  listsLoad();
+});
+
+/* Running: the assistants' threads, and the choices of a step that waits for the person. */
+async function runsLoad() {
+  const d = await api("/api/kitsune", { action: "runs" });
+  const ul = $("kRunsList");
+  ul.textContent = "";
+  for (const r of d.runs || []) {
+    const li = document.createElement("li");
+    li.className = "knote";
+    const title = document.createElement("p"); title.className = "knote-text"; title.textContent = r.title || r.id;
+    const wf = r.workflow || {};
+    const meta = document.createElement("p"); meta.className = "kmeta";
+    meta.textContent = [wf.status === "waiting" ? "waits for you" : wf.status, wf.step, r.phase].filter(Boolean).join(" · ");
+    li.append(title, meta);
+    if (r.said) { const s = document.createElement("p"); s.className = "krun-said"; s.textContent = String(r.said).slice(0, 1200); li.append(s); }
+    if (wf.status === "waiting") {
+      const row = document.createElement("div"); row.className = "krun-choices";
+      for (const c of wf.choices || []) {
+        const b = actButton("choice", c.label, "btn small go");
+        b.onclick = async () => { await api("/api/message", { agent: r.id, text: "", workflow: { resume: true, choice: c.id, label: c.label } }); say(c.label + "."); runsLoad(); };
+        row.append(b);
+      }
+      li.append(row);
+    }
+    const open = document.createElement("a"); open.href = "/app"; open.textContent = "Open the thread in Inari"; open.className = "kmeta";
+    li.append(open);
+    ul.append(li);
+  }
+  $("kRunsState").textContent = (d.runs || []).length ? "" : "No assistant is working. Start one in Assistants.";
+}
+
+/* My week: kept and done, privately, and the weekly review. */
+async function weekLoad() {
+  const d = await api("/api/kitsune", { action: "week" });
+  if (d.error) return;
+  $("kWeekDone").textContent = String(d.done);
+  $("kWeekKept").textContent = String(d.kept);
+}
+$("kWeekReview").addEventListener("click", () => { assist.pick = ASSISTANTS.find((a) => a.wf === "weekly-review"); assistStart({}); });
+
 /* The Inari app on the phone (window.InariPhone): it keeps the reminders so they ring with no network,
    on its own alarm and the system's geofencing, and hands back what was done from a notification. */
 function phone() {
@@ -743,7 +999,7 @@ function ringShow() {
   $("kRing").hidden = !n;
   if (!n) return;
   $("kRingText").textContent = words(n) || "Reminder #" + n.id;
-  $("kRingMore").textContent = n.trigger_type === "geofence" ? "You are at " + (n.location_raw || "the place") + "." : stamp(n.due_date);
+  $("kRingMore").textContent = n.trigger_type === "geofence" ? "You are at " + (n.location_raw || "the place") + "." : stamp(n.due_date) + " · " + rel(n.due_date);
 }
 
 function ringHeard(n) {
@@ -802,6 +1058,9 @@ async function connect() {
   mountFox();
   ringListen();
   await phoneActions();
+  todayLoad();
+  const start = ["assist", "lists", "runs", "week"].find((v) => hash.has(v));
+  if (start) showView(start);
   if (hash.has("talk")) window.inariTalk();
 }
 

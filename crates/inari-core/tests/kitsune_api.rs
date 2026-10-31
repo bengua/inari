@@ -808,3 +808,48 @@ async fn a_due_reminder_rings_on_the_page_and_a_place_rings_on_entry() {
     let (st, _) = call(port, "token=nope", "GET", "/api/kitsune/events", None).await;
     assert_eq!(st, 401);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_page_keeps_lists_places_a_task_again_and_counts_the_week() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = node(dir.path()).await;
+    let port = home.gateway_port;
+    let owner = "token=owner";
+    let k = |body: Value| call(port, owner, "POST", "/api/kitsune", Some(body));
+
+    let (st, added) = k(json!({"action": "add_items", "list": "Courses", "kind": "shopping",
+        "items": [{"text": "Lait", "qty": 1, "unit": "L", "aisle": "2-frais"}, {"text": "Tomates", "aisle": "1-fruits"}]})).await;
+    assert_eq!(st, 200, "{added}");
+    let (_, again) = k(json!({"action": "add_items", "list": "Courses", "kind": "shopping", "items": [{"text": "lait", "qty": 2, "unit": "L"}]})).await;
+    assert_eq!(again["ids"][0], added["ids"][0], "the same line grows");
+    let (_, items) = k(json!({"action": "items", "list": "Courses"})).await;
+    assert_eq!(items["items"][0]["text"], "Tomates", "by aisle");
+    assert_eq!(items["items"][1]["qty"], 3.0);
+    let (_, lists) = k(json!({"action": "lists"})).await;
+    assert_eq!(lists["lists"][0]["open"], 2);
+    k(json!({"action": "check", "ids": [added["ids"][1]]})).await;
+
+    // a task that did not happen is placed again, without a trace of blame
+    let (_, t) = k(json!({"action": "add_items", "list": "Pro", "kind": "todo",
+        "items": [{"text": "Rappeler la banque", "due_date": "2020-01-01T09:00:00Z"}]}))
+    .await;
+    let (_, late) = k(json!({"action": "overdue"})).await;
+    assert_eq!(late["items"][0]["id"], t["ids"][0]);
+    let (_, moved) =
+        k(json!({"action": "move_item", "id": t["ids"][0], "due_date": "2099-01-01T09:00:00Z"}))
+            .await;
+    assert_eq!(moved["ok"], true);
+    let (_, late) = k(json!({"action": "overdue"})).await;
+    assert_eq!(late["items"].as_array().unwrap().len(), 0);
+
+    // the week, privately
+    let (_, week) = k(json!({"action": "week"})).await;
+    assert_eq!(week["done"], 1);
+
+    // no core runs the local engine here: an assistant says so plainly; nothing runs
+    let (st, no) = k(json!({"action": "assist", "workflow": "daily-plan", "title": "Plan"})).await;
+    assert_eq!(st, 400, "{no}");
+    assert!(no["error"].as_str().unwrap().contains("local engine"));
+    let (_, runs) = k(json!({"action": "runs"})).await;
+    assert_eq!(runs["runs"].as_array().unwrap().len(), 0);
+}
