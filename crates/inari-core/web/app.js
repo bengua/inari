@@ -1143,7 +1143,13 @@ function swarmPanel(body) {
     const b = document.createElement("button");
     b.type = "button"; b.className = "swarmrow" + (swarmTarget === id ? " on" : "");
     b.title = a.last || "";
-    b.append(badge(a.model || ""));
+    /* a logo badge when the model is known; otherwise a coloured core dot (the colour is the core,
+       so the eye groups the swarm by machine even when a bot runs no named model) */
+    if (family(a.model || "").id !== "local") b.append(badge(a.model || ""));
+    else { const dot = document.createElement("span"); const palette = ["#e48a46", "#8b5cf6", "#4ade80", "#4285f4", "#ff6b9d", "#22d3ee"];
+      const ni = Math.max(0, snap.nodes.findIndex((n) => n.node_id === a.node));
+      dot.className = "mb node"; dot.style.background = palette[ni % palette.length];
+      dot.textContent = (a.node || "?").charAt(0).toUpperCase(); dot.title = a.node; b.append(dot); }
     const name = document.createElement("span"); name.textContent = a.title || id; b.append(name);
     const ph = document.createElement("small"); ph.className = "pg"; ph.textContent = `${GLYPH[a.phase] || "·"} ${a.node}`; b.append(ph);
     const last = document.createElement("small"); last.textContent = a.last || ""; b.append(last);
