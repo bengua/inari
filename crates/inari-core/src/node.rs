@@ -50,6 +50,9 @@ pub struct HarnessSpec {
     /// Read a message sent during a turn at the next tool boundary (see AcpHarness::steer).
     #[serde(default)]
     pub steer: bool,
+    /// Paths outside the workdir the sandboxed session may still write: see AcpHarness.
+    #[serde(default)]
+    pub sandbox_rw: Vec<String>,
     /// Where the harness comes from, to offer and install its updates.
     #[serde(default)]
     pub update: Option<UpdateSpec>,
@@ -234,6 +237,7 @@ fn build_harness(cfg: &NodeConfig, name: &str, spec: &HarnessSpec) -> Harness {
     h.prepare = spec.prepare.clone();
     h.pass_env = spec.pass_env.clone();
     h.steer = spec.steer;
+    h.sandbox_rw = spec.sandbox_rw.iter().map(PathBuf::from).collect();
     h.prepare_timeout = Duration::from_secs_f64(spec.prepare_timeout.max(1.0));
     Harness::from(h)
 }
@@ -391,6 +395,11 @@ impl Node {
         let mut host = CapsuleHost::new(&cfg.node_id, &cfg.data_dir.join("host"))
             .map_err(|e| e.to_string())?;
         let specs = merged_specs(&cfg);
+        if !crate::sandbox::available() {
+            eprintln!(
+                "sandbox: bwrap not found — this node will refuse to start agent threads until bubblewrap is installed"
+            );
+        }
         let names: Vec<String> = specs.iter().map(|(n, _)| n.clone()).collect();
         let known_names = Arc::new(Mutex::new(names.clone()));
         if !names.is_empty() {

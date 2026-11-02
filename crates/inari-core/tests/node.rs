@@ -21,7 +21,8 @@ fn config(dir: &Path, id: &str, hub: &str, log: &Path) -> NodeConfig {
         "node_id": id, "data_dir": dir.join(id), "key_file": dir.join("mesh.key"),
         "device_key_file": dir.join("device.key"), "hub": hub, "heartbeat": 0.2, "registry_ttl": 3.0,
         "expected_peers": ["peer"], "approval_ttl": 10.0,
-        "harnesses": {"fake": {"command": [script, "fake-agent"], "env": {"FAKE_ACP_LOG": log}}},
+        "harnesses": {"fake": {"command": [script, "fake-agent"], "env": {"FAKE_ACP_LOG": log},
+            "sandbox_rw": [dir]}},
     });
     if hub.is_empty() {
         cfg["gateway_listen"] = json!("127.0.0.1:0");

@@ -26,6 +26,10 @@ fn fake(log: &Path, sessions: &Path, images: bool) -> AcpHarness {
     );
     h.extra_env
         .insert("FAKE_ACP_LOG".into(), log.display().to_string());
+    // the fake agent logs beside the workdir: that folder is its extra writable path
+    if let Some(dir) = log.parent() {
+        h.sandbox_rw = vec![dir.to_path_buf()];
+    }
     if images {
         h.extra_env.insert("FAKE_ACP_IMAGES".into(), "1".into());
     }

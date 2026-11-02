@@ -239,6 +239,10 @@ pub struct AcpHarness {
     /// (session/cancel, then the message). Off: the message waits for the turn to end, as ACP
     /// has it, and the agent's own way of working (OpenFox's, say) is never interrupted.
     pub steer: bool,
+    /// Paths outside the workdir the sandboxed session may still write (a cache
+    /// the harness insists on, say). Kept empty wherever possible: the bubble's
+    /// point is that this list stays short.
+    pub sandbox_rw: Vec<PathBuf>,
     models_set: Mutex<HashMap<String, String>>,
     modes_set: Mutex<HashMap<String, String>>,
 }
@@ -302,6 +306,7 @@ impl AcpHarness {
             prepare_timeout: Duration::from_secs(600),
             pass_env: BTreeMap::new(),
             steer: false,
+            sandbox_rw: Vec::new(),
             models_set: Mutex::default(),
             modes_set: Mutex::default(),
         }
@@ -324,8 +329,23 @@ impl AcpHarness {
     }
 
     fn spawn(&self, cwd: &Path, pass: &str) -> std::io::Result<Child> {
-        let mut cmd = Command::new(&self.command[0]);
-        cmd.args(&self.command[1..])
+        // the session runs in its bubble (crates/inari-core/src/sandbox.rs):
+        // workdir and the pass's own HOME writable, everything else read-only
+        let mut extra_rw = Vec::new();
+        if !pass.is_empty() {
+            for (k, v) in &self.pass_env {
+                if k == "HOME" || k.starts_with("XDG_") {
+                    let v = v.replace("{pass}", pass);
+                    let _ = std::fs::create_dir_all(&v);
+                    extra_rw.push(PathBuf::from(v));
+                }
+            }
+        }
+        extra_rw.extend(self.sandbox_rw.iter().cloned());
+        let argv = crate::sandbox::wrap(&self.command, cwd, &extra_rw)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::NotFound, e.to_string()))?;
+        let mut cmd = Command::new(&argv[0]);
+        cmd.args(&argv[1..])
             .current_dir(cwd)
             .env_clear()
             .stdin(Stdio::piped())
@@ -342,9 +362,6 @@ impl AcpHarness {
         if !pass.is_empty() {
             for (k, v) in &self.pass_env {
                 let v = v.replace("{pass}", pass);
-                if k == "HOME" || k.starts_with("XDG_") {
-                    let _ = std::fs::create_dir_all(&v);
-                }
                 cmd.env(k, v);
             }
         }

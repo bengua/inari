@@ -81,6 +81,36 @@ paths that leave the target directory.
 - **Limits.** At most 512 connections at once (beyond that a connection is closed at once), and
   a request must arrive whole within 60 seconds.
 
+## Per-session sandbox
+
+Every agent session runs inside a bubblewrap bubble (`crates/inari-core/src/sandbox.rs`):
+
+- the whole filesystem is mounted **read-only**, except the thread's workdir and
+  the pass's own HOME/XDG directories (`pass_env`), which stay writable;
+- the network is kept (a harness speaks to its model backends over HTTP), the
+  mount/IPC/UTS namespaces are private, and the bubble dies with the node. The
+  **PID namespace stays shared** and the bubble joins no new session, so the
+  node's process-group kill still ends whatever the agent started — a private
+  PID namespace would hide the agent's children from the node's own bookkeeping;
+- when systemd offers user scopes, the bubble is placed in a **workload cgroup of
+  its own** (`systemd-run --user --scope --collect`), so a session's processes are
+  accounted and collected as one unit; without a user bus the session still runs
+  sandboxed, just uncaged;
+- a node **without bwrap refuses to start the thread** and says why — the refusal
+  surfaces as the harness error, never as a silent fallback to running bare.
+
+`tests/sandbox.rs` proves that a write outside the workdir fails (read-only
+filesystem), that a write inside it lands on the host, and that the refusal names
+the missing piece.
+
+Ubuntu 24.04 and later restrict unprivileged user namespaces through AppArmor
+(`kernel.apparmor_restrict_unprivileged_userns=1`) and the `bubblewrap` package
+ships no profile for `bwrap`, so an unprivileged bubble fails with `setting up
+uid map: Permission denied`. The cure on such a core is to make the binary
+setuid root — `sudo chmod u+s /usr/bin/bwrap` — the binary drops its privileges
+inside the bubble by design; the node then sandboxes sessions as everywhere
+else.
+
 ## Not covered
 
 Encryption of links (the TCP transport authenticates and signs every frame but does

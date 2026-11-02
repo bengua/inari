@@ -11,6 +11,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # the session sandbox's tests run the agent inside the real bubble; Ubuntu
+      # restricts unprivileged user namespaces via AppArmor and ships no bwrap
+      # profile, so the runner's bwrap goes setuid (same cure as on the cores)
+      - run: |
+          sudo apt-get update && sudo apt-get install -y bubblewrap
+          sudo chmod u+s /usr/bin/bwrap
       - run: rustup component add clippy rustfmt
       - run: ./verify.sh
 
