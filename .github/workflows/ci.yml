@@ -13,6 +13,11 @@ jobs:
       - uses: actions/checkout@v4
       # the session sandbox's tests run the agent inside the real bubble
       - run: sudo apt-get update && sudo apt-get install -y bubblewrap
+      # TEMP debug: what does bwrap say on this runner?
+      - run: |
+          mkdir -p /tmp/bwd
+          bwrap --die-with-parent --unshare-user --unshare-ipc --unshare-uts --unshare-cgroup-try --share-net --ro-bind / / --bind /tmp/bwd /tmp/bwd --chdir /tmp/bwd -- echo BUBBLE-OK
+          echo "bwrap exit=$?"
       - run: rustup component add clippy rustfmt
       - run: ./verify.sh
 
