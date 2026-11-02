@@ -1,0 +1,55 @@
+{
+  "title": "Policy Decision",
+  "description": "The journaled record of one policy verdict (crates/inari-core/src/policy.rs): what was asked, how it was classed, what was decided, and what the session had spent at the time.",
+  "type": "object",
+  "properties": {
+    "agent_id": {
+      "title": "Agent Id",
+      "type": "string"
+    },
+    "node_id": {
+      "title": "Node Id",
+      "type": "string"
+    },
+    "command": {
+      "title": "Command",
+      "description": "The command as the agent titled it (e.g. \"bash: rm -rf x\").",
+      "type": "string"
+    },
+    "class": {
+      "title": "Class",
+      "type": "string",
+      "enum": ["benign", "regular", "sudo"]
+    },
+    "verdict": {
+      "title": "Verdict",
+      "type": "string",
+      "enum": ["allow", "ask", "deny"]
+    },
+    "reason": {
+      "title": "Reason",
+      "type": "string"
+    },
+    "spend": {
+      "title": "Spend",
+      "type": "object",
+      "properties": {
+        "tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "gpu_seconds": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "required": ["tokens", "gpu_seconds"]
+    },
+    "at": {
+      "title": "At",
+      "description": "Unix time of the decision.",
+      "type": "number"
+    }
+  },
+  "required": ["agent_id", "node_id", "command", "class", "verdict", "spend", "at"]
+}
