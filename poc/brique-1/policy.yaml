@@ -1,0 +1,16 @@
+# Brique 1 — la seule politique du PoC : la porte sudo.
+# Déclarative, lisible par un humain ; à terme lue par policy.rs (brique 4).
+# Dans ce PoC, l'application est le mécanisme déjà prouvé d'Inari
+# (approvals.rs : verdict signé, usage unique, expiration, silence = non).
+policy: sudo-gate
+scope: session          # niveau le plus strict gagne (modèle Omnigent, brique 4)
+on: agent.shell_command # toute commande qu'un agent veut exécuter
+verdict: ASK            # rien n'est ALLOW par défaut : default deny
+ask:
+  show: exact_command   # la demande montre la commande exacte, jamais un résumé
+  sign: device_key      # verdict HMAC-SHA256 du canonique {id, nonce, ok}
+  single_use: true      # un verdict compte une fois
+  ttl_seconds: 300      # expiration ; après quoi le silence tranche
+  silence: deny         # le silence vaut non
+# Hors de portée du PoC (briques 3-4) : budget, niveaux serveur/agent/session,
+# montages bwrap du périmètre d'écriture.
