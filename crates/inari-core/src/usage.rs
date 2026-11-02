@@ -367,6 +367,46 @@ impl Source {
     }
 }
 
+/// The cumulative spend of each thread the policy engine budgets against
+/// (`policy.rs`): tokens accumulate each reported context use (an upper-bound
+/// estimate — a re-read-context backend reprocesses its context every turn),
+/// GPU-seconds accumulate the measured turn time of threads on local models.
+#[derive(Default)]
+pub struct SpendBook {
+    per_agent: std::sync::Mutex<std::collections::HashMap<String, crate::policy::Spend>>,
+}
+
+impl SpendBook {
+    /// The agent reported a context use of `tokens`.
+    pub fn note_tokens(&self, agent: &str, tokens: u64) {
+        self.per_agent
+            .lock()
+            .expect("not poisoned")
+            .entry(agent.into())
+            .or_default()
+            .tokens += tokens;
+    }
+
+    /// A turn on a local model took `seconds`.
+    pub fn note_gpu(&self, agent: &str, seconds: f64) {
+        self.per_agent
+            .lock()
+            .expect("not poisoned")
+            .entry(agent.into())
+            .or_default()
+            .gpu_seconds += seconds;
+    }
+
+    pub fn snapshot(&self, agent: &str) -> crate::policy::Spend {
+        self.per_agent
+            .lock()
+            .expect("not poisoned")
+            .get(agent)
+            .copied()
+            .unwrap_or_default()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

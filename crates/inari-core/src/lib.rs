@@ -25,6 +25,7 @@ pub mod openfox;
 pub mod openfox_library;
 pub mod passes;
 pub mod personas;
+pub mod policy;
 pub mod rpc;
 pub mod sandbox;
 pub mod session;

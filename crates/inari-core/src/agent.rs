@@ -1120,6 +1120,12 @@ pub struct Runner {
     pub cancels: Mutex<std::collections::HashSet<String>>,
     /// The last context use each agent reported.
     pub usage: Mutex<HashMap<String, Value>>,
+    /// What each thread already spent (tokens, GPU-seconds): the budget side of policy.
+    pub spend: crate::usage::SpendBook,
+    /// The server level of the policy (node configuration).
+    policy_server: std::sync::RwLock<crate::policy::Level>,
+    /// The agent level of the policy, by harness name (its spec).
+    policy_agent: std::sync::RwLock<BTreeMap<String, crate::policy::Level>>,
     locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
@@ -1148,8 +1154,24 @@ impl Runner {
             waiting: Mutex::default(),
             cancels: Mutex::default(),
             usage: Mutex::default(),
+            spend: crate::usage::SpendBook::default(),
+            policy_server: std::sync::RwLock::new(crate::policy::Level::default()),
+            policy_agent: std::sync::RwLock::new(BTreeMap::new()),
             locks: Mutex::default(),
         })
+    }
+
+    /// The server level of the policy, from the node configuration.
+    pub fn set_policy_server(&self, level: crate::policy::Level) {
+        *self.policy_server.write().expect("not poisoned") = level;
+    }
+
+    /// The agent level of the policy of one harness, from its spec.
+    pub fn set_policy_agent(&self, harness: &str, level: crate::policy::Level) {
+        self.policy_agent
+            .write()
+            .expect("not poisoned")
+            .insert(harness.into(), level);
     }
 
     fn lock(&self, agent: &str) -> Arc<tokio::sync::Mutex<()>> {
@@ -1336,6 +1358,8 @@ impl Runner {
         if size == 0 {
             return;
         }
+        // the policy's token budget counts an upper bound of what the backend processed
+        self.spend.note_tokens(agent, used);
         let mut u = json!({"used": used, "size": size});
         if let Some(c) = cost {
             u["cost"] = json!(c);
@@ -1355,24 +1379,63 @@ impl Runner {
     }
 
     pub(crate) async fn approve(&self, agent: &str, command: &str) -> bool {
-        // Auto mode: the owner chose to let this thread act without asking. It never applies to a
-        // thread under a core pass (a child's thread is followed and approved by the parent).
+        // The policy engine decides first (crates/inari-core/src/policy.rs): server,
+        // agent and session levels, the strictest verdict wins. Auto mode (the owner
+        // letting this thread act without asking) never applies to a thread under a
+        // core pass, and never to sudo — that gate's verdict is the owner's, always.
         let labels = self.labels(agent);
         let under_pass = labels
             .get("pass")
             .and_then(Value::as_str)
             .is_some_and(|p| !p.is_empty());
-        if !under_pass && labels.get("auto").and_then(Value::as_str) == Some("1") {
-            let _ = self.journal(
-                agent,
-                EventKind::Checkpoint,
-                json!({"reason": "auto_approved", "detail": command}),
-            );
-            return true;
-        }
-        match &self.approver {
-            Some(a) => a(agent.into(), command.into()).await,
-            None => false, // no approver connected: no
+        let policy = crate::policy::Policy {
+            server: self.policy_server.read().expect("not poisoned").clone(),
+            agent: self
+                .policy_agent
+                .read()
+                .expect("not poisoned")
+                .get(&self.harness_of(agent))
+                .cloned()
+                .unwrap_or_default(),
+            session: crate::policy::Level::from_labels(&labels),
+        };
+        let spend = self.spend.snapshot(agent);
+        let verdict = policy.decide(&crate::policy::Request {
+            command,
+            auto_requested: !under_pass && labels.get("auto").and_then(Value::as_str) == Some("1"),
+            spend,
+        });
+        match verdict {
+            crate::policy::Verdict::Allow => {
+                let _ = self.journal(
+                    agent,
+                    EventKind::Checkpoint,
+                    json!({"reason": "auto_approved", "detail": command}),
+                );
+                true
+            }
+            crate::policy::Verdict::Deny(_) => {
+                let _ = self.journal(
+                    agent,
+                    EventKind::Checkpoint,
+                    json!({"reason": "policy_denied", "policy": crate::policy::record(
+                        agent, &self.host.node_id, command, &verdict, &spend, now())}),
+                );
+                false
+            }
+            crate::policy::Verdict::Ask(_) => {
+                let granted = match &self.approver {
+                    Some(a) => a(agent.into(), command.into()).await,
+                    None => false, // no approver connected: no
+                };
+                let _ = self.journal(
+                    agent,
+                    EventKind::Checkpoint,
+                    json!({"reason": "policy_ask", "granted": granted, "policy": crate::policy::record(
+                        agent, &self.host.node_id, command, &verdict, &spend, now())}),
+                );
+                granted
+            }
         }
     }
 
@@ -1758,6 +1821,7 @@ impl Runner {
         let path = self.host.agents.join(agent);
         let harness = self.harness(&harness_name);
         let keep = harness.as_ref().is_some_and(|h| h.keeps_folder());
+        let local_engine = harness.as_ref().is_some_and(|h| h.local().is_some());
         self.set_phase(agent, "listening");
         let files: Vec<Value> = attachments
             .iter()
@@ -1787,6 +1851,7 @@ impl Runner {
                 self.emit(agent, e);
             }
         }
+        let started = Instant::now();
         let summary = match (self.host.open_workdir(agent, keep), harness) {
             (Ok(workdir), Some(h)) => {
                 let turn = Turn {
@@ -1795,7 +1860,7 @@ impl Runner {
                     text: text.into(),
                     attachments,
                     workdir,
-                    model,
+                    model: model.clone(),
                     mode: labels
                         .get("mode")
                         .and_then(Value::as_str)
@@ -1822,6 +1887,17 @@ impl Runner {
                 ..Default::default()
             },
         };
+        // the policy's GPU budget: turn time of threads on a local model (the local
+        // engine always; a pinned model whose name holds no cloud hint otherwise)
+        let low = model.to_lowercase();
+        let local = local_engine
+            || (!low.is_empty()
+                && !["claude", "gpt", "gemini", "kimi"]
+                    .iter()
+                    .any(|hint| low.contains(hint)));
+        if local {
+            self.spend.note_gpu(agent, started.elapsed().as_secs_f64());
+        }
         if summary.stopped == "error" && !summary.error.is_empty() {
             // said in the thread, not only in the activity feed: a turn never fails silently
             let shown = io::load(&path).ok().is_some_and(|c| {

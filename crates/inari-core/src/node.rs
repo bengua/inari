@@ -53,6 +53,9 @@ pub struct HarnessSpec {
     /// Paths outside the workdir the sandboxed session may still write: see AcpHarness.
     #[serde(default)]
     pub sandbox_rw: Vec<String>,
+    /// The agent level of the policy for this harness (policy.rs): auto, budgets…
+    #[serde(default)]
+    pub policy: Value,
     /// Where the harness comes from, to offer and install its updates.
     #[serde(default)]
     pub update: Option<UpdateSpec>,
@@ -155,6 +158,9 @@ pub struct NodeConfig {
     /// Seconds an approval waits for the phone before the default no.
     #[serde(default = "default_approval_ttl")]
     pub approval_ttl: f64,
+    /// The server level of the policy (policy.rs): auto, benign commands, budgets.
+    #[serde(default)]
+    pub policy: Value,
 }
 
 fn default_approval_ttl() -> f64 {
@@ -503,12 +509,13 @@ impl Node {
                 .iter()
                 .map(|(name, spec)| (name.clone(), build_harness(&cfg, name, spec)))
                 .collect();
-            Some(Runner::new(
-                Arc::clone(&host),
-                built,
-                Some(publish),
-                approver,
-            ))
+            let runner = Runner::new(Arc::clone(&host), built, Some(publish), approver);
+            // the policy's levels: the node's own, then each harness spec's
+            runner.set_policy_server(crate::policy::Level::from_config(&cfg.policy));
+            for (name, spec) in &specs {
+                runner.set_policy_agent(name, crate::policy::Level::from_config(&spec.policy));
+            }
+            Some(runner)
         };
         let mut gateway_port = 0;
         // any node may serve the interface: its bus sees the whole mesh through the hub
