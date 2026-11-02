@@ -1,0 +1,17 @@
+[project]
+name = "openfox-acp"
+version = "1.0.0"
+description = "OpenFox as an ACP agent: the bridge that lets Inari run its threads with OpenFox (JSON-RPC stdio ↔ HTTP/WebSocket)"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+openfox-acp = "openfox_acp:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["openfox_acp"]
