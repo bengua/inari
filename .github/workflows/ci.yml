@@ -11,6 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # the session sandbox's tests run the agent inside the real bubble
+      - run: sudo apt-get update && sudo apt-get install -y bubblewrap
       - run: rustup component add clippy rustfmt
       - run: ./verify.sh
 
