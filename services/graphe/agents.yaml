@@ -1,0 +1,28 @@
+# The graph's roster: who each agent is — a name, a harness, a model, a purpose,
+# a write scope. Call sites name an agent, never a model. The harness is Inari's
+# (openfox / claude / gemini / local); the model is pinned per agent at call time.
+defaults:
+  harness: openfox
+  model: local/Q3.8-heretic-9BQ6-llamacpp-c0
+
+agents:
+  - name: scout
+    purpose: Read-only reconnaissance; answers from the repo, changes nothing.
+    writes: []
+
+  - name: planner
+    purpose: Turn a request into a plan the builder can implement without asking.
+    writes:
+      - specs/**
+
+  - name: builder
+    purpose: Implement the plan, bounded to its write scope.
+    writes:
+      - crates/**
+      - services/**
+      - docs/**
+
+  - name: reviewer
+    purpose: Judge whether the work is what was asked; writes only its verdict.
+    writes:
+      - reviews/**

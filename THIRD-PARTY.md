@@ -47,3 +47,17 @@ start a live talk. The voice agent in `services/kitsune-voice` depends on LiveKi
 `services/openfox-acp/` is original code written for this project and published under Inari's
 MIT licence. It is a protocol bridge: it speaks to OpenFox's HTTP and WebSocket API
 (https://github.com/co-l/openfox, MIT) but contains no OpenFox code.
+
+## Provenance note: services/graphe
+
+`services/graphe/` is original code written for this project and published under Inari's
+MIT licence. Two models were adopted, no code imported:
+
+- the **graph model** (code owns sequencing, retries and acceptance; three lanes —
+  engineer, agent, code; typed envelopes; after-the-fact gates; corrections in the same
+  session) is adopted from **Super Simple Software Factory** (IndyDevDan / disler,
+  https://github.com/disler/super-simple-software-factory), published under the MIT
+  licence. Its code drives the Pi coding agent and was not imported — the model alone
+  was re-implemented here against Inari's harnesses.
+- the **trace shape** (SQLite WAL, one numbered events table, reads by cursor) follows
+  CloudFoxRoom (the owner's own code, MIT).
