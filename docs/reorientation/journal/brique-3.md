@@ -84,8 +84,35 @@ Cure, identique en CI et consignée pour les cœurs dans `docs/security.md` :
 privilèges dans la bulle. Le job `verify` installe bubblewrap puis applique le
 setuid ; la bulle testée en CI est donc la bulle réelle, pas un skip.
 
-## Reste à faire après fusion (critère réel)
+## Critère réel après fusion : rempli (2026-11-02)
 
-- Thread dans sa bulle sur gamer et laptop (écriture refusée hors workdir
-  constatée dans le journal du thread).
-- Démarrage proprement refusé sur un cœur sans bwrap (PATH masqué).
+Binaire release construit depuis `654ed34` et déployé sur les trois cœurs
+(`~/.local/share/inari-core/bin/inari-core-rs`, ancien binaire conservé en
+`.prev-brique3`), service `inari-core` redémarré partout.
+
+- **gamer** (cette machine) : thread `brique3-verif` (harnais openfox) —
+  bulle observée en cours de tour :
+  `bwrap --die-with-parent --unshare-user --unshare-ipc --unshare-uts
+  --unshare-cgroup-try --share-net --ro-bind / / --bind …/work/brique3-verif
+  … -- openfox-acp`, scope systemd `inari-session-*` actif.
+- **gamer sans bwrap** (nœud lancé avec un PATH sans bwrap) : avertissement
+  au démarrage (`…will refuse to start agent threads…`), puis le tour finit
+  `stopped:error` avec
+  `cannot start the agent: sandbox: bwrap not found — this node refuses to
+  start the thread until bubblewrap is installed` — refus propre, jamais de
+  repli à nu. Service rendu ensuite.
+- **laptop** (omarchy-elitebook, arbre de travail sale — build fait dans un
+  worktree détaché `/tmp/inari-main` sur `origin/main`, l'arbre de Ben n'a
+  pas été touché) : thread créé, tour `done` sans erreur, bulle bwrap d'une
+  session observée sous le nouveau nœud.
+- **mindhub** (arbre propre, build local) : thread `brique3-verif`, tour
+  `done` sans erreur.
+- Threads de vérification archivés sur les trois cœurs, fichiers temporaires
+  supprimés.
+
+Note d'exploitation : la création de thread via la gateway exige
+`"node":"<node_id>"` dans le payload — sans lui aucun nœud ne répond et la
+gateway répond `thread creation timed out` au bout de 30 s.
+
+**Brique 3 : critère d'acceptation entièrement rempli, trois cœurs
+conformes.**
