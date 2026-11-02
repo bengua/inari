@@ -70,6 +70,20 @@ fichier du poste, bien au-delà du workdir du thread.
   groupe ; lecture de `/proc/<pid>/stat` cohérente depuis l'hôte.
 - bubblewrap installé sur mindhub (0.12.0) — laptop et gamer l'avaient déjà.
 
+## Écueil CI : Ubuntu 24.04 et les user namespaces
+
+Premier essai CI : 21 tests `agent` rouges — le runner GitHub (Ubuntu 24.04)
+a `kernel.apparmor_restrict_unprivileged_userns=1` et le paquet `bubblewrap`
+n'y livre **aucun profil AppArmor** pour `bwrap` : l'écriture de l'uid_map est
+refusée (`bwrap: setting up uid map: Permission denied`), l'agent meurt au
+lancement. Mesuré sur le runner par une étape de diagnostic (sysctl, profils,
+essai direct), retirée ensuite.
+
+Cure, identique en CI et consignée pour les cœurs dans `docs/security.md` :
+`sudo chmod u+s /usr/bin/bwrap` — bwrap est conçu setuid et redescend ses
+privilèges dans la bulle. Le job `verify` installe bubblewrap puis applique le
+setuid ; la bulle testée en CI est donc la bulle réelle, pas un skip.
+
 ## Reste à faire après fusion (critère réel)
 
 - Thread dans sa bulle sur gamer et laptop (écriture refusée hors workdir

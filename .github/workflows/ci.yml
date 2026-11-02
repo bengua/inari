@@ -11,18 +11,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # the session sandbox's tests run the agent inside the real bubble
-      - run: sudo apt-get update && sudo apt-get install -y bubblewrap
-      # TEMP debug: what does bwrap say on this runner?
+      # the session sandbox's tests run the agent inside the real bubble; Ubuntu
+      # restricts unprivileged user namespaces via AppArmor and ships no bwrap
+      # profile, so the runner's bwrap goes setuid (same cure as on the cores)
       - run: |
-          sysctl kernel.unprivileged_userns_clone kernel.apparmor_restrict_unprivileged_userns 2>&1 || true
-          ls -l /etc/apparmor.d/ 2>/dev/null | grep -i bwrap || echo "no bwrap apparmor profile"
-          sudo aa-status 2>&1 | grep -i bwrap || true
-          sudo chmod u+s /usr/bin/bwrap && echo "setuid set"
-          ls -l /usr/bin/bwrap
-          mkdir -p /tmp/bwd
-          bwrap --die-with-parent --unshare-user --unshare-ipc --unshare-uts --unshare-cgroup-try --share-net --ro-bind / / --bind /tmp/bwd /tmp/bwd --chdir /tmp/bwd -- echo BUBBLE-OK
-          echo "bwrap exit=$?"
+          sudo apt-get update && sudo apt-get install -y bubblewrap
+          sudo chmod u+s /usr/bin/bwrap
       - run: rustup component add clippy rustfmt
       - run: ./verify.sh
 
