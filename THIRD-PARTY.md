@@ -41,3 +41,9 @@ livekit-client 2.23.0 (https://github.com/livekit/client-sdk-js), unchanged, pub
 Apache License 2.0. The core serves it under `/assets/vendor/` and the Kitsune page loads it only to
 start a live talk. The voice agent in `services/kitsune-voice` depends on LiveKit Agents
 (Apache-2.0), installed by pip, not vendored.
+
+## Provenance note: services/openfox-acp
+
+`services/openfox-acp/` is original code written for this project and published under Inari's
+MIT licence. It is a protocol bridge: it speaks to OpenFox's HTTP and WebSocket API
+(https://github.com/co-l/openfox, MIT) but contains no OpenFox code.

@@ -49,3 +49,19 @@ jobs:
           python-version: "3.12"
       - run: pip install .
       - run: python -m unittest discover -s tests -v
+
+  # The ACP bridge to OpenFox (services/openfox-acp): standard library only,
+  # unit tests of the translator and of the WebSocket framing against a
+  # stand-in socket server.
+  openfox-acp:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/openfox-acp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install .
+      - run: python -m unittest discover -s tests -v
